@@ -1,0 +1,22 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "ctf-generator"
+version = "0.1.0"
+description = "AI-assisted CTF environment generator and validator."
+readme = "README.md"
+requires-python = ">=3.11"
+authors = [{ name = "CTFGenerator contributors" }]
+dependencies = []
+
+[project.optional-dependencies]
+dev = ["pytest>=8"]
+
+[project.scripts]
+ctfgen = "ctf_generator.cli:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
