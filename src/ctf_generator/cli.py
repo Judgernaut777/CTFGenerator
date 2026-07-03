@@ -736,10 +736,23 @@ def main(argv: list[str] | None = None) -> int:
     # branch's body ever runs; the existing branch itself is untouched.
     if args.command == "run-scenario" and getattr(args, "runtime", False):
         from . import scenario_runtime
+        from .models import ScenarioSpec
+
+        # Load the recorded timeline so the live defender/attacker are derived
+        # from it (same as the offline branch). Without this the live run has
+        # no triggers to fire and does nothing.
+        timeline_path = Path(args.challenge_dir) / "private" / "scenario_timeline.json"
+        if timeline_path.exists():
+            scenario_spec = _scenario_spec_from_mapping(
+                json.loads(timeline_path.read_text(encoding="utf-8"))
+            )
+        else:
+            scenario_spec = ScenarioSpec()
 
         report = scenario_runtime.run_live_scenario(
             args.challenge_dir,
             base_url=args.base_url,
+            spec=scenario_spec,
             max_ticks=args.max_ticks,
         )
         subject = {"type": "challenge", "identifier": args.challenge_dir.name}
