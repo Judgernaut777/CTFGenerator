@@ -13,6 +13,7 @@ from . import __version__
 if TYPE_CHECKING:
     from .replay_validator import ReplayReport
     from .runtime_validator import RuntimeValidationReport
+    from .scoreboard import ScoreboardSnapshot
     from .sibling_validator import SiblingValidationReport
     from .validator import ValidationReport
 
@@ -151,6 +152,26 @@ def serialize_replay(report: "ReplayReport") -> dict:
         "solver_dir": str(report.solver_dir) if report.solver_dir is not None else None,
         "target_dir": str(report.target_dir) if report.target_dir is not None else None,
         "success": report.success,
+    }
+
+
+def serialize_scoreboard(snapshot: "ScoreboardSnapshot") -> dict:
+    return {
+        "competition_id": snapshot.competition_id,
+        "generated_at": snapshot.generated_at.isoformat(),
+        "frozen": snapshot.frozen,
+        "entries": [
+            {
+                "team_id": entry.team_id,
+                "score": entry.score,
+                "solve_count": entry.solve_count,
+                "last_solve_at": (
+                    entry.last_solve_at.isoformat() if entry.last_solve_at is not None else None
+                ),
+                "rank": entry.rank,
+            }
+            for entry in snapshot.entries
+        ],
     }
 
 
