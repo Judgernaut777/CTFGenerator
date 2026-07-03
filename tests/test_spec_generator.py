@@ -5,15 +5,23 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from ctf_generator import spec_generator
+from ctf_generator import families, spec_generator
 from ctf_generator.cli import main
-from ctf_generator.models import AIResistance, ChallengeSpec, DynamicVariation
+from ctf_generator.models import (
+    AIResistance,
+    ChallengeSpec,
+    DynamicVariation,
+    ResponseSpec,
+    ScenarioSpec,
+    TriggerSpec,
+)
 from ctf_generator.spec_generator import (
     AnthropicSpecBackend,
     DeterministicSpecBackend,
     OpenAISpecBackend,
     build_prompt,
     default_spec,
+    default_spec_for_family,
     get_backend,
     spec_from_dict,
     spec_from_llm_output,
@@ -109,6 +117,138 @@ class ValidateSpecTests(unittest.TestCase):
     def test_too_few_checkpoints(self) -> None:
         errors = validate_spec(self._base(checkpoints=["1", "2"]))
         self.assertTrue(any("min_solver_steps" in e for e in errors))
+
+    def test_family_recognized_via_registry(self) -> None:
+        # FAMILY is only known because families.py registered it; this is a
+        # proxy for "validate_spec consults the families registry".
+        self.assertIn(FAMILY, families.family_names())
+        self.assertEqual(validate_spec(self._base(family=FAMILY)), [])
+
+    def test_invalid_cve_ref_rejected(self) -> None:
+        errors = validate_spec(self._base(cve_refs=["not-a-cve"]))
+        self.assertTrue(any("invalid cve_ref" in e for e in errors))
+
+    def test_valid_cve_ref_accepted(self) -> None:
+        errors = validate_spec(self._base(cve_refs=["CVE-2023-12345"]))
+        self.assertEqual([e for e in errors if "cve_ref" in e], [])
+
+    def test_mode_not_valid_for_family_rejected(self) -> None:
+        errors = validate_spec(self._base(mode="scenario"))
+        self.assertTrue(any("mode" in e for e in errors))
+
+    def test_default_mode_valid_for_family(self) -> None:
+        errors = validate_spec(self._base(mode="red"))
+        self.assertEqual([e for e in errors if "mode" in e], [])
+
+    def test_unknown_family_skips_mode_check_gracefully(self) -> None:
+        # An unknown family is already flagged; the mode check must not also
+        # blow up (e.g. via a KeyError from families.get()).
+        errors = validate_spec(self._base(family="bogus", mode="anything"))
+        self.assertTrue(any("unknown family" in e for e in errors))
+        self.assertFalse(any("mode" in e for e in errors))
+
+
+class FamiliesAliasTests(unittest.TestCase):
+    def test_module_families_mirrors_registry(self) -> None:
+        self.assertEqual(list(spec_generator.FAMILIES), families.family_names())
+        self.assertIn(FAMILY, spec_generator.FAMILIES)
+        self.assertEqual(spec_generator.FAMILIES[0], families.family_names()[0])
+
+
+class DefaultSpecForFamilyTests(unittest.TestCase):
+    def test_falls_back_to_default_spec_when_no_builder(self) -> None:
+        # web_business_logic_tenant_export has no default_spec_builder set.
+        spec = default_spec_for_family(seed="s", title="T", difficulty="medium", family=FAMILY)
+        self.assertEqual(spec, default_spec(seed="s", title="T", difficulty="medium", family=FAMILY))
+
+    def test_uses_registered_builder_when_present(self) -> None:
+        sentinel = ChallengeSpec(
+            title="from-builder",
+            category="web",
+            difficulty="medium",
+            family=FAMILY,
+            seed="s",
+            learning_objectives=["a"],
+            checkpoints=["1", "2", "3", "4", "5"],
+        )
+        captured: dict = {}
+
+        def builder(*, seed, title, difficulty, family):
+            captured.update(seed=seed, title=title, difficulty=difficulty, family=family)
+            return sentinel
+
+        original = families.get(FAMILY)
+        families.register(
+            families.Family(
+                name=original.name,
+                category=original.category,
+                modes=original.modes,
+                render=original.render,
+                required_files=original.required_files,
+                compose_service_markers=original.compose_service_markers,
+                difficulties=original.difficulties,
+                cve_driven=original.cve_driven,
+                llm_brief=original.llm_brief,
+                default_spec_builder=builder,
+                scoring_hints=original.scoring_hints,
+            )
+        )
+        try:
+            spec = default_spec_for_family(
+                seed="s", title="T", difficulty="medium", family=FAMILY
+            )
+        finally:
+            families.register(original)
+
+        self.assertIs(spec, sentinel)
+        self.assertEqual(captured, {"seed": "s", "title": "T", "difficulty": "medium", "family": FAMILY})
+
+
+class NewSpecFieldsRoundTripTests(unittest.TestCase):
+    def test_round_trip_without_new_fields_unchanged(self) -> None:
+        # A dict lacking the new keys must load identically to before they
+        # existed (defaults: mode="red", scenario disabled, cve_refs=[]).
+        spec = default_spec(seed="s", title="T", difficulty="hard", family=FAMILY)
+        base_dict = spec_to_dict(spec)
+        self.assertNotIn("cve_refs", base_dict)
+        self.assertNotIn("cve_content_hash", base_dict)
+        self.assertNotIn("mode", base_dict)
+        self.assertNotIn("scenario", base_dict)
+        restored = spec_from_dict(base_dict)
+        self.assertEqual(restored, spec)
+        self.assertEqual(restored.mode, "red")
+        self.assertEqual(restored.cve_refs, [])
+        self.assertEqual(restored.scenario, ScenarioSpec())
+
+    def test_round_trip_with_new_fields(self) -> None:
+        spec = ChallengeSpec(
+            title="T",
+            category="web",
+            difficulty="hard",
+            family=FAMILY,
+            seed="s",
+            learning_objectives=["a"],
+            checkpoints=["1", "2", "3", "4", "5"],
+            cve_refs=["CVE-2023-12345"],
+            cve_content_hash="abc123",
+            mode="scenario",
+            scenario=ScenarioSpec(
+                enabled=True,
+                triggers=[TriggerSpec(trigger_id="t1", description="d", condition="c")],
+                responses=[
+                    ResponseSpec(
+                        response_id="r1", description="d", action="a", payload={"k": "v"}
+                    )
+                ],
+            ),
+        )
+        data = spec_to_dict(spec)
+        self.assertEqual(data["cve_refs"], ["CVE-2023-12345"])
+        self.assertEqual(data["cve_content_hash"], "abc123")
+        self.assertEqual(data["mode"], "scenario")
+        self.assertEqual(data["scenario"], spec.scenario.to_mapping())
+        restored = spec_from_dict(data)
+        self.assertEqual(restored, spec)
 
 
 class SerializationTests(unittest.TestCase):
