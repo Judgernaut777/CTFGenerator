@@ -567,6 +567,46 @@ class RunScenarioRuntimeFlagCliTests(unittest.TestCase):
             self.assertEqual(payload["ticks_run"], 7)
             self.assertEqual(payload["triggers_fired"], ["t1"])
 
+    def test_run_scenario_runtime_loads_timeline_as_spec(self) -> None:
+        # Regression: the --runtime branch must read private/scenario_timeline.json
+        # and pass it as `spec`, or the live defender has no triggers to fire.
+        from ctf_generator.scenario import ScenarioRunReport
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            challenge_dir = Path(temp_dir) / "chal"
+            (challenge_dir / "private").mkdir(parents=True)
+            (challenge_dir / "private" / "scenario_timeline.json").write_text(
+                json.dumps(
+                    {
+                        "enabled": True,
+                        "triggers": [
+                            {"trigger_id": "t9", "description": "d", "condition": "time:>=1"}
+                        ],
+                        "responses": [
+                            {
+                                "response_id": "r9",
+                                "description": "d",
+                                "action": "patch_route",
+                                "payload": {"target": "api"},
+                            }
+                        ],
+                    }
+                ),
+                encoding="utf-8",
+            )
+            fake_report = ScenarioRunReport(challenge_path=str(challenge_dir), ticks_run=3)
+            with mock.patch(
+                "ctf_generator.scenario_runtime.run_live_scenario", return_value=fake_report
+            ) as run_mock:
+                code, _, _ = _run(["run-scenario", str(challenge_dir), "--runtime", "--json"])
+            self.assertEqual(code, 0)
+            _, kwargs = run_mock.call_args
+            spec = kwargs.get("spec")
+            self.assertIsNotNone(spec, "--runtime must pass the loaded scenario spec")
+            self.assertTrue(spec.enabled)
+            self.assertEqual([t.trigger_id for t in spec.triggers], ["t9"])
+            self.assertEqual([r.response_id for r in spec.responses], ["r9"])
+
 
 class ServeHelperTests(unittest.TestCase):
     """Offline: only the pure service/auth builder helpers are exercised --
