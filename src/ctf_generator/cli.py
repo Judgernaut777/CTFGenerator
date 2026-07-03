@@ -1,10 +1,12 @@
 from __future__ import annotations
 
 import argparse
+import json
 from pathlib import Path
 
 from .generator import create_challenge
 from .runtime_validator import validate_runtime
+from .score import score_challenge
 from .sibling_validator import validate_siblings
 from .validator import validate_challenge
 
@@ -64,6 +66,19 @@ def build_parser() -> argparse.ArgumentParser:
         help="Also run Docker runtime validation for each sibling sequentially",
     )
     siblings.add_argument("--timeout", default=90, type=int)
+
+    score = subparsers.add_parser(
+        "score",
+        help="Score a generated challenge on AI-resistance dimensions",
+    )
+    score.add_argument("challenge_path", type=Path)
+    score.add_argument("--json", action="store_true", help="Emit the score report as JSON")
+    score.add_argument(
+        "--min-score",
+        type=float,
+        default=None,
+        help="Exit non-zero if the total score is below this threshold",
+    )
 
     return parser
 
@@ -139,6 +154,28 @@ def main(argv: list[str] | None = None) -> int:
         for warning in report.warnings:
             print(f"warning: {warning}")
         print("Sibling validation passed")
+        return 0
+
+    if args.command == "score":
+        report = score_challenge(args.challenge_path)
+        if report.errors:
+            print("Scoring failed:")
+            for error in report.errors:
+                print(f"- {error}")
+            return 1
+        if args.json:
+            print(json.dumps(report.to_mapping(), indent=2, sort_keys=True))
+        else:
+            print(f"AI-resistance score: {report.total:.1f}/100 ({report.band})")
+            for dimension in report.dimensions:
+                print(f"- {dimension.name} [w={dimension.weight}]: {dimension.score:.1f}")
+                for note in dimension.notes:
+                    print(f"    {note}")
+            for warning in report.warnings:
+                print(f"warning: {warning}")
+        if args.min_score is not None and report.total < args.min_score:
+            print(f"score {report.total:.1f} is below threshold {args.min_score:.1f}")
+            return 1
         return 0
 
     parser.error(f"unknown command: {args.command}")
