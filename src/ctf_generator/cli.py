@@ -4,6 +4,7 @@ import argparse
 from pathlib import Path
 
 from .generator import create_challenge
+from .runtime_validator import validate_runtime
 from .validator import validate_challenge
 
 
@@ -28,6 +29,19 @@ def build_parser() -> argparse.ArgumentParser:
 
     validate = subparsers.add_parser("validate", help="Validate generated challenge files")
     validate.add_argument("challenge_path", type=Path)
+
+    validate_runtime_parser = subparsers.add_parser(
+        "validate-runtime",
+        help="Build, launch, health-check, solve, and tear down a generated challenge",
+    )
+    validate_runtime_parser.add_argument("challenge_path", type=Path)
+    validate_runtime_parser.add_argument("--base-url", default="http://127.0.0.1:8080")
+    validate_runtime_parser.add_argument("--timeout", default=90, type=int)
+    validate_runtime_parser.add_argument(
+        "--keep-running",
+        action="store_true",
+        help="Leave containers running after validation",
+    )
 
     return parser
 
@@ -60,6 +74,22 @@ def main(argv: list[str] | None = None) -> int:
             print(f"warning: {warning}")
         return 0
 
+    if args.command == "validate-runtime":
+        report = validate_runtime(
+            challenge_path=args.challenge_path,
+            base_url=args.base_url,
+            timeout_seconds=args.timeout,
+            keep_running=args.keep_running,
+        )
+        for log in report.logs:
+            print(log.rstrip())
+        if report.errors:
+            print("Runtime validation failed:")
+            for error in report.errors:
+                print(f"- {error}")
+            return 1
+        print("Runtime validation passed")
+        return 0
+
     parser.error(f"unknown command: {args.command}")
     return 2
-

@@ -8,11 +8,12 @@ The platform should treat validation as the core product. A generated challenge 
 
 ## MVP Shape
 
-The repository currently starts with a local generator CLI:
+The repository currently starts with a local generator and validator CLI:
 
 ```text
 ctfgen create -> challenge folder
 ctfgen validate -> static artifact validation
+ctfgen validate-runtime -> Docker build, launch, health check, solve, cleanup
 ```
 
 Generated challenge folders contain:
@@ -44,10 +45,10 @@ Target pipeline:
 structured spec
   -> artifact rendering
   -> static validation
-  -> container build
-  -> isolated launch
-  -> health check
-  -> private solver replay
+  -> container build                  implemented for local Docker
+  -> isolated launch                  implemented for local Docker
+  -> health check                     implemented
+  -> private solver replay            implemented
   -> sibling variant replay
   -> AI-agent evaluation
   -> human review
@@ -91,4 +92,3 @@ Long-term platform components:
 - Build/runtime: Docker BuildKit and Docker Compose first, Kubernetes later
 - AI orchestration: structured outputs, role-specific generation, repair loop
 - Validation: health checks, private solver, sibling replay, AI-agent bench
-

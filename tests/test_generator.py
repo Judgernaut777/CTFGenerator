@@ -23,6 +23,16 @@ class GeneratorTests(unittest.TestCase):
             report = validate_challenge(output)
             self.assertEqual(report.errors, [])
 
+            compose = (output / "docker-compose.yml").read_text(encoding="utf-8")
+            self.assertIn("frontend:", compose)
+            self.assertIn('"8080:8080"', compose)
+
+            app = (output / "services/api/app.py").read_text(encoding="utf-8")
+            self.assertLess(
+                app.index('redis_client.hset(f"job:{job_id}"'),
+                app.index('redis_client.rpush("export_jobs"'),
+            )
+
     def test_create_challenge_refuses_existing_directory(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             output = Path(temp_dir) / "existing"

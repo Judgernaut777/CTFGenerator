@@ -43,6 +43,14 @@ PYTHONPATH=src python3 -m ctf_generator validate /tmp/invoice-drift
 PYTHONPATH=src python3 -m unittest discover -s tests
 ```
 
+Run full Docker validation when Docker and image/package downloads are available:
+
+```bash
+PYTHONPATH=src python3 -m ctf_generator validate-runtime /tmp/invoice-drift
+```
+
+That command runs static validation, `docker compose build`, `docker compose up -d`, the generated health check, the private solver, and cleanup with `docker compose down --volumes --remove-orphans`.
+
 ## Product Direction
 
 The long-term platform should generate challenge specs first, then build and validate deterministic artifacts:
@@ -80,8 +88,8 @@ git@github-ctfgenerator:Judgernaut777/CTFGenerator.git
 
 ## Next Engineering Targets
 
-1. Add full Docker validation: build, launch, health check, run solver, tear down.
+1. Add sibling variant replay so an exploit can be tested against a related generated instance.
 2. Add an LLM-backed spec generator that emits structured challenge metadata before code.
-3. Add sibling variant replay so an exploit can be tested against a related generated instance.
-4. Add AI-agent evaluation profiles and an AI-resistance score.
-5. Add a minimal web admin UI for generation, validation logs, and review approval.
+3. Add AI-agent evaluation profiles and an AI-resistance score.
+4. Add a minimal web admin UI for generation, validation logs, and review approval.
+5. Add persisted validation reports and challenge version metadata.

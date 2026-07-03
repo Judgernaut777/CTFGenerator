@@ -86,7 +86,7 @@ def _compose() -> str:
   redis:
     image: redis:7-alpine
     command: ["redis-server", "--save", "", "--appendonly", "no"]
-    networks: [ctfnet]
+    networks: [backend]
     read_only: true
     security_opt:
       - no-new-privileges:true
@@ -99,7 +99,9 @@ def _compose() -> str:
     ports:
       - "8080:8080"
     depends_on: [redis]
-    networks: [ctfnet]
+    networks:
+      - frontend
+      - backend
     security_opt:
       - no-new-privileges:true
     cap_drop: [ALL]
@@ -112,7 +114,7 @@ def _compose() -> str:
       REDIS_URL: redis://redis:6379/0
       CTFGEN_FLAG: ${CTFGEN_FLAG:-}
     depends_on: [redis]
-    networks: [ctfnet]
+    networks: [backend]
     security_opt:
       - no-new-privileges:true
     cap_drop: [ALL]
@@ -120,7 +122,8 @@ def _compose() -> str:
     pids_limit: 128
 
 networks:
-  ctfnet:
+  frontend:
+  backend:
     internal: true
 """
 
@@ -264,8 +267,8 @@ def queue_export():
         "invoice_id": invoice_id,
         "{v.tenant_field}": requested_tenant,
     }}
-    redis_client.rpush("export_jobs", json.dumps(job))
     redis_client.hset(f"job:{{job_id}}", mapping={{"status": "queued", "created_by": user}})
+    redis_client.rpush("export_jobs", json.dumps(job))
     return jsonify({{"job_id": job_id, "status": "queued"}}), 202
 
 
@@ -343,7 +346,11 @@ def process(job):
 
 def main():
     while True:
-        item = redis_client.blpop("export_jobs", timeout=5)
+        try:
+            item = redis_client.blpop("export_jobs", timeout=5)
+        except Exception:
+            time.sleep(1)
+            continue
         if not item:
             continue
         _, payload = item
@@ -451,7 +458,7 @@ def main():
     )
     job_id = queued["job_id"]
 
-    for _ in range(20):
+    for _ in range(40):
         status = json.loads(get(f"{route_base}/status/{{job_id}}"))
         if status.get("status") == "ready":
             break
