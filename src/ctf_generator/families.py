@@ -7,6 +7,7 @@ from typing import TYPE_CHECKING, Callable, Protocol
 
 from .models import ChallengeSpec
 from .spec_generator import _FAMILY_BRIEF
+from .templates import binary, cloud, crypto, forensics, mobile, network, scada_ics
 from .templates.tenant_export import render_tenant_export
 from .validator import REQUIRED_FILES
 
@@ -161,3 +162,29 @@ register(
         ),
     )
 )
+
+
+# --- Bootstrap: Phase 3 template-module families -----------------------------
+#
+# Each of these modules exports the fixed renderer-module interface
+# (FAMILY_NAME/CATEGORY/MODES/DIFFICULTIES/CVE_DRIVEN/LLM_BRIEF/
+# COMPOSE_MARKERS/SCORING_HINTS/REQUIRED_FILES/render) described in their own
+# docstrings; this loop just wires each one into the registry uniformly.
+
+for _module in (scada_ics, network, crypto, cloud, forensics, binary, mobile):
+    register(
+        Family(
+            name=_module.FAMILY_NAME,
+            category=_module.CATEGORY,
+            modes=_module.MODES,
+            render=_module.render,
+            required_files=tuple(_module.REQUIRED_FILES),
+            compose_service_markers=tuple(_module.COMPOSE_MARKERS),
+            difficulties=_module.DIFFICULTIES,
+            cve_driven=_module.CVE_DRIVEN,
+            llm_brief=_module.LLM_BRIEF,
+            scoring_hints=ScoringHints(**_module.SCORING_HINTS),
+        )
+    )
+
+del _module

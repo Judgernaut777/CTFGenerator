@@ -167,10 +167,40 @@ class SpecFromCveTests(unittest.TestCase):
         self.assertEqual(spec.seed, fold_seed("base-seed", "CVE-2021-44228"))
         self.assertGreaterEqual(len(spec.checkpoints), 5)
 
-    def test_unregistered_family_falls_back_but_keeps_theme(self) -> None:
-        record = _record("CVE-2021-3156")  # category "binary" -> not yet registered
-        self.assertFalse(families.is_registered(CATEGORY_FAMILY_MAP["binary"]))
+    def test_binary_category_uses_its_now_registered_family(self) -> None:
+        # binary_heap_exploit was wired up in Phase 3.5, so a "binary" CVE
+        # resolves to its intended family instead of falling back.
+        record = _record("CVE-2021-3156")  # category "binary"
+        self.assertTrue(families.is_registered(CATEGORY_FAMILY_MAP["binary"]))
         spec = spec_from_cve(record, base_seed="base-seed")
+        self.assertEqual(validate_spec(spec), [])
+        self.assertEqual(spec.family, "binary_heap_exploit")
+        self.assertEqual(spec.mode, "red")
+        self.assertEqual(spec.category, "binary")
+        self.assertIn("CVE-2021-3156", spec.title)
+        self.assertEqual(spec.cve_refs, ["CVE-2021-3156"])
+        self.assertEqual(spec.cve_content_hash, content_hash(record))
+
+    def test_forensics_category_uses_its_now_registered_family_in_blue_mode(self) -> None:
+        # forensics_incident_triage ("blue"-only) was wired up in Phase 3.5,
+        # so a "forensics" CVE resolves to its intended family and keeps its
+        # blue mode instead of falling back and downgrading.
+        record = _record("CVE-2020-13379")
+        self.assertTrue(families.is_registered(CATEGORY_FAMILY_MAP["forensics"]))
+        spec = spec_from_cve(record, base_seed="base-seed")
+        self.assertEqual(validate_spec(spec), [])
+        self.assertEqual(spec.family, "forensics_incident_triage")
+        self.assertEqual(spec.mode, "blue")
+        self.assertEqual(spec.category, "forensics")
+
+    def test_unregistered_family_override_falls_back_but_keeps_theme(self) -> None:
+        # spec_from_cve's fallback path is still reachable via an explicit
+        # override naming a family that isn't registered (now that every
+        # CATEGORY_FAMILY_MAP entry is registered, this is the only way to
+        # exercise it).
+        record = _record("CVE-2021-3156")
+        self.assertFalse(families.is_registered("totally_bogus_family"))
+        spec = spec_from_cve(record, base_seed="base-seed", family="totally_bogus_family")
         self.assertEqual(validate_spec(spec), [])
         # Falls back to the always-registered family...
         self.assertEqual(spec.family, "web_business_logic_tenant_export")
@@ -180,13 +210,15 @@ class SpecFromCveTests(unittest.TestCase):
         self.assertEqual(spec.cve_refs, ["CVE-2021-3156"])
         self.assertEqual(spec.cve_content_hash, content_hash(record))
 
-    def test_forensics_falls_back_and_downgrades_mode_to_stay_valid(self) -> None:
-        # forensics_incident_triage is "blue"-only and not yet registered; the
-        # fallback family only supports "red", so the mode must be downgraded
-        # too, or validate_spec would reject the mode/family combination.
+    def test_unregistered_family_override_falls_back_and_downgrades_mode(self) -> None:
+        # An explicit blue-mode override paired with an unregistered family
+        # must still fall back to a family that supports the resolved mode,
+        # downgrading to "red" so validate_spec() accepts the result.
         record = _record("CVE-2020-13379")
-        self.assertFalse(families.is_registered(CATEGORY_FAMILY_MAP["forensics"]))
-        spec = spec_from_cve(record, base_seed="base-seed")
+        self.assertFalse(families.is_registered("totally_bogus_family"))
+        spec = spec_from_cve(
+            record, base_seed="base-seed", family="totally_bogus_family", mode="blue"
+        )
         self.assertEqual(validate_spec(spec), [])
         self.assertEqual(spec.family, "web_business_logic_tenant_export")
         self.assertEqual(spec.mode, "red")

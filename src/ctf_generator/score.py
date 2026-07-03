@@ -5,6 +5,9 @@ import re
 from dataclasses import dataclass, field
 from pathlib import Path
 
+from . import families
+from .families import ScoringHints
+
 
 @dataclass
 class Dimension:
@@ -60,14 +63,22 @@ def score_challenge(challenge_path: Path) -> ScoreReport:
     ai = _read_block(spec, "ai_resistance")
     variation = _read_block(spec, "dynamic_variation")
     checkpoint_count = spec.count("name:") if spec else 0
+    cve_refs = _read_list_block(spec, "cve_refs")
+    scenario = _read_block(spec, "scenario")
+    scenario_enabled = scenario.get("enabled") == "true"
+
+    hints = _resolve_scoring_hints(spec)
 
     report.dimensions = [
-        _variant_uniqueness(variant, variation),
-        _statefulness(compose, solver),
+        _variant_uniqueness(variant, variation, cve_refs),
+        _statefulness(compose, solver, hints),
         _solver_depth(solver, checkpoint_count, ai),
-        _live_interaction(solver, ai, report),
+        _live_interaction(solver, ai, report, hints),
         _scanner_resistance(ai),
     ]
+    if scenario_enabled:
+        _rescale_weights(report.dimensions, _SCENARIO_RESISTANCE_WEIGHT)
+        report.dimensions.append(_scenario_resistance(spec))
 
     report.total = sum(d.weight * d.score for d in report.dimensions)
     report.band = _band(report.total)
@@ -75,7 +86,22 @@ def score_challenge(challenge_path: Path) -> ScoreReport:
     return report
 
 
-def _variant_uniqueness(variant: dict, variation: dict[str, str]) -> Dimension:
+def _resolve_scoring_hints(spec_text: str) -> ScoringHints:
+    """Resolve a challenge's ``Family.scoring_hints`` from its rendered spec.
+
+    Falls back to the default ``ScoringHints()`` (which reproduces today's
+    hard-coded signals) when the family can't be resolved -- an unregistered
+    or unknown family, or a spec with no top-level ``family:`` line.
+    """
+    family_name = families.family_of(spec_text) if spec_text else None
+    if family_name and families.is_registered(family_name):
+        return families.get(family_name).scoring_hints
+    return ScoringHints()
+
+
+def _variant_uniqueness(
+    variant: dict, variation: dict[str, str], cve_refs: list[str] | None = None
+) -> Dimension:
     flags = [
         "per_user_schema",
         "per_user_routes",
@@ -91,33 +117,48 @@ def _variant_uniqueness(variant: dict, variation: dict[str, str]) -> Dimension:
     token_count = len(routes) + len(tokens)
 
     score = 60.0 * flag_fraction + 40.0 * min(1.0, token_count / 8.0)
+    notes = [
+        f"{enabled}/{len(flags)} dynamic-variation dimensions enabled",
+        f"{token_count} per-instance route/token values in variant.json",
+    ]
+    # Non-scoring provenance note: does not affect `score` above, purely
+    # informational when this instance was grounded in a real-world CVE.
+    for cve_id in cve_refs or []:
+        notes.append(f"CVE-grounded: {cve_id}")
     return Dimension(
         name="variant_uniqueness",
         weight=0.25,
         score=score,
-        notes=[
-            f"{enabled}/{len(flags)} dynamic-variation dimensions enabled",
-            f"{token_count} per-instance route/token values in variant.json",
-        ],
+        notes=notes,
     )
 
 
-def _statefulness(compose: str, solver: str) -> Dimension:
+def _statefulness(compose: str, solver: str, hints: ScoringHints) -> Dimension:
     has_worker = "worker:" in compose
     has_queue = "redis" in compose.lower()
     polls_status = bool(re.search(r"for .*in range", solver)) and "status" in solver
 
-    signals = [has_worker, has_queue, polls_status]
-    score = 100.0 * (sum(signals) / len(signals))
+    # Only weigh in a signal the resolved family actually expects; a family
+    # whose ScoringHints don't call for a worker/queue backend isn't
+    # penalized for lacking one. Defaults (has_worker=has_queue=True)
+    # reproduce today's fixed 3-signal check unchanged.
+    signals: list[bool] = []
+    notes: list[str] = []
+    if hints.has_worker:
+        signals.append(has_worker)
+        notes.append(f"background worker service: {has_worker}")
+    if hints.has_queue:
+        signals.append(has_queue)
+        notes.append(f"queue/state backend: {has_queue}")
+    signals.append(polls_status)
+    notes.append(f"solver drives async job state: {polls_status}")
+
+    score = 100.0 * (sum(signals) / len(signals)) if signals else 100.0
     return Dimension(
         name="statefulness",
         weight=0.20,
         score=score,
-        notes=[
-            f"background worker service: {has_worker}",
-            f"queue/state backend: {has_queue}",
-            f"solver drives async job state: {polls_status}",
-        ],
+        notes=notes,
     )
 
 
@@ -139,22 +180,31 @@ def _solver_depth(solver: str, checkpoint_count: int, ai: dict[str, str]) -> Dim
     )
 
 
-def _live_interaction(solver: str, ai: dict[str, str], report: ScoreReport) -> Dimension:
+def _live_interaction(
+    solver: str, ai: dict[str, str], report: ScoreReport, hints: ScoringHints
+) -> Dimension:
     requires_live = ai.get("require_live_interaction") == "true"
     discovers = "/api/profile" in solver
     polls = bool(re.search(r"for .*in range", solver))
 
-    signals = [requires_live, discovers, polls]
-    score = 100.0 * (sum(signals) / len(signals))
+    notes = [
+        f"spec requires live interaction: {requires_live}",
+        f"solver discovers routes at runtime: {discovers}",
+        f"solver polls a live endpoint: {polls}",
+    ]
+    # A family that doesn't hint at live interaction (hints.live_interaction
+    # is False) isn't scored against these three signals at all. Default
+    # (True) reproduces today's fixed 3-signal check unchanged.
+    if hints.live_interaction:
+        signals = [requires_live, discovers, polls]
+        score = 100.0 * (sum(signals) / len(signals))
+    else:
+        score = 100.0
     return Dimension(
         name="live_interaction",
         weight=0.15,
         score=score,
-        notes=[
-            f"spec requires live interaction: {requires_live}",
-            f"solver discovers routes at runtime: {discovers}",
-            f"solver polls a live endpoint: {polls}",
-        ],
+        notes=notes,
     )
 
 
@@ -173,6 +223,65 @@ def _scanner_resistance(ai: dict[str, str]) -> Dimension:
         notes=[
             f"generic scanner usefulness: {usefulness}",
             f"decoy density: {density}",
+        ],
+    )
+
+
+# Weight the conditional scenario_resistance dimension gets when a challenge
+# opts into a live scenario timeline (``scenario.enabled: true``). The other
+# five dimensions' weights are rescaled down proportionally so all weights
+# keep summing to 1.0; see `_rescale_weights`. When scenario is absent (the
+# default) this dimension and rescale never run, so today's five fixed
+# weights (0.25/0.20/0.20/0.15/0.20) are untouched.
+_SCENARIO_RESISTANCE_WEIGHT = 0.15
+
+
+def _rescale_weights(dimensions: list[Dimension], reserved_weight: float) -> None:
+    """Scale existing dimension weights down so they leave room for one more.
+
+    Preserves each dimension's weight *proportion* relative to the others
+    while making room for ``reserved_weight`` of total weight, so the full
+    dimension set (existing + new) still sums to 1.0.
+    """
+    factor = 1.0 - reserved_weight
+    for dimension in dimensions:
+        dimension.weight *= factor
+
+
+def _scenario_resistance(spec_text: str) -> Dimension:
+    """Score how much a live scenario timeline resists a static, one-shot solve.
+
+    Purely a function of the declared ``scenario`` block in challenge.yaml:
+    more distinct triggers/responses and a wider variety of trigger
+    conditions / response actions mean a player can't just replay a single
+    recorded trace and expect it to still work once the timeline reacts.
+    """
+    scenario_lines = _extract_block_lines(spec_text, "scenario")
+    scenario_block = "\n".join(scenario_lines)
+
+    trigger_count = scenario_block.count("trigger_id:")
+    response_count = scenario_block.count("response_id:")
+    conditions = {
+        m.strip() for m in re.findall(r"condition: (.+)", scenario_block) if m.strip('"').strip()
+    }
+    actions = {
+        m.strip() for m in re.findall(r"action: (.+)", scenario_block) if m.strip('"').strip()
+    }
+
+    trigger_score = 100.0 * min(1.0, trigger_count / 3.0)
+    response_score = 100.0 * min(1.0, response_count / 3.0)
+    diversity_score = 100.0 * min(1.0, (len(conditions) + len(actions)) / 4.0)
+    score = (trigger_score + response_score + diversity_score) / 3.0
+
+    return Dimension(
+        name="scenario_resistance",
+        weight=_SCENARIO_RESISTANCE_WEIGHT,
+        score=score,
+        notes=[
+            f"{trigger_count} scenario trigger(s) declared",
+            f"{response_count} scripted response(s) declared",
+            f"{len(conditions)} distinct trigger condition(s), "
+            f"{len(actions)} distinct response action(s)",
         ],
     )
 
@@ -220,6 +329,50 @@ def _read_block(text: str, block_name: str) -> dict[str, str]:
         match = re.match(r"^  (\w+): (.+)$", line)
         if match:
             values[match.group(1)] = match.group(2).strip().strip('"')
+    return values
+
+
+def _extract_block_lines(text: str, block_name: str) -> list[str]:
+    """Return the raw (still-indented) lines nested under a top-level key.
+
+    Unlike ``_read_block`` (which only keeps flat scalar ``key: value``
+    lines), this keeps every line of the block verbatim -- including nested
+    sub-blocks and list items -- for callers that need to scan deeper
+    structure (e.g. ``scenario.triggers``/``scenario.responses``).
+    """
+    if not text:
+        return []
+    lines = text.splitlines()
+    inside = False
+    collected: list[str] = []
+    for line in lines:
+        if not inside:
+            if line.rstrip() == f"{block_name}:":
+                inside = True
+            continue
+        if line and not line.startswith(" "):
+            break
+        collected.append(line)
+    return collected
+
+
+def _read_list_block(text: str, block_name: str) -> list[str]:
+    """Parse a top-level flat string list (2-space ``- "value"`` items)."""
+    values: list[str] = []
+    if not text:
+        return values
+    lines = text.splitlines()
+    inside = False
+    for line in lines:
+        if not inside:
+            if line.rstrip() == f"{block_name}:":
+                inside = True
+            continue
+        if line and not line.startswith(" "):
+            break
+        match = re.match(r"^  - (.+)$", line)
+        if match:
+            values.append(match.group(1).strip().strip('"'))
     return values
 
 
