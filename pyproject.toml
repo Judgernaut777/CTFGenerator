@@ -9,6 +9,7 @@ description = "AI-assisted CTF environment generator and validator."
 readme = "README.md"
 requires-python = ">=3.11"
 authors = [{ name = "CTFGenerator contributors" }]
+license = { file = "LICENSE" }
 dependencies = []
 classifiers = [
     "Programming Language :: Python :: 3",
@@ -16,10 +17,14 @@ classifiers = [
     "Operating System :: OS Independent",
     "Topic :: Security",
     "Environment :: Console",
+    "License :: Other/Proprietary License",
 ]
 
 [project.optional-dependencies]
 dev = ["pytest>=8"]
+# LLM-backed spec generation (`ctfgen spec --backend llm`). Optional so the core
+# tool stays dependency-free.
+llm = ["anthropic>=0.49"]
 
 [project.scripts]
 ctfgen = "ctf_generator.cli:main"

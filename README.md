@@ -126,6 +126,25 @@ ctfgen report-index /tmp/reports
 ctfgen report-index /tmp/reports --html /tmp/reports/index.html
 ```
 
+Generate a structured challenge spec before rendering any code, then render from
+it. The default backend is deterministic and offline:
+
+```bash
+ctfgen spec --output specs/invoice-drift.json --seed demo-001 --difficulty hard
+ctfgen create --output challenges/invoice-drift --from-spec specs/invoice-drift.json
+```
+
+The optional Claude-backed backend drafts the pedagogical metadata (title,
+learning objectives, checkpoints) — never code, flags, or the security-relevant
+AI-resistance knobs, which stay deterministic. It needs the `[llm]` extra and
+`ANTHROPIC_API_KEY` (or an `ant auth login` profile); the generated spec is
+validated before it can be rendered:
+
+```bash
+pip install -e '.[llm]'
+ctfgen spec --output specs/drift.json --backend llm --model claude-opus-4-8
+```
+
 ## Development
 
 To work on the tool without installing it, run the package directly from the
@@ -161,18 +180,16 @@ The generator should prioritize:
 
 ## Next Engineering Targets
 
-1. Add an LLM-backed spec generator that emits structured challenge metadata before code.
-2. Add AI-agent evaluation profiles that complement the static AI-resistance score.
-3. Grow the `report-index` viewer into an interactive web admin UI for generation and review approval.
-4. Choose and add a project license (see below).
+1. Add AI-agent evaluation profiles that complement the static AI-resistance score.
+2. Grow the `report-index` viewer into an interactive web admin UI for generation and review approval.
 
-The generic exploit-replay interface, challenge version metadata, and a static
-report dashboard are implemented (`replay` / `validate-siblings --cross-replay`,
-the `meta` blocks, and `report-index --html`).
+Implemented: the structured spec generator with a pluggable backend (`spec` /
+`create --from-spec`), the generic exploit-replay interface (`replay` /
+`validate-siblings --cross-replay`), challenge version metadata (the `meta`
+blocks), and a static report dashboard (`report-index --html`).
 
 ## License
 
-No license has been chosen yet, so the package ships without a `license` field.
-Until one is added the code is "all rights reserved" by default; pick a license
-(e.g. MIT or Apache-2.0) and add a `LICENSE` file plus a `license` entry in
-`pyproject.toml` before distributing.
+CTFGenerator is proprietary, for-profit software — see [LICENSE](LICENSE).
+Copyright (c) 2026 Judgernaut777, all rights reserved. Commercial use requires a
+paid license from the copyright holder; there is no open-source grant.
