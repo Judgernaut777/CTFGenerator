@@ -15,6 +15,7 @@ ctfgen create -> challenge folder
 ctfgen validate -> static artifact validation
 ctfgen validate-runtime -> Docker build, launch, health check, solve, cleanup
 ctfgen validate-siblings -> sibling generation, variant comparison, optional runtime replay
+ctfgen score -> static AI-resistance scoring across five dimensions
 ```
 
 Generated challenge folders contain:
@@ -51,10 +52,31 @@ structured spec
   -> health check                     implemented
   -> private solver replay            implemented
   -> sibling variant replay           implemented for generated private solvers
+  -> AI-resistance scoring            implemented as static artifact analysis
   -> AI-agent evaluation
   -> human review
   -> publish
 ```
+
+## AI-Resistance Scoring
+
+`ctfgen score` reads a generated challenge folder and rates it 0-100 across five
+weighted dimensions, then reports a band (`strong`/`good`/`moderate`/`weak`):
+
+- `variant_uniqueness` (0.25): how many dynamic-variation dimensions are enabled
+  and how many per-instance route/token values appear in `variant.json`.
+- `statefulness` (0.20): presence of a background worker, a queue/state backend,
+  and a solver that drives asynchronous job state.
+- `solver_depth` (0.20): declared checkpoints and distinct HTTP interactions in
+  the private solver, relative to `ai_resistance.min_solver_steps`.
+- `live_interaction` (0.15): whether the solver discovers routes at runtime and
+  polls a live endpoint rather than replaying hardcoded values.
+- `scanner_resistance` (0.20): derived from `generic_scanner_usefulness` and
+  `decoy_density`.
+
+Scores are computed from the actual artifacts, not just the spec's declared
+values, so a challenge that claims live interaction but ships a hardcoded solver
+is flagged and scored down. `--min-score` turns the score into a CI gate.
 
 ## AI-Resistance Model
 

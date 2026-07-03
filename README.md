@@ -63,6 +63,21 @@ Run full Docker validation for each sibling sequentially:
 PYTHONPATH=src python3 -m ctf_generator validate-siblings --output /tmp/invoice-siblings --seed demo-001 --force --runtime
 ```
 
+Score a generated challenge on AI-resistance dimensions:
+
+```bash
+PYTHONPATH=src python3 -m ctf_generator score /tmp/invoice-drift
+```
+
+The score cross-checks the challenge spec's AI-resistance claims against what
+the generated artifacts actually do (variant uniqueness, statefulness, solver
+depth, live interaction, scanner resistance). Use `--json` for a machine-readable
+report or `--min-score N` to gate generation in CI:
+
+```bash
+PYTHONPATH=src python3 -m ctf_generator score /tmp/invoice-drift --min-score 80
+```
+
 ## Product Direction
 
 The long-term platform should generate challenge specs first, then build and validate deterministic artifacts:
@@ -101,7 +116,7 @@ git@github-ctfgenerator:Judgernaut777/CTFGenerator.git
 ## Next Engineering Targets
 
 1. Add an LLM-backed spec generator that emits structured challenge metadata before code.
-2. Add AI-agent evaluation profiles and an AI-resistance score.
+2. Add AI-agent evaluation profiles that complement the static AI-resistance score.
 3. Add a minimal web admin UI for generation, validation logs, and review approval.
 4. Add persisted validation reports and challenge version metadata.
 5. Add a generic exploit replay interface that tests one solver strategy across hidden siblings.
