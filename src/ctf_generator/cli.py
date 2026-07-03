@@ -5,7 +5,7 @@ import json
 import sys
 from pathlib import Path
 
-from . import __version__, report_index, report_writer
+from . import __version__, report_index, report_writer, spec_generator
 from .generator import create_challenge
 from .replay_validator import cross_replay
 from .runtime_validator import validate_runtime
@@ -67,6 +67,33 @@ def build_parser() -> argparse.ArgumentParser:
         choices=FAMILIES,
     )
     create.add_argument("--force", action="store_true", help="Overwrite an existing output directory")
+    create.add_argument(
+        "--from-spec",
+        type=Path,
+        default=None,
+        help="Render from a challenge spec JSON file (produced by `ctfgen spec`)",
+    )
+
+    spec = subparsers.add_parser(
+        "spec",
+        help="Generate a structured challenge spec before rendering any code",
+    )
+    spec.add_argument("--output", "-o", required=True, type=Path, help="Spec JSON output path")
+    spec.add_argument("--seed", default="demo-001")
+    spec.add_argument("--title", default="Invoice Drift")
+    spec.add_argument("--difficulty", default="medium", choices=["easy", "medium", "hard"])
+    spec.add_argument("--family", default=FAMILIES[0], choices=FAMILIES)
+    spec.add_argument(
+        "--backend",
+        default="deterministic",
+        choices=["deterministic", "llm"],
+        help="deterministic (offline default) or llm (Claude-backed, needs ctf-generator[llm])",
+    )
+    spec.add_argument(
+        "--model",
+        default=spec_generator.DEFAULT_MODEL,
+        help="Model id for the llm backend",
+    )
 
     validate = subparsers.add_parser("validate", help="Validate generated challenge files")
     validate.add_argument("challenge_path", type=Path)
@@ -204,6 +231,19 @@ def main(argv: list[str] | None = None) -> int:
         return 0
 
     if args.command == "create":
+        spec = None
+        if args.from_spec is not None:
+            try:
+                spec = spec_generator.load_spec(args.from_spec)
+            except (OSError, json.JSONDecodeError) as exc:
+                print(f"Could not read spec {args.from_spec}: {exc}", file=sys.stderr)
+                return 1
+            errors = spec_generator.validate_spec(spec)
+            if errors:
+                print("Spec validation failed:")
+                for error in errors:
+                    print(f"- {error}")
+                return 1
         try:
             result = create_challenge(
                 output_dir=args.output,
@@ -212,11 +252,34 @@ def main(argv: list[str] | None = None) -> int:
                 difficulty=args.difficulty,
                 family=args.family,
                 force=args.force,
+                spec=spec,
             )
         except FileExistsError as exc:
             print(str(exc), file=sys.stderr)
             return 1
         print(f"Generated challenge at {result}")
+        return 0
+
+    if args.command == "spec":
+        backend = spec_generator.get_backend(args.backend, model=args.model)
+        try:
+            generated = backend.generate(
+                family=args.family,
+                difficulty=args.difficulty,
+                seed=args.seed,
+                title=args.title,
+            )
+        except Exception as exc:  # noqa: BLE001 - surface backend/LLM errors cleanly
+            print(f"Spec generation failed: {exc}", file=sys.stderr)
+            return 1
+        errors = spec_generator.validate_spec(generated)
+        if errors:
+            print("Spec validation failed:")
+            for error in errors:
+                print(f"- {error}")
+            return 1
+        spec_generator.write_spec(args.output, generated)
+        print(f"Wrote {args.backend} spec to {args.output}")
         return 0
 
     if args.command == "validate":

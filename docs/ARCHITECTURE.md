@@ -11,15 +11,40 @@ The platform should treat validation as the core product. A generated challenge 
 The repository currently starts with a local generator and validator CLI:
 
 ```text
-ctfgen create -> challenge folder
+ctfgen spec -> structured challenge spec (deterministic or LLM backend)
+ctfgen create -> challenge folder (optionally --from-spec)
 ctfgen validate -> static artifact validation
 ctfgen validate-runtime -> Docker build, launch, health check, solve, cleanup
 ctfgen validate-siblings -> sibling generation, variant comparison, optional runtime replay
 ctfgen score -> static AI-resistance scoring across five dimensions
+ctfgen replay -> run one challenge's solver against another's live instance
+ctfgen report-index -> summarize persisted reports (table or static HTML)
 ```
 
 The validation and scoring commands accept `--report-dir` to persist their
 result as a JSON artifact (see Persisted Validation Reports below).
+
+## Spec-First Generation
+
+`spec_generator.py` decouples *what the challenge is* from *how it is rendered*.
+A `SpecBackend` produces a validated `ChallengeSpec`; `create_challenge` renders
+it deterministically. Two backends ship:
+
+- `DeterministicSpecBackend` (default) — offline, no dependencies, byte-stable
+  for a given seed.
+- `AnthropicSpecBackend` — drafts only the human-facing metadata (title,
+  learning objectives, checkpoints) via the Claude Messages API using structured
+  outputs. It never emits code, flags, routes, or the security-relevant
+  AI-resistance knobs, which stay under deterministic control, so a generated
+  spec is always safe and structurally valid. The Anthropic client is injectable,
+  so the prompt-building and response-parsing logic is unit-tested without
+  network access. Requires the optional `[llm]` extra.
+
+Every spec is checked by `validate_spec` (title, family, difficulty, objective
+count, and that checkpoint count meets `ai_resistance.min_solver_steps`) before
+it can be rendered. `ctfgen spec` writes a spec as JSON; `ctfgen create
+--from-spec` loads, re-validates, and renders it — the spec's own seed fully
+determines the instance.
 
 Generated challenge folders contain:
 
