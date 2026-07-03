@@ -16,8 +16,22 @@ The first build target is a local CLI that produces a Dockerized business-logic 
 
 ## Quick Start
 
+Install the package (no runtime dependencies; Python 3.11+):
+
 ```bash
 python3 -m pip install -e .
+ctfgen --version
+```
+
+List the challenge families the generator can produce:
+
+```bash
+ctfgen list-families
+```
+
+Generate and statically validate a challenge:
+
+```bash
 ctfgen create --output challenges/invoice-drift --seed demo-001
 ctfgen validate challenges/invoice-drift
 ```
@@ -35,18 +49,10 @@ In another shell:
 python3 private/solver.py --base-url http://127.0.0.1:8080
 ```
 
-For development without installing the package:
-
-```bash
-PYTHONPATH=src python3 -m ctf_generator create --output /tmp/invoice-drift --seed demo-001 --force
-PYTHONPATH=src python3 -m ctf_generator validate /tmp/invoice-drift
-PYTHONPATH=src python3 -m unittest discover -s tests
-```
-
 Run full Docker validation when Docker and image/package downloads are available:
 
 ```bash
-PYTHONPATH=src python3 -m ctf_generator validate-runtime /tmp/invoice-drift
+ctfgen validate-runtime challenges/invoice-drift
 ```
 
 That command runs static validation, `docker compose build`, `docker compose up -d`, the generated health check, the private solver, and cleanup with `docker compose down --volumes --remove-orphans`.
@@ -54,19 +60,19 @@ That command runs static validation, `docker compose build`, `docker compose up 
 Generate and compare sibling variants:
 
 ```bash
-PYTHONPATH=src python3 -m ctf_generator validate-siblings --output /tmp/invoice-siblings --seed demo-001 --force
+ctfgen validate-siblings --output challenges/invoice-siblings --seed demo-001 --force
 ```
 
 Run full Docker validation for each sibling sequentially:
 
 ```bash
-PYTHONPATH=src python3 -m ctf_generator validate-siblings --output /tmp/invoice-siblings --seed demo-001 --force --runtime
+ctfgen validate-siblings --output challenges/invoice-siblings --seed demo-001 --force --runtime
 ```
 
 Score a generated challenge on AI-resistance dimensions:
 
 ```bash
-PYTHONPATH=src python3 -m ctf_generator score /tmp/invoice-drift
+ctfgen score challenges/invoice-drift
 ```
 
 The score cross-checks the challenge spec's AI-resistance claims against what
@@ -75,20 +81,62 @@ depth, live interaction, scanner resistance). Use `--json` for a machine-readabl
 report or `--min-score N` to gate generation in CI:
 
 ```bash
-PYTHONPATH=src python3 -m ctf_generator score /tmp/invoice-drift --min-score 80
+ctfgen score challenges/invoice-drift --min-score 80
 ```
 
 Persist a validation/score result as a JSON artifact with `--report-dir`
 (supported by `validate`, `validate-runtime`, `validate-siblings`, and `score`):
 
 ```bash
-PYTHONPATH=src python3 -m ctf_generator score /tmp/invoice-drift --report-dir /tmp/reports
+ctfgen score challenges/invoice-drift --report-dir /tmp/reports
 ```
 
 Each report is a timestamped, versioned JSON envelope (`schema_version`,
-`command`, `subject`, `timestamp`, `git_commit`, `status`, `result`). Reports are
-never overwritten, and a failed report write never changes the command's exit
-code, so the flag is safe to add in CI to build an auditable validation trail.
+`generator_version`, `command`, `subject`, `timestamp`, `git_commit`, `status`,
+`result`). Reports are never overwritten, and a failed report write never changes
+the command's exit code, so the flag is safe to add in CI to build an auditable
+validation trail. Generated challenges also carry a `meta` block (generator
+version, spec version, family, seed) in `challenge.yaml` and `private/variant.json`
+so any instance is traceable back to the build that produced it.
+
+Cross-sibling exploit replay proves an exploit generalizes rather than being a
+memorized answer: it points one sibling's solver at the *other* sibling's live
+instance and requires it to extract the flag. Add `--cross-replay` to a runtime
+sibling run:
+
+```bash
+ctfgen validate-siblings --output challenges/invoice-siblings --seed demo-001 --force --runtime --cross-replay
+```
+
+Or replay any solver against any target instance directly:
+
+```bash
+ctfgen replay challenges/invoice-a challenges/invoice-b
+```
+
+Both build and launch the target with Docker, run the solver against it, and
+tear it down. A solver that hardcoded one instance's routes/flag fails here; the
+generated solvers discover routes and tokens at runtime, so they succeed.
+
+Summarize accumulated report artifacts as a table, or a self-contained HTML
+dashboard:
+
+```bash
+ctfgen report-index /tmp/reports
+ctfgen report-index /tmp/reports --html /tmp/reports/index.html
+```
+
+## Development
+
+To work on the tool without installing it, run the package directly from the
+source tree with `PYTHONPATH=src` (the `ctfgen` invocations above map to
+`python3 -m ctf_generator`):
+
+```bash
+PYTHONPATH=src python3 -m ctf_generator create --output /tmp/invoice-drift --seed demo-001 --force
+PYTHONPATH=src python3 -m unittest discover -s tests
+PYTHONPATH=src python3 -m compileall -q src tests
+```
 
 ## Product Direction
 
@@ -111,24 +159,20 @@ The generator should prioritize:
 - Private solver replay
 - AI-resistance scoring
 
-## Deploy Key
-
-This machine has a dedicated deploy key for the repository:
-
-- Public key: `/home/mini/.ssh/ctfgenerator_deploy_key.pub`
-- Private key: `/home/mini/.ssh/ctfgenerator_deploy_key`
-- SSH alias: `github-ctfgenerator`
-
-Remote URL:
-
-```bash
-git@github-ctfgenerator:Judgernaut777/CTFGenerator.git
-```
-
 ## Next Engineering Targets
 
 1. Add an LLM-backed spec generator that emits structured challenge metadata before code.
 2. Add AI-agent evaluation profiles that complement the static AI-resistance score.
-3. Add a minimal web admin UI for generation, validation logs, and review approval.
-4. Add challenge version metadata alongside the persisted validation reports.
-5. Add a generic exploit replay interface that tests one solver strategy across hidden siblings.
+3. Grow the `report-index` viewer into an interactive web admin UI for generation and review approval.
+4. Choose and add a project license (see below).
+
+The generic exploit-replay interface, challenge version metadata, and a static
+report dashboard are implemented (`replay` / `validate-siblings --cross-replay`,
+the `meta` blocks, and `report-index --html`).
+
+## License
+
+No license has been chosen yet, so the package ships without a `license` field.
+Until one is added the code is "all rights reserved" by default; pick a license
+(e.g. MIT or Apache-2.0) and add a `LICENSE` file plus a `license` entry in
+`pyproject.toml` before distributing.

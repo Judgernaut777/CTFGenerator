@@ -5,12 +5,17 @@ import json
 import sys
 from pathlib import Path
 
-from . import report_writer
+from . import __version__, report_index, report_writer
 from .generator import create_challenge
+from .replay_validator import cross_replay
 from .runtime_validator import validate_runtime
 from .score import score_challenge
 from .sibling_validator import validate_siblings
 from .validator import validate_challenge
+
+# Challenge families the generator can produce. Single source of truth for the
+# argparse choices below and the `list-families` discovery command.
+FAMILIES = ["web_business_logic_tenant_export"]
 
 
 def _write_cli_report(
@@ -44,7 +49,12 @@ def build_parser() -> argparse.ArgumentParser:
         prog="ctfgen",
         description="Generate and validate AI-resistant CTF challenge environments.",
     )
-    subparsers = parser.add_subparsers(dest="command", required=True)
+    parser.add_argument(
+        "--version",
+        action="version",
+        version=f"%(prog)s {__version__}",
+    )
+    subparsers = parser.add_subparsers(dest="command", required=False)
 
     create = subparsers.add_parser("create", help="Generate a challenge environment")
     create.add_argument("--output", "-o", required=True, type=Path)
@@ -53,8 +63,8 @@ def build_parser() -> argparse.ArgumentParser:
     create.add_argument("--difficulty", default="medium", choices=["easy", "medium", "hard"])
     create.add_argument(
         "--family",
-        default="web_business_logic_tenant_export",
-        choices=["web_business_logic_tenant_export"],
+        default=FAMILIES[0],
+        choices=FAMILIES,
     )
     create.add_argument("--force", action="store_true", help="Overwrite an existing output directory")
 
@@ -96,14 +106,22 @@ def build_parser() -> argparse.ArgumentParser:
     siblings.add_argument("--difficulty", default="medium", choices=["easy", "medium", "hard"])
     siblings.add_argument(
         "--family",
-        default="web_business_logic_tenant_export",
-        choices=["web_business_logic_tenant_export"],
+        default=FAMILIES[0],
+        choices=FAMILIES,
     )
     siblings.add_argument("--force", action="store_true")
     siblings.add_argument(
         "--runtime",
         action="store_true",
         help="Also run Docker runtime validation for each sibling sequentially",
+    )
+    siblings.add_argument(
+        "--cross-replay",
+        action="store_true",
+        help=(
+            "With --runtime, additionally replay each sibling's solver against the "
+            "other sibling's live instance (cross-sibling exploit replay)"
+        ),
     )
     siblings.add_argument("--timeout", default=90, type=int)
     siblings.add_argument(
@@ -132,6 +150,43 @@ def build_parser() -> argparse.ArgumentParser:
         help="Write a structured JSON report artifact to this directory",
     )
 
+    replay = subparsers.add_parser(
+        "replay",
+        help="Replay one challenge's solver against another challenge's live instance",
+    )
+    replay.add_argument("solver_dir", type=Path, help="Challenge whose solver is run")
+    replay.add_argument("target_dir", type=Path, help="Challenge whose instance is launched as the target")
+    replay.add_argument("--base-url", default="http://127.0.0.1:8080")
+    replay.add_argument("--timeout", default=90, type=int)
+    replay.add_argument(
+        "--keep-running",
+        action="store_true",
+        help="Leave the target containers running after replay",
+    )
+    replay.add_argument(
+        "--report-dir",
+        type=Path,
+        default=None,
+        help="Write a structured JSON report artifact to this directory",
+    )
+
+    subparsers.add_parser(
+        "list-families",
+        help="List the challenge families the generator can produce",
+    )
+
+    report_index_parser = subparsers.add_parser(
+        "report-index",
+        help="Summarize JSON report artifacts in a directory as a table (and optional HTML)",
+    )
+    report_index_parser.add_argument("report_dir", type=Path)
+    report_index_parser.add_argument(
+        "--html",
+        type=Path,
+        default=None,
+        help="Write a self-contained static HTML dashboard to this file",
+    )
+
     return parser
 
 
@@ -139,15 +194,28 @@ def main(argv: list[str] | None = None) -> int:
     parser = build_parser()
     args = parser.parse_args(argv)
 
+    if args.command is None:
+        parser.print_help(sys.stderr)
+        return 2
+
+    if args.command == "list-families":
+        for family in FAMILIES:
+            print(family)
+        return 0
+
     if args.command == "create":
-        result = create_challenge(
-            output_dir=args.output,
-            seed=args.seed,
-            title=args.title,
-            difficulty=args.difficulty,
-            family=args.family,
-            force=args.force,
-        )
+        try:
+            result = create_challenge(
+                output_dir=args.output,
+                seed=args.seed,
+                title=args.title,
+                difficulty=args.difficulty,
+                family=args.family,
+                force=args.force,
+            )
+        except FileExistsError as exc:
+            print(str(exc), file=sys.stderr)
+            return 1
         print(f"Generated challenge at {result}")
         return 0
 
@@ -189,6 +257,8 @@ def main(argv: list[str] | None = None) -> int:
         return 0
 
     if args.command == "validate-siblings":
+        if args.cross_replay and not args.runtime:
+            parser.error("--cross-replay requires --runtime")
         report = validate_siblings(
             output_dir=args.output,
             seed=args.seed,
@@ -197,6 +267,7 @@ def main(argv: list[str] | None = None) -> int:
             family=args.family,
             force=args.force,
             runtime=args.runtime,
+            cross_replay=args.cross_replay,
             timeout_seconds=args.timeout,
         )
         subject = {"type": "sibling-set", "identifier": args.seed}
@@ -218,6 +289,34 @@ def main(argv: list[str] | None = None) -> int:
         for warning in report.warnings:
             print(f"warning: {warning}")
         print("Sibling validation passed")
+        return 0
+
+    if args.command == "replay":
+        report = cross_replay(
+            solver_dir=args.solver_dir,
+            target_dir=args.target_dir,
+            base_url=args.base_url,
+            timeout_seconds=args.timeout,
+            keep_running=args.keep_running,
+        )
+        subject = {
+            "type": "replay",
+            "identifier": f"{args.solver_dir.name}-vs-{args.target_dir.name}",
+        }
+        result = report_writer.serialize_replay(report)
+        status = report_writer.status_of(report.errors)
+        _write_cli_report(args, "replay", subject, status, result)
+        for log in report.logs:
+            print(log.rstrip())
+        if report.errors:
+            print("Replay failed:")
+            for error in report.errors:
+                print(f"- {error}")
+            return 1
+        print(
+            f"Replay passed: {args.solver_dir.name}'s solver extracted the flag "
+            f"from {args.target_dir.name}"
+        )
         return 0
 
     if args.command == "score":
@@ -246,6 +345,17 @@ def main(argv: list[str] | None = None) -> int:
         if below_min:
             print(f"score {report.total:.1f} is below threshold {args.min_score:.1f}")
             return 1
+        return 0
+
+    if args.command == "report-index":
+        index = report_index.load_index(args.report_dir)
+        print(report_index.render_table(index))
+        if args.html is not None:
+            try:
+                args.html.parent.mkdir(parents=True, exist_ok=True)
+                args.html.write_text(report_index.render_html(index), encoding="utf-8")
+            except OSError as exc:
+                print(f"warning: failed to write HTML dashboard: {exc}", file=sys.stderr)
         return 0
 
     parser.error(f"unknown command: {args.command}")

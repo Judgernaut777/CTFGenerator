@@ -57,7 +57,7 @@ def validate_challenge(challenge_path: Path) -> ValidationReport:
     spec = challenge_path / "challenge.yaml"
     if spec.exists():
         text = spec.read_text(encoding="utf-8")
-        for marker in ("ai_resistance:", "dynamic_variation:", "checkpoints:"):
+        for marker in ("meta:", "ai_resistance:", "dynamic_variation:", "checkpoints:"):
             if marker not in text:
                 report.errors.append(f"challenge.yaml missing {marker}")
 

@@ -45,7 +45,7 @@ def render_tenant_export(spec: ChallengeSpec, rng: random.Random) -> dict[str, s
         "public/description.md": _description(spec, variant, route_base, support_route),
         "public/hints.yaml": dump_yaml({"hints": public_hints}),
         "private/solution.md": _solution(variant, route_base, support_route),
-        "private/variant.json": _variant_json(variant, route_base, support_route),
+        "private/variant.json": _variant_json(spec, variant, route_base, support_route),
         "private/checkpoints.yaml": dump_yaml(
             {"checkpoints": [{"name": name, "required": True} for name in spec.checkpoints]}
         ),
@@ -86,9 +86,10 @@ def _token_hex(rng: random.Random, byte_count: int) -> str:
     return rng.getrandbits(byte_count * 8).to_bytes(byte_count, "big").hex()
 
 
-def _variant_json(v: Variant, route_base: str, support_route: str) -> str:
+def _variant_json(spec: ChallengeSpec, v: Variant, route_base: str, support_route: str) -> str:
     return json.dumps(
         {
+            "meta": spec.meta_mapping(),
             "family": "web_business_logic_tenant_export",
             "routes": {
                 "export_base": route_base,

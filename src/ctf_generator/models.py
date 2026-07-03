@@ -2,6 +2,12 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 
+from . import __version__
+
+# Version of the stamped challenge metadata schema. Bump when the shape of the
+# ``meta`` block (or any generated layout it describes) changes incompatibly.
+SPEC_VERSION = "1.0"
+
 
 @dataclass(frozen=True)
 class AIResistance:
@@ -34,8 +40,23 @@ class ChallengeSpec:
     ai_resistance: AIResistance = field(default_factory=AIResistance)
     dynamic_variation: DynamicVariation = field(default_factory=DynamicVariation)
 
+    def meta_mapping(self) -> dict[str, object]:
+        """Provenance stamp for a generated instance.
+
+        Deterministic given the seed: version/spec/family/seed only, with no
+        wall-clock time or randomness, so a fixed seed yields a byte-identical
+        meta block.
+        """
+        return {
+            "generator_version": __version__,
+            "spec_version": SPEC_VERSION,
+            "family": self.family,
+            "seed": self.seed,
+        }
+
     def to_mapping(self) -> dict[str, object]:
         return {
+            "meta": self.meta_mapping(),
             "title": self.title,
             "category": self.category,
             "difficulty": self.difficulty,

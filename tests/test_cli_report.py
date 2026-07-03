@@ -6,9 +6,10 @@ import unittest
 from pathlib import Path
 from unittest import mock
 
-from ctf_generator import report_writer
+from ctf_generator import cli, report_writer
 from ctf_generator.cli import main
 from ctf_generator.generator import create_challenge
+from ctf_generator.replay_validator import ReplayReport
 
 
 def _generate(temp_dir: str) -> Path:
@@ -97,6 +98,57 @@ class ScoreReportCliTests(unittest.TestCase):
             # Report-write failure must never change the command's exit code.
             self.assertEqual(code, 0)
             self.assertFalse(_reports(report_dir))
+
+
+class CreateCliTests(unittest.TestCase):
+    def test_create_existing_dir_without_force_returns_1(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            output = Path(temp_dir) / "chal"
+            self.assertEqual(main(["create", "-o", str(output), "--seed", "x"]), 0)
+            # Second create without --force must fail cleanly (no traceback).
+            self.assertEqual(main(["create", "-o", str(output), "--seed", "x"]), 1)
+
+
+class ReplayCliTests(unittest.TestCase):
+    def _dirs(self, temp_dir: str) -> tuple[Path, Path]:
+        a = Path(temp_dir) / "sibling-a"
+        b = Path(temp_dir) / "sibling-b"
+        a.mkdir()
+        b.mkdir()
+        return a, b
+
+    def test_replay_command_writes_passed_report(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            a, b = self._dirs(temp_dir)
+            report_dir = Path(temp_dir) / "reports"
+            fake = ReplayReport(solver_dir=a, target_dir=b, success=True)
+            with mock.patch.object(cli, "cross_replay", return_value=fake):
+                code = main(["replay", str(a), str(b), "--report-dir", str(report_dir)])
+            self.assertEqual(code, 0)
+
+            files = _reports(report_dir)
+            self.assertEqual(len(files), 1)
+            payload = json.loads(files[0].read_text(encoding="utf-8"))
+            self.assertEqual(payload["command"], "replay")
+            self.assertEqual(payload["status"], "passed")
+            self.assertTrue(payload["result"]["success"])
+
+    def test_replay_command_failure_returns_1(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            a, b = self._dirs(temp_dir)
+            fake = ReplayReport(errors=["a-solver: command failed"], success=False)
+            with mock.patch.object(cli, "cross_replay", return_value=fake):
+                code = main(["replay", str(a), str(b)])
+            self.assertEqual(code, 1)
+
+
+class CrossReplayGuardTests(unittest.TestCase):
+    def test_cross_replay_without_runtime_errors(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            output = Path(temp_dir) / "siblings"
+            with self.assertRaises(SystemExit) as cm:
+                main(["validate-siblings", "-o", str(output), "--cross-replay"])
+            self.assertEqual(cm.exception.code, 2)
 
 
 class ValidateReportCliTests(unittest.TestCase):
