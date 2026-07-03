@@ -78,8 +78,17 @@ REQUIRED_FILES: tuple[str, ...] = (
     "private/solver.py",
     "private/variant.json",
     "private/checkpoints.yaml",
+    "private/runtime.json",
     "tests/healthcheck.py",
 )
+
+# The Modbus PLC + HMI are not HTTP-on-8080, and health vs solve target
+# different services, so validate-runtime reads this manifest instead of
+# injecting --base-url. Empty args => invoke the generated solver/healthcheck
+# with their own per-instance-correct defaults (PLC port / hmi-base-url).
+_RUNTIME_MANIFEST = json.dumps(
+    {"health": {"args": []}, "solve": {"args": []}}, indent=2
+) + "\n"
 
 
 # --- Variant (per-instance derived data) -------------------------------------
@@ -304,6 +313,7 @@ def render(
         "private/checkpoints.yaml": dump_yaml(
             {"checkpoints": [{"name": name, "required": True} for name in spec.checkpoints]}
         ),
+        "private/runtime.json": _RUNTIME_MANIFEST,
         "tests/healthcheck.py": _healthcheck(v),
     }
     return files
