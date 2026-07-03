@@ -9,7 +9,8 @@ from datetime import datetime, timezone
 from pathlib import Path
 from unittest import mock
 
-from ctf_generator import report_writer
+from ctf_generator import __version__, report_writer
+from ctf_generator.replay_validator import ReplayReport
 from ctf_generator.runtime_validator import RuntimeValidationReport
 from ctf_generator.sibling_validator import SiblingValidationReport
 from ctf_generator.validator import ValidationReport
@@ -37,6 +38,7 @@ class BuildReportTests(unittest.TestCase):
 
         for key in (
             "schema_version",
+            "generator_version",
             "command",
             "subject",
             "timestamp",
@@ -46,6 +48,7 @@ class BuildReportTests(unittest.TestCase):
         ):
             self.assertIn(key, report)
         self.assertEqual(report["schema_version"], "1.0")
+        self.assertEqual(report["generator_version"], __version__)
         self.assertEqual(report["command"], "validate")
         self.assertEqual(report["git_commit"], "abc123")
         self.assertEqual(report["timestamp"], ts.isoformat())
@@ -139,6 +142,25 @@ class SerializeTests(unittest.TestCase):
         self.assertEqual(result["errors"], ["boom"])
         self.assertEqual(result["logs"], ["$ cmd\nout"])
         json.dumps(result)  # must not raise
+
+    def test_serialize_replay(self) -> None:
+        report = ReplayReport(
+            errors=["a-solver-vs-b: command failed"],
+            logs=["$ solver\nno flag"],
+            solver_dir=Path("/tmp/sibling-a"),
+            target_dir=Path("/tmp/sibling-b"),
+            success=False,
+        )
+        result = report_writer.serialize_replay(report)
+        self.assertEqual(result["solver_dir"], "/tmp/sibling-a")
+        self.assertEqual(result["target_dir"], "/tmp/sibling-b")
+        self.assertFalse(result["success"])
+        json.dumps(result)  # must not raise
+
+        empty = report_writer.serialize_replay(ReplayReport())
+        self.assertIsNone(empty["solver_dir"])
+        self.assertIsNone(empty["target_dir"])
+        json.dumps(empty)  # must not raise
 
     def test_serialize_siblings_paths_are_json_safe(self) -> None:
         report = SiblingValidationReport(

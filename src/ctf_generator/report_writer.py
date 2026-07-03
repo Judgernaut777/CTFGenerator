@@ -8,7 +8,10 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import TYPE_CHECKING
 
+from . import __version__
+
 if TYPE_CHECKING:
+    from .replay_validator import ReplayReport
     from .runtime_validator import RuntimeValidationReport
     from .sibling_validator import SiblingValidationReport
     from .validator import ValidationReport
@@ -56,6 +59,7 @@ def build_report(
         git_commit_value = git_commit()
     return {
         "schema_version": SCHEMA_VERSION,
+        "generator_version": __version__,
         "command": command,
         "subject": subject,
         "timestamp": timestamp.isoformat(),
@@ -137,6 +141,16 @@ def serialize_siblings(report: "SiblingValidationReport") -> dict:
         "sibling_a": str(report.sibling_a) if report.sibling_a is not None else None,
         "sibling_b": str(report.sibling_b) if report.sibling_b is not None else None,
         "changed_tokens": list(report.changed_tokens),
+    }
+
+
+def serialize_replay(report: "ReplayReport") -> dict:
+    return {
+        "errors": list(report.errors),
+        "logs": list(report.logs),
+        "solver_dir": str(report.solver_dir) if report.solver_dir is not None else None,
+        "target_dir": str(report.target_dir) if report.target_dir is not None else None,
+        "success": report.success,
     }
 
 

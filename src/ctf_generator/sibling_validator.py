@@ -6,7 +6,8 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 from .generator import create_challenge
-from .runtime_validator import RuntimeValidationReport, validate_runtime
+from .replay_validator import ReplayReport, cross_replay as run_cross_replay
+from .runtime_validator import CommandRunner, RuntimeValidationReport, validate_runtime
 from .validator import validate_challenge
 
 
@@ -28,7 +29,9 @@ def validate_siblings(
     family: str = "web_business_logic_tenant_export",
     force: bool = False,
     runtime: bool = False,
+    cross_replay: bool = False,
     timeout_seconds: int = 90,
+    runner: CommandRunner | None = None,
 ) -> SiblingValidationReport:
     report = SiblingValidationReport()
     if output_dir.exists():
@@ -77,8 +80,21 @@ def validate_siblings(
         return report
 
     for path in (sibling_a, sibling_b):
-        runtime_report = validate_runtime(path, timeout_seconds=timeout_seconds)
+        runtime_report = validate_runtime(path, timeout_seconds=timeout_seconds, runner=runner)
         _merge_runtime_report(report, path.name, runtime_report)
+
+    if cross_replay and not report.errors:
+        # Cross-sibling exploit replay: each sibling's solver is pointed at the
+        # OTHER sibling's freshly launched instance. Sequential, so both runs
+        # can reuse the same base URL.
+        replay_ab = run_cross_replay(
+            sibling_a, sibling_b, timeout_seconds=timeout_seconds, runner=runner
+        )
+        _merge_replay_report(report, "a-solver-vs-b", replay_ab)
+        replay_ba = run_cross_replay(
+            sibling_b, sibling_a, timeout_seconds=timeout_seconds, runner=runner
+        )
+        _merge_replay_report(report, "b-solver-vs-a", replay_ba)
 
     return report
 
@@ -107,4 +123,13 @@ def _merge_runtime_report(
 ) -> None:
     report.errors.extend([f"{sibling_name}: {error}" for error in runtime_report.errors])
     report.logs.extend([f"[{sibling_name}]\n{log}" for log in runtime_report.logs])
+
+
+def _merge_replay_report(
+    report: SiblingValidationReport,
+    replay_name: str,
+    replay_report: ReplayReport,
+) -> None:
+    report.errors.extend([f"{replay_name}: {error}" for error in replay_report.errors])
+    report.logs.extend([f"[{replay_name}]\n{log}" for log in replay_report.logs])
 
