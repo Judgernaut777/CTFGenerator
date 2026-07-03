@@ -1,12 +1,13 @@
 from __future__ import annotations
 
+import json
 import tempfile
 import unittest
 from pathlib import Path
 
 from ctf_generator.generator import create_challenge
 from ctf_generator.models import ChallengeSpec, ResponseSpec, ScenarioSpec, TriggerSpec
-from ctf_generator.score import score_challenge
+from ctf_generator.score import score_challenge, score_with_agent_eval
 from ctf_generator.spec_generator import default_spec
 
 
@@ -266,6 +267,99 @@ class ScoreTests(unittest.TestCase):
                     "scanner_resistance": 0.20,
                 },
             )
+
+
+class ScoreWithAgentEvalTests(unittest.TestCase):
+    def _generate(self, temp_dir: str) -> Path:
+        output = Path(temp_dir) / "challenge"
+        create_challenge(
+            output_dir=output,
+            seed="agent-eval-score-seed",
+            title="Invoice Drift",
+            difficulty="medium",
+            family="web_business_logic_tenant_export",
+        )
+        return output
+
+    def test_no_eval_report_path_returns_static_only(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            output = self._generate(temp_dir)
+            static_report = score_challenge(output)
+            blended = score_with_agent_eval(output)
+            self.assertEqual(blended["static"], static_report.to_mapping())
+            self.assertIsNone(blended["agent_eval"])
+            self.assertEqual(blended["blended_score"], static_report.to_mapping()["total"])
+
+    def test_agent_eval_report_shape_blends_score(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            output = self._generate(temp_dir)
+            eval_report_path = Path(temp_dir) / "eval-report.json"
+            eval_report_path.write_text(
+                json.dumps(
+                    {
+                        "result": {
+                            "profile": "writeup_replay",
+                            "solved": False,
+                            "steps": 4,
+                            "elapsed_ticks": 4,
+                            "notes": [],
+                        }
+                    }
+                ),
+                encoding="utf-8",
+            )
+            blended = score_with_agent_eval(output, eval_report_path)
+            self.assertEqual(blended["agent_eval"]["kind"], "agent_eval")
+            self.assertFalse(blended["agent_eval"]["solved"])
+            static_total = blended["static"]["total"]
+            self.assertAlmostEqual(
+                blended["blended_score"], round(0.7 * static_total + 0.3 * 100.0, 1)
+            )
+
+    def test_adversarial_delta_report_shape_uses_adversarial_leg(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            output = self._generate(temp_dir)
+            eval_report_path = Path(temp_dir) / "delta-report.json"
+            eval_report_path.write_text(
+                json.dumps(
+                    {
+                        "result": {
+                            "profile": "writeup_replay",
+                            "baseline": {"solved": True, "steps": 2},
+                            "adversarial": {"solved": False, "steps": 6},
+                            "success_dropped": True,
+                            "step_delta": 4,
+                        }
+                    }
+                ),
+                encoding="utf-8",
+            )
+            blended = score_with_agent_eval(output, eval_report_path)
+            self.assertEqual(blended["agent_eval"]["kind"], "adversarial_delta")
+            self.assertTrue(blended["agent_eval"]["baseline_solved"])
+            self.assertFalse(blended["agent_eval"]["adversarial_solved"])
+            self.assertTrue(blended["agent_eval"]["success_dropped"])
+            static_total = blended["static"]["total"]
+            self.assertAlmostEqual(
+                blended["blended_score"], round(0.7 * static_total + 0.3 * 100.0, 1)
+            )
+
+    def test_missing_eval_report_file_warns_but_does_not_raise(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            output = self._generate(temp_dir)
+            missing = Path(temp_dir) / "does-not-exist.json"
+            blended = score_with_agent_eval(output, missing)
+            self.assertIsNone(blended["agent_eval"])
+            self.assertTrue(any("could not read" in w for w in blended["warnings"]))
+
+    def test_unrecognized_shape_warns(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            output = self._generate(temp_dir)
+            eval_report_path = Path(temp_dir) / "weird-report.json"
+            eval_report_path.write_text(json.dumps({"result": {"nonsense": True}}), encoding="utf-8")
+            blended = score_with_agent_eval(output, eval_report_path)
+            self.assertIsNone(blended["agent_eval"])
+            self.assertTrue(any("unrecognized shape" in w for w in blended["warnings"]))
 
 
 if __name__ == "__main__":

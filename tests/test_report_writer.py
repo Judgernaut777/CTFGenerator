@@ -233,5 +233,101 @@ class StatusOfTests(unittest.TestCase):
         self.assertEqual(report_writer.status_of(["e"]), "failed")
 
 
+class SerializeAgentEvalTests(unittest.TestCase):
+    def test_serialize_agent_eval_shape_and_json_round_trip(self) -> None:
+        from ctf_generator.agent_eval import AgentEvalReport
+
+        report = AgentEvalReport(
+            profile="writeup_replay",
+            solved=True,
+            steps=3,
+            elapsed_ticks=3,
+            notes=["GET /api/flag -> 200", "flag found: ctf{fake}"],
+        )
+        result = report_writer.serialize_agent_eval(report)
+        self.assertEqual(
+            result,
+            {
+                "profile": "writeup_replay",
+                "solved": True,
+                "steps": 3,
+                "elapsed_ticks": 3,
+                "notes": ["GET /api/flag -> 200", "flag found: ctf{fake}"],
+            },
+        )
+        round_tripped = json.loads(json.dumps(result))
+        self.assertEqual(round_tripped, result)
+
+
+class SerializeAdversarialDeltaTests(unittest.TestCase):
+    def test_serialize_adversarial_delta_shape_and_json_round_trip(self) -> None:
+        from ctf_generator.agent_eval import AdversarialDeltaReport, AgentEvalReport
+        from ctf_generator.scenario import (
+            ScenarioResponseRecord,
+            ScenarioRunReport,
+            ScenarioState,
+            SimEvent,
+        )
+
+        scenario_report = ScenarioRunReport(
+            challenge_path="/tmp/chal",
+            ticks_run=5,
+            timeline=[SimEvent(tick=0, source="attacker", kind="probe", target="api")],
+            triggers_fired=["t1"],
+            responses_applied=[
+                ScenarioResponseRecord(
+                    tick=1, role="defender", response_id="r1", action="rotate_credential", target="api"
+                )
+            ],
+            attacker_blocked=["probe"],
+            final_state=ScenarioState(tick=5, checkpoints={"c1"}, flags={"f": "v"}, fired_triggers={"t1"}),
+        )
+        baseline = AgentEvalReport(profile="writeup_replay", solved=True, steps=2, elapsed_ticks=2)
+        adversarial = AgentEvalReport(profile="writeup_replay", solved=False, steps=6, elapsed_ticks=6)
+        report = AdversarialDeltaReport(
+            challenge_path="/tmp/chal",
+            profile="writeup_replay",
+            baseline=baseline,
+            adversarial=adversarial,
+            scenario_report=scenario_report,
+            notes=["scenario ticks_run=5"],
+        )
+
+        result = report_writer.serialize_adversarial_delta(report)
+
+        self.assertEqual(result["challenge_path"], "/tmp/chal")
+        self.assertEqual(result["profile"], "writeup_replay")
+        self.assertEqual(result["baseline"], report_writer.serialize_agent_eval(baseline))
+        self.assertEqual(result["adversarial"], report_writer.serialize_agent_eval(adversarial))
+        self.assertTrue(result["success_dropped"])
+        self.assertEqual(result["step_delta"], 4)
+        self.assertEqual(result["scenario_report"]["ticks_run"], 5)
+        self.assertEqual(result["scenario_report"]["triggers_fired"], ["t1"])
+        self.assertEqual(
+            result["scenario_report"]["timeline"],
+            [{"tick": 0, "source": "attacker", "kind": "probe", "target": "api", "payload": {}}],
+        )
+        self.assertEqual(result["scenario_report"]["final_state"]["checkpoints"], ["c1"])
+
+        round_tripped = json.loads(json.dumps(result))
+        self.assertEqual(round_tripped, result)
+
+    def test_serialize_adversarial_delta_handles_none_final_state(self) -> None:
+        from ctf_generator.agent_eval import AdversarialDeltaReport, AgentEvalReport
+        from ctf_generator.scenario import ScenarioRunReport
+
+        scenario_report = ScenarioRunReport(challenge_path="/tmp/chal", ticks_run=0, final_state=None)
+        report = AdversarialDeltaReport(
+            challenge_path="/tmp/chal",
+            profile="one_shot_prompt",
+            baseline=AgentEvalReport(profile="one_shot_prompt"),
+            adversarial=AgentEvalReport(profile="one_shot_prompt"),
+            scenario_report=scenario_report,
+        )
+        result = report_writer.serialize_adversarial_delta(report)
+        self.assertIsNone(result["scenario_report"]["final_state"])
+        self.assertFalse(result["success_dropped"])
+
+
 if __name__ == "__main__":
     unittest.main()
