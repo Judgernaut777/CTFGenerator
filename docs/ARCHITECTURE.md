@@ -14,6 +14,7 @@ The repository currently starts with a local generator and validator CLI:
 ctfgen create -> challenge folder
 ctfgen validate -> static artifact validation
 ctfgen validate-runtime -> Docker build, launch, health check, solve, cleanup
+ctfgen validate-siblings -> sibling generation, variant comparison, optional runtime replay
 ```
 
 Generated challenge folders contain:
@@ -49,7 +50,7 @@ structured spec
   -> isolated launch                  implemented for local Docker
   -> health check                     implemented
   -> private solver replay            implemented
-  -> sibling variant replay
+  -> sibling variant replay           implemented for generated private solvers
   -> AI-agent evaluation
   -> human review
   -> publish
@@ -68,6 +69,8 @@ The generator should prefer challenges that are:
 - Fair to humans through discoverable clues
 
 The first challenge family uses an API and worker authorization mismatch. A generic scanner is insufficient; the solver has to inspect live routes, read operational notices, understand the queue workflow, and exploit a legacy trust boundary.
+
+Sibling validation generates two related challenges from the same family and verifies that route names, support endpoints, tenant fields, tenants, and invoice IDs differ. With `--runtime`, each sibling is built, launched, solved, and cleaned up sequentially.
 
 ## Runtime Safety Defaults
 

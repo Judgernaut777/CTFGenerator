@@ -5,6 +5,7 @@ from pathlib import Path
 
 from .generator import create_challenge
 from .runtime_validator import validate_runtime
+from .sibling_validator import validate_siblings
 from .validator import validate_challenge
 
 
@@ -42,6 +43,27 @@ def build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="Leave containers running after validation",
     )
+
+    siblings = subparsers.add_parser(
+        "validate-siblings",
+        help="Generate sibling variants and verify they differ meaningfully",
+    )
+    siblings.add_argument("--output", "-o", required=True, type=Path)
+    siblings.add_argument("--seed", default="demo-001")
+    siblings.add_argument("--title", default="Invoice Drift")
+    siblings.add_argument("--difficulty", default="medium", choices=["easy", "medium", "hard"])
+    siblings.add_argument(
+        "--family",
+        default="web_business_logic_tenant_export",
+        choices=["web_business_logic_tenant_export"],
+    )
+    siblings.add_argument("--force", action="store_true")
+    siblings.add_argument(
+        "--runtime",
+        action="store_true",
+        help="Also run Docker runtime validation for each sibling sequentially",
+    )
+    siblings.add_argument("--timeout", default=90, type=int)
 
     return parser
 
@@ -89,6 +111,34 @@ def main(argv: list[str] | None = None) -> int:
                 print(f"- {error}")
             return 1
         print("Runtime validation passed")
+        return 0
+
+    if args.command == "validate-siblings":
+        report = validate_siblings(
+            output_dir=args.output,
+            seed=args.seed,
+            title=args.title,
+            difficulty=args.difficulty,
+            family=args.family,
+            force=args.force,
+            runtime=args.runtime,
+            timeout_seconds=args.timeout,
+        )
+        for log in report.logs:
+            print(log.rstrip())
+        if report.errors:
+            print("Sibling validation failed:")
+            for error in report.errors:
+                print(f"- {error}")
+            return 1
+        print(f"Sibling A: {report.sibling_a}")
+        print(f"Sibling B: {report.sibling_b}")
+        print("Changed fields:")
+        for field in report.changed_tokens:
+            print(f"- {field}")
+        for warning in report.warnings:
+            print(f"warning: {warning}")
+        print("Sibling validation passed")
         return 0
 
     parser.error(f"unknown command: {args.command}")

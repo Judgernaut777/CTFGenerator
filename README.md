@@ -51,6 +51,18 @@ PYTHONPATH=src python3 -m ctf_generator validate-runtime /tmp/invoice-drift
 
 That command runs static validation, `docker compose build`, `docker compose up -d`, the generated health check, the private solver, and cleanup with `docker compose down --volumes --remove-orphans`.
 
+Generate and compare sibling variants:
+
+```bash
+PYTHONPATH=src python3 -m ctf_generator validate-siblings --output /tmp/invoice-siblings --seed demo-001 --force
+```
+
+Run full Docker validation for each sibling sequentially:
+
+```bash
+PYTHONPATH=src python3 -m ctf_generator validate-siblings --output /tmp/invoice-siblings --seed demo-001 --force --runtime
+```
+
 ## Product Direction
 
 The long-term platform should generate challenge specs first, then build and validate deterministic artifacts:
@@ -88,8 +100,8 @@ git@github-ctfgenerator:Judgernaut777/CTFGenerator.git
 
 ## Next Engineering Targets
 
-1. Add sibling variant replay so an exploit can be tested against a related generated instance.
-2. Add an LLM-backed spec generator that emits structured challenge metadata before code.
-3. Add AI-agent evaluation profiles and an AI-resistance score.
-4. Add a minimal web admin UI for generation, validation logs, and review approval.
-5. Add persisted validation reports and challenge version metadata.
+1. Add an LLM-backed spec generator that emits structured challenge metadata before code.
+2. Add AI-agent evaluation profiles and an AI-resistance score.
+3. Add a minimal web admin UI for generation, validation logs, and review approval.
+4. Add persisted validation reports and challenge version metadata.
+5. Add a generic exploit replay interface that tests one solver strategy across hidden siblings.

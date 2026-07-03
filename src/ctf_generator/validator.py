@@ -17,6 +17,7 @@ REQUIRED_FILES = [
     "public/hints.yaml",
     "private/solution.md",
     "private/solver.py",
+    "private/variant.json",
     "private/checkpoints.yaml",
     "tests/healthcheck.py",
     "tests/validate_solver.py",
@@ -65,4 +66,3 @@ def validate_challenge(challenge_path: Path) -> ValidationReport:
         report.warnings.append("private solver does not appear to expose CLI arguments")
 
     return report
-

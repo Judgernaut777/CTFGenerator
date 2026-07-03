@@ -33,6 +33,10 @@ class GeneratorTests(unittest.TestCase):
                 app.index('redis_client.rpush("export_jobs"'),
             )
 
+            solver = (output / "private/solver.py").read_text(encoding="utf-8")
+            self.assertIn("Delayed invoice", solver)
+            self.assertIn("may still send", solver)
+
     def test_create_challenge_refuses_existing_directory(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             output = Path(temp_dir) / "existing"
