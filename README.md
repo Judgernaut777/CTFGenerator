@@ -134,16 +134,40 @@ ctfgen spec --output specs/invoice-drift.json --seed demo-001 --difficulty hard
 ctfgen create --output challenges/invoice-drift --from-spec specs/invoice-drift.json
 ```
 
-The optional Claude-backed backend drafts the pedagogical metadata (title,
-learning objectives, checkpoints) — never code, flags, or the security-relevant
-AI-resistance knobs, which stay deterministic. It needs the `[llm]` extra and
-`ANTHROPIC_API_KEY` (or an `ant auth login` profile); the generated spec is
-validated before it can be rendered:
+Two optional LLM backends draft the pedagogical metadata (title, learning
+objectives, checkpoints) — never code, flags, or the security-relevant
+AI-resistance knobs, which stay deterministic. Each is behind its own extra and
+needs that provider's API key; the generated spec is validated before it can be
+rendered. The `--model` flag defaults per provider (`claude-opus-4-8` for
+Anthropic, `gpt-5.1` for OpenAI):
 
 ```bash
-pip install -e '.[llm]'
-ctfgen spec --output specs/drift.json --backend llm --model claude-opus-4-8
+pip install -e '.[anthropic]'   # needs ANTHROPIC_API_KEY (or an `ant auth login` profile)
+ctfgen spec --output specs/drift.json --backend anthropic
+
+pip install -e '.[openai]'      # needs OPENAI_API_KEY
+ctfgen spec --output specs/drift.json --backend openai
 ```
+
+### Use your own subscription via MCP
+
+Instead of an API key, run CTFGenerator as an MCP server and let an MCP host
+(Claude Desktop/Code, or any other client) drive it with the model you already
+pay for. The host's model drafts the metadata and calls the server's tools; the
+LLM never lives in CTFGenerator.
+
+```bash
+pip install -e '.[mcp]'
+ctfgen-mcp   # speaks MCP over stdio
+```
+
+Point your host at that command (e.g. in Claude Desktop's MCP config). The
+server exposes only pure tools — `list_families`, `spec_schema`, `build_spec`,
+`validate_spec`, `create_from_spec`, `create_challenge`, `validate_challenge`,
+`score_challenge`, `report_index_table` — plus a `design_challenge` prompt.
+Docker-driving commands (`validate-runtime`, `replay`, `validate-siblings
+--runtime`) are deliberately **not** exposed over MCP, so connecting a model
+host never hands it container builds or host execution; run those from the CLI.
 
 ## Development
 

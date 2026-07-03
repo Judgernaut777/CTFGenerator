@@ -32,13 +32,38 @@ it deterministically. Two backends ship:
 
 - `DeterministicSpecBackend` (default) — offline, no dependencies, byte-stable
   for a given seed.
-- `AnthropicSpecBackend` — drafts only the human-facing metadata (title,
-  learning objectives, checkpoints) via the Claude Messages API using structured
-  outputs. It never emits code, flags, routes, or the security-relevant
-  AI-resistance knobs, which stay under deterministic control, so a generated
-  spec is always safe and structurally valid. The Anthropic client is injectable,
-  so the prompt-building and response-parsing logic is unit-tested without
-  network access. Requires the optional `[llm]` extra.
+- `AnthropicSpecBackend` — drafts metadata via the Claude Messages API
+  (structured outputs + adaptive thinking). Requires the optional `[anthropic]`
+  extra; default model `claude-opus-4-8`.
+- `OpenAISpecBackend` — drafts metadata via OpenAI Chat Completions with a
+  strict `json_schema` response format. Requires the optional `[openai]` extra;
+  default model `gpt-5.1`.
+
+Both LLM backends draft only the human-facing metadata (title, learning
+objectives, checkpoints). They never emit code, flags, routes, or the
+security-relevant AI-resistance knobs, which stay under deterministic control,
+so a generated spec is always safe and structurally valid. Each provider's
+client is injectable, so the prompt-building and response-parsing logic is
+unit-tested without network access or credentials.
+
+## MCP Server
+
+`mcp_server.py` runs CTFGenerator as an MCP *server* (`ctfgen-mcp`, stdio), so
+an MCP host drives generation with the user's own model/subscription rather than
+an API key: the host's model drafts the pedagogical metadata and calls the
+server's tools, and the LLM never lives in CTFGenerator.
+
+The exposed surface is deliberately pure: `list_families`, `spec_schema`,
+`build_spec`, `validate_spec`, `create_from_spec`, `create_challenge`,
+`validate_challenge`, `score_challenge`, and `report_index_table`, plus a
+`design_challenge` prompt that primes a host model with the safety boundary.
+Every Docker-driving command (`validate-runtime`, `replay`, `validate-siblings
+--runtime`) stays CLI-only, so connecting a model host to the server never hands
+it container builds or host execution. The tool bodies are plain functions,
+unit-tested without the optional `[mcp]` dependency; `build_server` wires them
+into a FastMCP instance lazily. `build_spec` merges host-supplied metadata with
+the fixed safety knobs and validates before returning, mirroring the LLM
+backends' boundary.
 
 Every spec is checked by `validate_spec` (title, family, difficulty, objective
 count, and that checkpoint count meets `ai_resistance.min_solver_steps`) before
