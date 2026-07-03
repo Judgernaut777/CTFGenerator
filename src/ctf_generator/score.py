@@ -395,3 +395,93 @@ def _read_text(path: Path) -> str:
         return path.read_text(encoding="utf-8")
     except OSError:
         return ""
+
+
+# --- score_with_agent_eval (Phase 5) -------------------------------------------
+#
+# Standalone function combining the static score_challenge() result with a
+# previously-saved agent_eval report (a JSON report artifact written by the
+# `eval-agent` CLI command via report_writer.write_report). Never modifies
+# score_challenge()/ScoreReport themselves -- this is purely an additional,
+# opt-in view layered on top.
+
+
+def score_with_agent_eval(
+    challenge_path: Path, eval_report_path: Path | None = None
+) -> dict[str, object]:
+    """Blend the static AI-resistance score with a saved agent-eval report.
+
+    Always runs the unmodified ``score_challenge`` first; ``static`` in the
+    returned mapping is exactly ``ScoreReport.to_mapping()``. When
+    ``eval_report_path`` is ``None`` (the default), ``agent_eval`` is ``None``
+    and ``blended_score`` simply equals the static total -- so a caller that
+    never supplies an eval report gets today's static score back, unchanged.
+
+    When given, ``eval_report_path`` is read as a JSON report artifact
+    produced by ``report_writer.build_report``/``write_report`` for either
+    the ``eval-agent`` command (``report_writer.serialize_agent_eval`` shape,
+    detected by a top-level ``"solved"`` key) or ``eval-agent --adversarial``
+    (``report_writer.serialize_adversarial_delta`` shape, detected by
+    top-level ``"baseline"``/``"adversarial"`` keys). A missing/unreadable
+    file or an unrecognized shape is recorded as a warning rather than
+    raising, mirroring this module's existing best-effort read helpers
+    (``_read_json``/``_read_text``).
+
+    ``blended_score`` is a simple, deterministic weighted mix: 70% the static
+    total, 30% an eval component that is 100 when the agent did *not* solve
+    the live challenge (the resistant outcome) and 0 when it did -- using the
+    adversarial (harder) leg's outcome when an adversarial-delta report was
+    supplied.
+    """
+    static_report = score_challenge(challenge_path)
+    static_mapping = static_report.to_mapping()
+    blended: dict[str, object] = {
+        "static": static_mapping,
+        "agent_eval": None,
+        "blended_score": static_mapping["total"],
+        "warnings": list(static_report.warnings),
+    }
+    if eval_report_path is None:
+        return blended
+
+    eval_report_path = Path(eval_report_path)
+    try:
+        payload = json.loads(eval_report_path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as exc:
+        blended["warnings"].append(f"could not read agent-eval report: {exc}")
+        return blended
+
+    result = payload.get("result", payload) if isinstance(payload, dict) else None
+    if not isinstance(result, dict):
+        blended["warnings"].append("agent-eval report has an unrecognized shape")
+        return blended
+
+    if "baseline" in result and "adversarial" in result:
+        adversarial = result.get("adversarial") or {}
+        baseline = result.get("baseline") or {}
+        solved = bool(adversarial.get("solved"))
+        agent_summary: dict[str, object] = {
+            "kind": "adversarial_delta",
+            "profile": result.get("profile"),
+            "baseline_solved": bool(baseline.get("solved")),
+            "adversarial_solved": solved,
+            "success_dropped": bool(result.get("success_dropped")),
+        }
+    elif "solved" in result:
+        solved = bool(result.get("solved"))
+        agent_summary = {
+            "kind": "agent_eval",
+            "profile": result.get("profile"),
+            "solved": solved,
+            "steps": result.get("steps"),
+        }
+    else:
+        blended["warnings"].append("agent-eval report has an unrecognized shape")
+        return blended
+
+    eval_component = 0.0 if solved else 100.0
+    blended["agent_eval"] = agent_summary
+    blended["blended_score"] = round(
+        0.7 * float(static_mapping["total"]) + 0.3 * eval_component, 1
+    )
+    return blended

@@ -11,6 +11,7 @@ from typing import TYPE_CHECKING
 from . import __version__
 
 if TYPE_CHECKING:
+    from .agent_eval import AdversarialDeltaReport, AgentEvalReport
     from .replay_validator import ReplayReport
     from .runtime_validator import RuntimeValidationReport
     from .scoreboard import ScoreboardSnapshot
@@ -172,6 +173,82 @@ def serialize_scoreboard(snapshot: "ScoreboardSnapshot") -> dict:
             }
             for entry in snapshot.entries
         ],
+    }
+
+
+def _serialize_sim_events(events: list) -> list[dict]:
+    """JSON-safe mapping for a list of ``scenario.SimEvent`` (each already
+    provides its own ``to_mapping()``, reused verbatim -- not reimplemented)."""
+    return [event.to_mapping() for event in events]
+
+
+def _serialize_scenario_run_report(report) -> dict:
+    """JSON-safe mapping for a ``scenario.ScenarioRunReport``.
+
+    Standalone (not imported from ``cli.py``'s private ``_serialize_scenario_report``,
+    per this project's strict per-file ownership rules), but mirrors its shape
+    so a ``run-scenario`` report artifact and an ``eval-agent --adversarial``
+    report artifact serialize a ``ScenarioRunReport`` identically.
+    """
+    final_state = report.final_state
+    return {
+        "challenge_path": report.challenge_path,
+        "ticks_run": report.ticks_run,
+        "timeline": _serialize_sim_events(report.timeline),
+        "triggers_fired": list(report.triggers_fired),
+        "responses_applied": [
+            {
+                "tick": record.tick,
+                "role": record.role,
+                "response_id": record.response_id,
+                "action": record.action,
+                "target": record.target,
+            }
+            for record in report.responses_applied
+        ],
+        "attacker_blocked": list(report.attacker_blocked),
+        "final_state": (
+            {
+                "tick": final_state.tick,
+                "checkpoints": sorted(final_state.checkpoints),
+                "flags": dict(final_state.flags),
+                "fired_triggers": sorted(final_state.fired_triggers),
+                "noise_count": final_state.noise_count,
+            }
+            if final_state is not None
+            else None
+        ),
+    }
+
+
+def serialize_agent_eval(report: "AgentEvalReport") -> dict:
+    """JSON-safe mapping for an ``agent_eval.AgentEvalReport``."""
+    return {
+        "profile": report.profile,
+        "solved": report.solved,
+        "steps": report.steps,
+        "elapsed_ticks": report.elapsed_ticks,
+        "notes": list(report.notes),
+    }
+
+
+def serialize_adversarial_delta(report: "AdversarialDeltaReport") -> dict:
+    """JSON-safe mapping for an ``agent_eval.AdversarialDeltaReport``.
+
+    Includes the ``success_dropped``/``step_delta`` derived properties
+    (computed, not stored, on the dataclass) so a persisted report artifact
+    carries the headline signal without a reader having to recompute it from
+    ``baseline``/``adversarial``.
+    """
+    return {
+        "challenge_path": report.challenge_path,
+        "profile": report.profile,
+        "baseline": serialize_agent_eval(report.baseline),
+        "adversarial": serialize_agent_eval(report.adversarial),
+        "scenario_report": _serialize_scenario_run_report(report.scenario_report),
+        "success_dropped": report.success_dropped,
+        "step_delta": report.step_delta,
+        "notes": list(report.notes),
     }
 
 

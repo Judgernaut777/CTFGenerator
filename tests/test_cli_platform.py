@@ -6,6 +6,7 @@ import json
 import tempfile
 import unittest
 from pathlib import Path
+from unittest import mock
 
 from ctf_generator import cve_source
 from ctf_generator.cli import main
@@ -442,6 +443,181 @@ class CreateSpecModeAndCveRefCliTests(unittest.TestCase):
                 ]
             )
             self.assertEqual(code, 0, err)
+
+
+class EvalAgentCliTests(unittest.TestCase):
+    """Offline: agent_eval.run_agent_eval/run_adversarial_delta are patched
+    (via mock.patch on the lazily-imported module attribute cli.py calls
+    through) so no real Docker/HTTP is ever touched."""
+
+    def _fake_agent_report(self, *, solved: bool = True, steps: int = 3):
+        from ctf_generator.agent_eval import AgentEvalReport
+
+        return AgentEvalReport(
+            profile="writeup_replay",
+            solved=solved,
+            steps=steps,
+            elapsed_ticks=steps,
+            notes=["GET /api/flag -> 200", "flag found: ctf{fake}"],
+        )
+
+    def _fake_delta_report(self, challenge_dir: Path):
+        from ctf_generator.agent_eval import AdversarialDeltaReport
+        from ctf_generator.scenario import ScenarioRunReport
+
+        return AdversarialDeltaReport(
+            challenge_path=str(challenge_dir),
+            profile="writeup_replay",
+            baseline=self._fake_agent_report(solved=True, steps=2),
+            adversarial=self._fake_agent_report(solved=False, steps=5),
+            scenario_report=ScenarioRunReport(challenge_path=str(challenge_dir), ticks_run=20),
+            notes=["scenario ticks_run=20"],
+        )
+
+    def test_eval_agent_basic_prints_and_writes_report(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            challenge_dir = Path(temp_dir) / "chal"
+            report_dir = Path(temp_dir) / "reports"
+            fake_report = self._fake_agent_report()
+            with mock.patch(
+                "ctf_generator.agent_eval.run_agent_eval", return_value=fake_report
+            ) as run_mock:
+                code, out, _ = _run(
+                    [
+                        "eval-agent",
+                        str(challenge_dir),
+                        "--profile",
+                        "writeup_replay",
+                        "--report-dir",
+                        str(report_dir),
+                    ]
+                )
+            self.assertEqual(code, 0)
+            run_mock.assert_called_once()
+            self.assertIn("solved=True steps=3", out)
+            files = _reports(report_dir)
+            self.assertEqual(len(files), 1)
+            payload = json.loads(files[0].read_text(encoding="utf-8"))
+            self.assertEqual(payload["command"], "eval-agent")
+            self.assertEqual(payload["result"]["profile"], "writeup_replay")
+            self.assertTrue(payload["result"]["solved"])
+
+    def test_eval_agent_adversarial_prints_delta_and_writes_report(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            challenge_dir = Path(temp_dir) / "chal"
+            report_dir = Path(temp_dir) / "reports"
+            fake_delta = self._fake_delta_report(challenge_dir)
+            with mock.patch(
+                "ctf_generator.agent_eval.run_adversarial_delta", return_value=fake_delta
+            ) as run_mock:
+                code, out, _ = _run(
+                    [
+                        "eval-agent",
+                        str(challenge_dir),
+                        "--profile",
+                        "writeup_replay",
+                        "--adversarial",
+                        "--report-dir",
+                        str(report_dir),
+                    ]
+                )
+            self.assertEqual(code, 0)
+            run_mock.assert_called_once()
+            self.assertIn("success_dropped=True", out)
+            files = _reports(report_dir)
+            self.assertEqual(len(files), 1)
+            payload = json.loads(files[0].read_text(encoding="utf-8"))
+            self.assertEqual(payload["command"], "eval-agent")
+            self.assertTrue(payload["result"]["success_dropped"])
+            self.assertIn("scenario_report", payload["result"])
+
+
+class RunScenarioRuntimeFlagCliTests(unittest.TestCase):
+    """Offline: scenario_runtime.run_live_scenario is patched so --runtime
+    never touches real Docker/HTTP. Confirms the sibling branch dispatches
+    correctly and the existing (non---runtime) run-scenario branch is
+    untouched by exercising both in the same test module."""
+
+    def test_run_scenario_with_runtime_flag_uses_scenario_runtime(self) -> None:
+        from ctf_generator.scenario import ScenarioRunReport
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            challenge_dir = Path(temp_dir) / "chal"
+            fake_report = ScenarioRunReport(
+                challenge_path=str(challenge_dir), ticks_run=7, triggers_fired=["t1"]
+            )
+            with mock.patch(
+                "ctf_generator.scenario_runtime.run_live_scenario", return_value=fake_report
+            ) as run_mock:
+                code, out, _ = _run(
+                    [
+                        "run-scenario",
+                        str(challenge_dir),
+                        "--runtime",
+                        "--base-url",
+                        "http://127.0.0.1:9999",
+                        "--json",
+                    ]
+                )
+            self.assertEqual(code, 0)
+            run_mock.assert_called_once()
+            _, kwargs = run_mock.call_args
+            self.assertEqual(kwargs["base_url"], "http://127.0.0.1:9999")
+            payload = json.loads(out)
+            self.assertEqual(payload["ticks_run"], 7)
+            self.assertEqual(payload["triggers_fired"], ["t1"])
+
+
+class ServeHelperTests(unittest.TestCase):
+    """Offline: only the pure service/auth builder helpers are exercised --
+    never dashboard_server.serve()/serve_forever(), which would open a real
+    socket."""
+
+    def test_build_serve_service_defaults_to_in_memory_and_empty_catalog(self) -> None:
+        from ctf_generator.cli import _build_serve_service
+        from ctf_generator.competition_service import CompetitionService
+        from ctf_generator.events import InMemoryEventStore
+
+        args = argparse_namespace(events_file=None, challenges=None, config=None)
+        service = _build_serve_service(args)
+        self.assertIsInstance(service, CompetitionService)
+        self.assertIsInstance(service.store, InMemoryEventStore)
+        self.assertEqual(service.catalog.ids(), [])
+        self.assertEqual(service.config.competition_id, "ctfgen-live")
+
+    def test_build_serve_service_reads_events_file_and_challenges(self) -> None:
+        from ctf_generator.cli import _build_serve_service
+        from ctf_generator.events import JsonlEventStore
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            events_path = Path(temp_dir) / "events.jsonl"
+            challenges_path = Path(temp_dir) / "challenges.json"
+            challenges_path.write_text(
+                json.dumps([{"challenge_id": "chal-1", "initial_value": 500}]),
+                encoding="utf-8",
+            )
+            args = argparse_namespace(
+                events_file=events_path, challenges=challenges_path, config=None
+            )
+            service = _build_serve_service(args)
+            self.assertIsInstance(service.store, JsonlEventStore)
+            self.assertEqual(service.catalog.ids(), ["chal-1"])
+
+    def test_build_serve_auth_uses_given_public_token(self) -> None:
+        from ctf_generator.cli import _build_serve_auth
+
+        args = argparse_namespace(admin_user="admin", admin_password="hunter2", public_token="fixed-token")
+        auth = _build_serve_auth(args)
+        self.assertEqual(auth.admin_username, "admin")
+        self.assertEqual(auth.public_token, "fixed-token")
+        self.assertTrue(auth.verify_password("admin", "hunter2"))
+        self.assertFalse(auth.verify_password("admin", "wrong"))
+
+
+def argparse_namespace(**kwargs):
+    import argparse
+
+    return argparse.Namespace(**kwargs)
 
 
 if __name__ == "__main__":

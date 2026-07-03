@@ -325,6 +325,19 @@ def build_parser() -> argparse.ArgumentParser:
         default=None,
         help="Write a structured JSON report artifact to this directory",
     )
+    run_scenario_parser.add_argument(
+        "--runtime",
+        action="store_true",
+        help=(
+            "Run against a live Docker instance via scenario_runtime.run_live_scenario "
+            "instead of the pure, offline scenario engine"
+        ),
+    )
+    run_scenario_parser.add_argument(
+        "--base-url",
+        default="http://127.0.0.1:8080",
+        help="Base URL of the live challenge instance (only used with --runtime)",
+    )
 
     subparsers.add_parser(
         "list-scoring-engines",
@@ -365,6 +378,66 @@ def build_parser() -> argparse.ArgumentParser:
         type=Path,
         default=None,
         help="Write a structured JSON report artifact to this directory",
+    )
+
+    # --- Agent-eval / live dashboard platform commands (Phase 5) ------------
+
+    eval_agent_parser = subparsers.add_parser(
+        "eval-agent",
+        help="Run an AI-agent evaluation against a live (Docker) challenge instance",
+    )
+    eval_agent_parser.add_argument("challenge_dir", type=Path)
+    eval_agent_parser.add_argument(
+        "--profile",
+        required=True,
+        help="Eval profile name (see agent_eval.list_eval_profiles())",
+    )
+    eval_agent_parser.add_argument(
+        "--adversarial",
+        action="store_true",
+        help=(
+            "Also compute the live-adversarial delta (agent_eval.run_adversarial_delta): "
+            "the same eval run twice, scenario engine off then on"
+        ),
+    )
+    eval_agent_parser.add_argument("--base-url", default="http://127.0.0.1:8080")
+    eval_agent_parser.add_argument(
+        "--report-dir",
+        type=Path,
+        default=None,
+        help="Write a structured JSON report artifact to this directory",
+    )
+
+    serve_parser = subparsers.add_parser(
+        "serve",
+        help="Serve the live competition admin dashboard + public scoreboard (stdlib HTTP)",
+    )
+    serve_parser.add_argument("--host", default="127.0.0.1")
+    serve_parser.add_argument("--port", type=int, default=8000)
+    serve_parser.add_argument("--admin-user", required=True)
+    serve_parser.add_argument("--admin-password", required=True)
+    serve_parser.add_argument(
+        "--events-file",
+        type=Path,
+        default=None,
+        help="Persist the event log to this JSONL file (default: in-memory only)",
+    )
+    serve_parser.add_argument(
+        "--challenges",
+        type=Path,
+        default=None,
+        help="JSON array of ChallengeScoringConfig records (default: empty catalog)",
+    )
+    serve_parser.add_argument(
+        "--config",
+        type=Path,
+        default=None,
+        help="JSON CompetitionConfig object (default: a permissive built-in placeholder)",
+    )
+    serve_parser.add_argument(
+        "--public-token",
+        default=None,
+        help="Fixed public scoreboard token (default: randomly generated, printed once)",
     )
 
     return parser
@@ -657,6 +730,34 @@ def main(argv: list[str] | None = None) -> int:
         print(f"Generated challenge from {cve_id} at {result}")
         return 0
 
+    # Sibling branch (not an edit of the existing run-scenario branch below):
+    # when --runtime is set, dispatch to the live/Docker-backed scenario
+    # engine instead. Placed first so it short-circuits before the existing
+    # branch's body ever runs; the existing branch itself is untouched.
+    if args.command == "run-scenario" and getattr(args, "runtime", False):
+        from . import scenario_runtime
+
+        report = scenario_runtime.run_live_scenario(
+            args.challenge_dir,
+            base_url=args.base_url,
+            max_ticks=args.max_ticks,
+        )
+        subject = {"type": "challenge", "identifier": args.challenge_dir.name}
+        result = _serialize_scenario_report(report)
+        _write_cli_report(args, "run-scenario", subject, "passed", result)
+        if args.json:
+            print(json.dumps(result, indent=2, sort_keys=True))
+        else:
+            print(f"Ran live scenario for {args.challenge_dir} ({report.ticks_run} ticks)")
+            for event in report.timeline:
+                print(
+                    f"- tick {event.tick} [{event.source}] {event.kind} "
+                    f"-> {event.target or '(none)'} {event.payload}"
+                )
+            print(f"Triggers fired: {report.triggers_fired}")
+            print(f"Attacker moves blocked: {report.attacker_blocked}")
+        return 0
+
     if args.command == "run-scenario":
         report = _run_scenario_command(args.challenge_dir, max_ticks=args.max_ticks)
         subject = {"type": "challenge", "identifier": args.challenge_dir.name}
@@ -721,6 +822,67 @@ def main(argv: list[str] | None = None) -> int:
                     f"{entry.rank}. {entry.team_id} - {entry.score} pts "
                     f"({entry.solve_count} solves)"
                 )
+        return 0
+
+    if args.command == "eval-agent":
+        from . import agent_eval
+
+        subject = {"type": "challenge", "identifier": args.challenge_dir.name}
+        if args.adversarial:
+            delta_report = agent_eval.run_adversarial_delta(
+                args.challenge_dir,
+                args.profile,
+                base_url=args.base_url,
+            )
+            result = report_writer.serialize_adversarial_delta(delta_report)
+            _write_cli_report(args, "eval-agent", subject, "passed", result)
+            print(
+                f"Adversarial delta for {args.challenge_dir} [{args.profile}]"
+            )
+            print(
+                f"  baseline:    solved={delta_report.baseline.solved} "
+                f"steps={delta_report.baseline.steps}"
+            )
+            print(
+                f"  adversarial: solved={delta_report.adversarial.solved} "
+                f"steps={delta_report.adversarial.steps}"
+            )
+            print(
+                f"  success_dropped={delta_report.success_dropped} "
+                f"step_delta={delta_report.step_delta}"
+            )
+        else:
+            eval_report = agent_eval.run_agent_eval(
+                args.challenge_dir,
+                args.profile,
+                base_url=args.base_url,
+            )
+            result = report_writer.serialize_agent_eval(eval_report)
+            _write_cli_report(args, "eval-agent", subject, "passed", result)
+            print(
+                f"Agent eval for {args.challenge_dir} [{args.profile}]: "
+                f"solved={eval_report.solved} steps={eval_report.steps}"
+            )
+            for note in eval_report.notes:
+                print(f"  {note}")
+        return 0
+
+    if args.command == "serve":
+        from . import dashboard_server
+        from .competition_service import CompetitionService
+
+        service = _build_serve_service(args)
+        auth = _build_serve_auth(args)
+        if args.public_token is None:
+            print(f"public scoreboard token: {auth.public_token}")
+        server = dashboard_server.serve(args.host, args.port, service=service, auth=auth)
+        print(f"Serving CTFGenerator dashboard on http://{args.host}:{args.port}")
+        try:
+            server.serve_forever()
+        except KeyboardInterrupt:
+            pass
+        finally:
+            server.server_close()
         return 0
 
     parser.error(f"unknown command: {args.command}")
@@ -860,3 +1022,81 @@ def _serialize_scenario_report(report) -> dict:
             else None
         ),
     }
+
+
+# --- eval-agent / serve helpers (Phase 5 platform commands) ------------------
+#
+# Appended, standalone helpers used only by the eval-agent/serve dispatch
+# branches above. The service/auth builders are split out of the `serve`
+# dispatch branch specifically so they're unit-testable without opening a
+# real socket (constructing a CompetitionService/AuthConfig touches only
+# JSON files / in-memory defaults, never Docker/network/sockets).
+
+
+def _default_serve_config():
+    """A permissive placeholder ``CompetitionConfig`` for ``serve`` when
+    ``--config`` is omitted: a single wide-open, always-scoring window
+    starting now and running for a year."""
+    import datetime as _datetime
+
+    from .models import CompetitionConfig
+
+    now = _datetime.datetime.now(_datetime.timezone.utc)
+    return CompetitionConfig(
+        competition_id="ctfgen-live",
+        name="CTFGenerator Live",
+        start_time=now,
+        end_time=now + _datetime.timedelta(days=365),
+    )
+
+
+def _build_serve_service(args: argparse.Namespace):
+    """Build the ``CompetitionService`` for ``serve`` from CLI args.
+
+    Store: ``JsonlEventStore`` (persisted) when ``--events-file`` is given,
+    else a volatile ``InMemoryEventStore``. Catalog: parsed from
+    ``--challenges`` (reusing ``scoreboard.load_challenges`` for the
+    ``ChallengeScoringConfig`` shape, wrapped in bare ``ChallengeMeta``s -- no
+    separate title/category/mode JSON shape is introduced) when given, else
+    an empty catalog. Config: parsed from ``--config`` (reusing
+    ``scoreboard.load_competition_config``) when given, else
+    :func:`_default_serve_config`.
+    """
+    from . import events
+    from .competition_service import ChallengeCatalog, ChallengeMeta, CompetitionService
+    from .scoreboard import load_challenges, load_competition_config
+
+    events_file = getattr(args, "events_file", None)
+    store = (
+        events.JsonlEventStore(events_file)
+        if events_file is not None
+        else events.InMemoryEventStore()
+    )
+
+    challenges_path = getattr(args, "challenges", None)
+    if challenges_path is not None:
+        scoring_configs = load_challenges(challenges_path)
+        catalog = ChallengeCatalog.from_entries(
+            {
+                challenge_id: ChallengeMeta(scoring=scoring)
+                for challenge_id, scoring in scoring_configs.items()
+            }
+        )
+    else:
+        catalog = ChallengeCatalog()
+
+    config_path = getattr(args, "config", None)
+    config = load_competition_config(config_path) if config_path is not None else _default_serve_config()
+
+    return CompetitionService(store=store, catalog=catalog, config=config)
+
+
+def _build_serve_auth(args: argparse.Namespace):
+    """Build the dashboard ``AuthConfig`` for ``serve`` from CLI args."""
+    from .dashboard_server import AuthConfig
+
+    return AuthConfig.create(
+        admin_username=args.admin_user,
+        password=args.admin_password,
+        public_token=getattr(args, "public_token", None),
+    )
