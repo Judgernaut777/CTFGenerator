@@ -1,15 +1,66 @@
 from __future__ import annotations
 
 import json
+import re
 from pathlib import Path
 from typing import Protocol
 
-from .models import AIResistance, ChallengeSpec, DynamicVariation
+from .models import (
+    AIResistance,
+    ChallengeSpec,
+    DynamicVariation,
+    ResponseSpec,
+    ScenarioSpec,
+    TriggerSpec,
+)
 
-# Challenge families the generator can render. Kept here (not imported from cli)
-# so the spec layer has no dependency on the CLI.
-FAMILIES = ["web_business_logic_tenant_export"]
+# Challenge families the generator can render. NOTE: ``families`` (the
+# registry module) imports ``_FAMILY_BRIEF`` from this module, so this module
+# must not import ``families`` at module scope (it would be circular) --
+# functions below that need the registry import it lazily instead.
+#
+# ``FAMILIES`` is kept as a module-level name (aliased to the registry's
+# family list at call time via a lazy property-like function below) for any
+# importer that still expects a plain list; validate_spec itself now checks
+# against the live registry so newly-registered families are recognized
+# without editing this module.
 DIFFICULTIES = ["easy", "medium", "hard"]
+
+_CVE_ID_RE = re.compile(r"^CVE-\d{4}-\d{4,}$")
+
+
+def _families_module():
+    """Lazy import of the families registry (avoids a circular import)."""
+    from . import families
+
+    return families
+
+
+class _FamilyNames:
+    """Mirrors ``families.family_names()`` on every access.
+
+    Kept as the module-level ``FAMILIES`` name for backward compatibility
+    with importers that used the old static list, while staying in sync
+    with the live registry (looked up lazily to avoid a circular import).
+    """
+
+    def __iter__(self):
+        return iter(_families_module().family_names())
+
+    def __contains__(self, item):
+        return item in _families_module().family_names()
+
+    def __len__(self):
+        return len(_families_module().family_names())
+
+    def __getitem__(self, index):
+        return _families_module().family_names()[index]
+
+    def __repr__(self):
+        return repr(_families_module().family_names())
+
+
+FAMILIES = _FamilyNames()
 
 
 class SpecBackend(Protocol):
@@ -48,6 +99,21 @@ def default_spec(seed: str, title: str, difficulty: str, family: str) -> Challen
         learning_objectives=list(_DEFAULT_OBJECTIVES),
         checkpoints=list(_DEFAULT_CHECKPOINTS),
     )
+
+
+def default_spec_for_family(seed: str, title: str, difficulty: str, family: str) -> ChallengeSpec:
+    """Like ``default_spec`` but routes through a family's own builder if set.
+
+    Falls back to ``default_spec`` when the family is unregistered or has no
+    ``default_spec_builder`` configured, so unfamiliar/legacy families keep
+    today's behavior unchanged.
+    """
+    families = _families_module()
+    if families.is_registered(family):
+        builder = families.get(family).default_spec_builder
+        if builder is not None:
+            return builder(seed=seed, title=title, difficulty=difficulty, family=family)
+    return default_spec(seed=seed, title=title, difficulty=difficulty, family=family)
 
 
 class DeterministicSpecBackend:
@@ -91,7 +157,11 @@ OPENAI_DEFAULT_MODEL = "gpt-5.1"
 
 def build_prompt(family: str, difficulty: str) -> tuple[str, str]:
     """Return (system, user) prompts. Pure, so the wording is unit-testable."""
-    brief = _FAMILY_BRIEF.get(family, "A web security challenge.")
+    families = _families_module()
+    if families.is_registered(family):
+        brief = families.get(family).llm_brief
+    else:
+        brief = _FAMILY_BRIEF.get(family, "A web security challenge.")
     system = (
         "You design capture-the-flag challenge specifications. You output only "
         "structured pedagogical metadata for an already-defined challenge family: "
@@ -256,9 +326,11 @@ def get_backend(name: str, model: str | None = None) -> SpecBackend:
 def validate_spec(spec: ChallengeSpec) -> list[str]:
     """Structural checks a spec must pass before it is rendered into code."""
     errors: list[str] = []
+    families = _families_module()
     if not spec.title.strip():
         errors.append("title is empty")
-    if spec.family not in FAMILIES:
+    family_known = spec.family in families.family_names()
+    if not family_known:
         errors.append(f"unknown family: {spec.family}")
     if spec.difficulty not in DIFFICULTIES:
         errors.append(f"unknown difficulty: {spec.difficulty}")
@@ -272,11 +344,20 @@ def validate_spec(spec: ChallengeSpec) -> list[str]:
             f"spec declares {len(spec.checkpoints)} checkpoints but "
             f"ai_resistance.min_solver_steps requires at least {min_steps}"
         )
+    for cve_ref in spec.cve_refs:
+        if not _CVE_ID_RE.match(cve_ref):
+            errors.append(f"invalid cve_ref: {cve_ref}")
+    # Only check mode-against-family once the family itself is known; an
+    # unknown family is already flagged above and has no ``modes`` to check.
+    if family_known and spec.mode not in families.get(spec.family).modes:
+        errors.append(
+            f"mode {spec.mode!r} is not valid for family {spec.family!r}"
+        )
     return errors
 
 
 def spec_to_dict(spec: ChallengeSpec) -> dict:
-    return {
+    data: dict = {
         "title": spec.title,
         "category": spec.category,
         "difficulty": spec.difficulty,
@@ -287,11 +368,49 @@ def spec_to_dict(spec: ChallengeSpec) -> dict:
         "ai_resistance": vars(spec.ai_resistance),
         "dynamic_variation": vars(spec.dynamic_variation),
     }
+    # Conditionally-emitted keys (new spec fields): only appear when set to a
+    # non-default value, so a spec without them round-trips to byte-identical
+    # dict/JSON as before these fields existed.
+    if spec.cve_refs:
+        data["cve_refs"] = list(spec.cve_refs)
+    if spec.cve_content_hash is not None:
+        data["cve_content_hash"] = spec.cve_content_hash
+    if spec.mode != "red":
+        data["mode"] = spec.mode
+    if not spec.scenario.is_default():
+        data["scenario"] = spec.scenario.to_mapping()
+    return data
 
 
 def spec_from_dict(data: dict) -> ChallengeSpec:
     ai = data.get("ai_resistance") or {}
     variation = data.get("dynamic_variation") or {}
+    scenario_data = data.get("scenario")
+    if isinstance(scenario_data, dict):
+        scenario = ScenarioSpec(
+            enabled=bool(scenario_data.get("enabled", False)),
+            triggers=[
+                TriggerSpec(
+                    trigger_id=str(t.get("trigger_id", "")),
+                    description=str(t.get("description", "")),
+                    condition=str(t.get("condition", "")),
+                )
+                for t in scenario_data.get("triggers", [])
+                if isinstance(t, dict)
+            ],
+            responses=[
+                ResponseSpec(
+                    response_id=str(r.get("response_id", "")),
+                    description=str(r.get("description", "")),
+                    action=str(r.get("action", "")),
+                    payload={str(k): str(v) for k, v in (r.get("payload") or {}).items()},
+                )
+                for r in scenario_data.get("responses", [])
+                if isinstance(r, dict)
+            ],
+        )
+    else:
+        scenario = ScenarioSpec()
     return ChallengeSpec(
         title=str(data.get("title", "")),
         category=str(data.get("category", "web")),
@@ -304,6 +423,12 @@ def spec_from_dict(data: dict) -> ChallengeSpec:
         dynamic_variation=(
             DynamicVariation(**variation) if isinstance(variation, dict) else DynamicVariation()
         ),
+        cve_refs=[str(c) for c in data.get("cve_refs", [])],
+        cve_content_hash=(
+            str(data["cve_content_hash"]) if data.get("cve_content_hash") is not None else None
+        ),
+        mode=str(data.get("mode", "red")),
+        scenario=scenario,
     )
 
 
