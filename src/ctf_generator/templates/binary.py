@@ -63,8 +63,17 @@ REQUIRED_FILES: tuple[str, ...] = (
     "private/variant.json",
     "private/checkpoints.yaml",
     "private/solver.py",
+    "private/runtime.json",
     "tests/healthcheck.py",
 )
+
+# The raw-TCP vuln service is not HTTP-on-8080, so validate-runtime reads this
+# manifest instead of injecting --base-url. Empty args => invoke the generated
+# solver/healthcheck with their own (per-instance-correct) --host/--port
+# defaults.
+_RUNTIME_MANIFEST = json.dumps(
+    {"health": {"args": []}, "solve": {"args": []}}, indent=2
+) + "\n"
 
 
 # --- Variant -----------------------------------------------------------------
@@ -198,6 +207,7 @@ def render(
             {"checkpoints": [{"name": name, "required": True} for name in spec.checkpoints]}
         ),
         "private/solver.py": _solver(v),
+        "private/runtime.json": _RUNTIME_MANIFEST,
         "tests/healthcheck.py": _healthcheck(v),
     }
     return files
