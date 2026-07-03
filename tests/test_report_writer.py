@@ -10,8 +10,10 @@ from pathlib import Path
 from unittest import mock
 
 from ctf_generator import __version__, report_writer
+from ctf_generator.models import ChallengeScoringConfig, CompetitionConfig, SolveEvent
 from ctf_generator.replay_validator import ReplayReport
 from ctf_generator.runtime_validator import RuntimeValidationReport
+from ctf_generator.scoreboard import compute_scoreboard
 from ctf_generator.sibling_validator import SiblingValidationReport
 from ctf_generator.validator import ValidationReport
 
@@ -177,6 +179,52 @@ class SerializeTests(unittest.TestCase):
         self.assertIsNone(empty["sibling_a"])
         self.assertIsNone(empty["sibling_b"])
         json.dumps(empty)  # must not raise
+
+
+class SerializeScoreboardTests(unittest.TestCase):
+    def test_serialize_scoreboard_is_json_safe(self) -> None:
+        config = CompetitionConfig(
+            competition_id="comp-1",
+            name="Test Comp",
+            start_time=datetime(2026, 7, 1, tzinfo=timezone.utc),
+            end_time=datetime(2026, 7, 2, tzinfo=timezone.utc),
+        )
+        challenges = {
+            "chal-1": ChallengeScoringConfig(challenge_id="chal-1", initial_value=500),
+        }
+        events = [
+            SolveEvent(
+                team_id="team-a",
+                challenge_id="chal-1",
+                solved_at=datetime(2026, 7, 1, 12, 0, tzinfo=timezone.utc),
+                submission_id="sub-1",
+            ),
+            SolveEvent(
+                team_id="team-b",
+                challenge_id="chal-1",
+                solved_at=datetime(2026, 7, 1, 13, 0, tzinfo=timezone.utc),
+                submission_id="sub-2",
+            ),
+        ]
+
+        snapshot = compute_scoreboard(events, challenges, config)
+        result = report_writer.serialize_scoreboard(snapshot)
+
+        self.assertEqual(result["competition_id"], "comp-1")
+        self.assertEqual(result["generated_at"], config.end_time.isoformat())
+        self.assertTrue(result["frozen"] is False)
+        self.assertEqual(len(result["entries"]), 2)
+        team_ids = {entry["team_id"] for entry in result["entries"]}
+        self.assertEqual(team_ids, {"team-a", "team-b"})
+        for entry in result["entries"]:
+            self.assertIn("score", entry)
+            self.assertIn("solve_count", entry)
+            self.assertIn("rank", entry)
+            self.assertIn("last_solve_at", entry)
+
+        # Full JSON round-trip must succeed, including any None last_solve_at.
+        round_tripped = json.loads(json.dumps(result))
+        self.assertEqual(round_tripped, result)
 
 
 class StatusOfTests(unittest.TestCase):

@@ -18,9 +18,11 @@ lazily, and ``main`` runs it over stdio.
 
 from __future__ import annotations
 
+import dataclasses
+import json
 from pathlib import Path
 
-from . import report_index, spec_generator
+from . import families, report_index, spec_generator
 from .generator import create_challenge as _create_challenge
 from .score import score_challenge as _score_challenge
 from .validator import validate_challenge as _validate_challenge
@@ -70,12 +72,20 @@ def build_spec(
     title: str = "",
     learning_objectives: list[str] | None = None,
     checkpoints: list[str] | None = None,
+    mode: str = "red",
+    cve_refs: list[str] | None = None,
 ) -> dict:
     """Assemble and validate a challenge spec from host-supplied metadata.
 
     The host model provides the pedagogical fields; this merges them with the
     fixed, safety-relevant defaults and validates the result. If no metadata is
     supplied, the deterministic built-in spec for the family is used.
+
+    ``mode`` and ``cve_refs`` are optional and default to today's plain
+    behavior ("red" mode, no CVE grounding) so existing callers are
+    unaffected. When supplied, they are validated by
+    ``spec_generator.validate_spec`` -- ``mode`` must be one of the family's
+    declared modes and each ``cve_refs`` entry must match ``CVE-YYYY-NNNN+``.
     """
     if family not in spec_generator.FAMILIES:
         return {"ok": False, "errors": [f"unknown family: {family}"]}
@@ -99,6 +109,9 @@ def build_spec(
             seed=seed, title=title or "Invoice Drift", difficulty=difficulty, family=family
         )
 
+    if mode != "red" or cve_refs:
+        spec = dataclasses.replace(spec, mode=mode, cve_refs=list(cve_refs or []))
+
     errors = spec_generator.validate_spec(spec)
     return {
         "ok": not errors,
@@ -113,9 +126,29 @@ def validate_spec(spec: dict) -> dict:
     return {"ok": not errors, "errors": errors}
 
 
-def create_from_spec(spec: dict, output_dir: str, force: bool = False) -> dict:
-    """Render a challenge folder from a spec dict. Filesystem-only, no Docker."""
+def create_from_spec(
+    spec: dict,
+    output_dir: str,
+    force: bool = False,
+    mode: str | None = None,
+    cve_refs: list[str] | None = None,
+) -> dict:
+    """Render a challenge folder from a spec dict. Filesystem-only, no Docker.
+
+    ``mode``/``cve_refs`` are optional overrides applied on top of whatever
+    the ``spec`` dict already carries (it may already have its own "mode"/
+    "cve_refs" keys, e.g. from ``build_spec``). Left as ``None`` (the
+    default), the spec dict is used exactly as given -- existing callers are
+    unaffected. Either way the result is validated by
+    ``spec_generator.validate_spec`` before anything is rendered.
+    """
     parsed = spec_generator.spec_from_dict(spec)
+    if mode is not None or cve_refs is not None:
+        parsed = dataclasses.replace(
+            parsed,
+            mode=mode if mode is not None else parsed.mode,
+            cve_refs=list(cve_refs) if cve_refs is not None else parsed.cve_refs,
+        )
     errors = spec_generator.validate_spec(parsed)
     if errors:
         return {"ok": False, "errors": errors}
@@ -141,12 +174,36 @@ def create_challenge(
     difficulty: str = "medium",
     family: str = spec_generator.FAMILIES[0],
     force: bool = False,
+    mode: str = "red",
+    cve_refs: list[str] | None = None,
 ) -> dict:
-    """Render a challenge folder deterministically from a seed. No Docker."""
+    """Render a challenge folder deterministically from a seed. No Docker.
+
+    ``mode``/``cve_refs`` default to today's plain behavior, so calls that
+    omit them render byte-identically to before these params existed: the
+    server falls back to the exact same code path (``spec=None``) that
+    ``generator.create_challenge`` already used internally. Only when a
+    non-default ``mode`` or a non-empty ``cve_refs`` is supplied is a spec
+    built up front (and validated) to carry them through.
+    """
     if family not in spec_generator.FAMILIES:
         return {"ok": False, "errors": [f"unknown family: {family}"]}
     if difficulty not in spec_generator.DIFFICULTIES:
         return {"ok": False, "errors": [f"unknown difficulty: {difficulty}"]}
+
+    spec = None
+    if mode != "red" or cve_refs:
+        spec = dataclasses.replace(
+            spec_generator.default_spec(
+                seed=seed, title=title, difficulty=difficulty, family=family
+            ),
+            mode=mode,
+            cve_refs=list(cve_refs or []),
+        )
+        errors = spec_generator.validate_spec(spec)
+        if errors:
+            return {"ok": False, "errors": errors}
+
     try:
         path = _create_challenge(
             output_dir=Path(output_dir),
@@ -155,6 +212,7 @@ def create_challenge(
             difficulty=difficulty,
             family=family,
             force=force,
+            spec=spec,
         )
     except FileExistsError as exc:
         return {"ok": False, "errors": [str(exc)]}
@@ -182,6 +240,69 @@ def report_index_table(report_dir: str) -> dict:
     return {"table": report_index.render_table(index)}
 
 
+def family_info(name: str) -> dict:
+    """Return read-only registry metadata for a single challenge family.
+
+    Pure lookup against the in-process family registry -- no rendering, no
+    filesystem access.
+    """
+    if not families.is_registered(name):
+        return {"ok": False, "errors": [f"unknown family: {name}"]}
+    fam = families.get(name)
+    return {
+        "ok": True,
+        "name": fam.name,
+        "category": fam.category,
+        "modes": list(fam.modes),
+        "difficulties": list(fam.difficulties),
+        "cve_driven": fam.cve_driven,
+        "llm_brief": fam.llm_brief,
+        "required_files": list(fam.required_files),
+    }
+
+
+def list_cves(category: str | None = None, keyword: str | None = None, limit: int = 10) -> dict:
+    """List curated CVE records from the bundled offline snapshot only.
+
+    Always uses ``cve_source.get_source("snapshot")`` -- the deterministic,
+    offline fixture backend. There is deliberately no way to select an
+    ``nvd`` (network-fetching) or other source over MCP: this tool stays
+    read-only and side-effect-free regardless of caller input.
+    """
+    from .cve_source import get_source
+
+    source = get_source("snapshot")
+    records = source.fetch(category=category, keyword=keyword, limit=limit)
+    return {"cves": [record.to_mapping() for record in records]}
+
+
+def scenario_timeline_summary(challenge_dir: str) -> dict:
+    """Summarize a generated challenge's private/scenario_timeline.json.
+
+    Read-only: parses the JSON file already written by ``create_challenge``/
+    ``create_from_spec`` for scenario-enabled specs. Returns a compact
+    summary (trigger/response counts, enabled flag) with no code execution.
+    Returns ``present: False`` when the file does not exist (e.g. a non-
+    scenario challenge).
+    """
+    path = Path(challenge_dir) / "private" / "scenario_timeline.json"
+    if not path.exists():
+        return {"ok": True, "present": False}
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError) as exc:
+        return {"ok": False, "errors": [str(exc)]}
+    triggers = data.get("triggers") or []
+    responses = data.get("responses") or []
+    return {
+        "ok": True,
+        "present": True,
+        "enabled": bool(data.get("enabled", False)),
+        "trigger_count": len(triggers),
+        "response_count": len(responses),
+    }
+
+
 # Ordered so build_server and the docs share one source of truth.
 TOOLS = [
     list_families,
@@ -193,6 +314,9 @@ TOOLS = [
     validate_challenge,
     score_challenge,
     report_index_table,
+    family_info,
+    list_cves,
+    scenario_timeline_summary,
 ]
 
 

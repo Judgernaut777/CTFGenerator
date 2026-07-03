@@ -5,7 +5,7 @@ import json
 import sys
 from pathlib import Path
 
-from . import __version__, report_index, report_writer, spec_generator
+from . import __version__, families, report_index, report_writer, spec_generator
 from .generator import create_challenge
 from .replay_validator import cross_replay
 from .runtime_validator import validate_runtime
@@ -13,9 +13,17 @@ from .score import score_challenge
 from .sibling_validator import validate_siblings
 from .validator import validate_challenge
 
-# Challenge families the generator can produce. Single source of truth for the
-# argparse choices below and the `list-families` discovery command.
-FAMILIES = ["web_business_logic_tenant_export"]
+# Challenge families the generator can produce. Sourced from the live family
+# registry (`families.family_names()`) so newly-registered families show up
+# here automatically; kept as a module-level alias so existing importers
+# (e.g. `from ctf_generator.cli import FAMILIES`) keep working unchanged.
+FAMILIES = families.family_names()
+
+# The historical default family for `create`/`spec`/`validate-siblings` when
+# --family is omitted. Kept as an explicit constant (rather than
+# ``FAMILIES[0]``) so widening `FAMILIES` to the full registry never changes
+# default CLI behavior for existing callers/tests.
+_DEFAULT_FAMILY = "web_business_logic_tenant_export"
 
 
 def _write_cli_report(
@@ -63,7 +71,7 @@ def build_parser() -> argparse.ArgumentParser:
     create.add_argument("--difficulty", default="medium", choices=["easy", "medium", "hard"])
     create.add_argument(
         "--family",
-        default=FAMILIES[0],
+        default=_DEFAULT_FAMILY,
         choices=FAMILIES,
     )
     create.add_argument("--force", action="store_true", help="Overwrite an existing output directory")
@@ -72,6 +80,18 @@ def build_parser() -> argparse.ArgumentParser:
         type=Path,
         default=None,
         help="Render from a challenge spec JSON file (produced by `ctfgen spec`)",
+    )
+    create.add_argument(
+        "--mode",
+        default="red",
+        help="Challenge mode (default: red)",
+    )
+    create.add_argument(
+        "--cve-ref",
+        dest="cve_refs",
+        action="append",
+        default=[],
+        help="CVE id (e.g. CVE-2021-44228) this challenge is grounded in (repeatable)",
     )
 
     spec = subparsers.add_parser(
@@ -82,7 +102,19 @@ def build_parser() -> argparse.ArgumentParser:
     spec.add_argument("--seed", default="demo-001")
     spec.add_argument("--title", default="Invoice Drift")
     spec.add_argument("--difficulty", default="medium", choices=["easy", "medium", "hard"])
-    spec.add_argument("--family", default=FAMILIES[0], choices=FAMILIES)
+    spec.add_argument("--family", default=_DEFAULT_FAMILY, choices=FAMILIES)
+    spec.add_argument(
+        "--mode",
+        default="red",
+        help="Challenge mode (default: red)",
+    )
+    spec.add_argument(
+        "--cve-ref",
+        dest="cve_refs",
+        action="append",
+        default=[],
+        help="CVE id (e.g. CVE-2021-44228) this challenge is grounded in (repeatable)",
+    )
     spec.add_argument(
         "--backend",
         default="deterministic",
@@ -136,7 +168,7 @@ def build_parser() -> argparse.ArgumentParser:
     siblings.add_argument("--difficulty", default="medium", choices=["easy", "medium", "hard"])
     siblings.add_argument(
         "--family",
-        default=FAMILIES[0],
+        default=_DEFAULT_FAMILY,
         choices=FAMILIES,
     )
     siblings.add_argument("--force", action="store_true")
@@ -217,6 +249,124 @@ def build_parser() -> argparse.ArgumentParser:
         help="Write a self-contained static HTML dashboard to this file",
     )
 
+    # --- CVE / scenario / scoreboard platform commands (Phase 4) ------------
+
+    cve_search_parser = subparsers.add_parser(
+        "cve-search",
+        help="Search CVE records to ground a challenge in",
+    )
+    cve_search_parser.add_argument("--category", default=None, choices=list(_cve_categories()))
+    cve_search_parser.add_argument("--min-cvss", type=float, default=0.0)
+    cve_search_parser.add_argument("--keyword", default=None)
+    cve_search_parser.add_argument("--limit", type=int, default=20)
+    cve_search_parser.add_argument(
+        "--source", default="snapshot", choices=["snapshot", "nvd"]
+    )
+    cve_search_parser.add_argument("--cache-dir", type=Path, default=None)
+
+    cve_show_parser = subparsers.add_parser(
+        "cve-show",
+        help="Show a single CVE record",
+    )
+    cve_show_parser.add_argument("cve_id")
+    cve_show_parser.add_argument(
+        "--source", default="snapshot", choices=["snapshot", "nvd"]
+    )
+    cve_show_parser.add_argument("--cache-dir", type=Path, default=None)
+
+    subparsers.add_parser(
+        "cve-categories",
+        help="List the CVE category taxonomy",
+    )
+
+    create_from_cve_parser = subparsers.add_parser(
+        "create-from-cve",
+        help="Generate a challenge environment grounded in a real CVE",
+    )
+    create_from_cve_parser.add_argument("--output", "-o", required=True, type=Path)
+    create_from_cve_parser.add_argument(
+        "cve_id", nargs="?", default=None, help="CVE id (or use --cve-id)"
+    )
+    create_from_cve_parser.add_argument("--cve-id", dest="cve_id_flag", default=None)
+    create_from_cve_parser.add_argument("--seed", default="demo-001", help="Base seed")
+    create_from_cve_parser.add_argument(
+        "--difficulty", default=None, choices=["easy", "medium", "hard"]
+    )
+    create_from_cve_parser.add_argument("--family", default=None, choices=FAMILIES)
+    create_from_cve_parser.add_argument("--title", default=None)
+    create_from_cve_parser.add_argument("--force", action="store_true")
+    create_from_cve_parser.add_argument(
+        "--source", default="snapshot", choices=["snapshot", "nvd"]
+    )
+    create_from_cve_parser.add_argument(
+        "--report-dir",
+        type=Path,
+        default=None,
+        help="Write a structured JSON report artifact to this directory",
+    )
+
+    run_scenario_parser = subparsers.add_parser(
+        "run-scenario",
+        help="Run a challenge's scripted scenario timeline offline (deterministic)",
+    )
+    run_scenario_parser.add_argument("challenge_dir", type=Path)
+    run_scenario_parser.add_argument(
+        "--max-ticks",
+        type=int,
+        default=None,
+        help="Number of ticks to run (default: scenario engine's own default)",
+    )
+    run_scenario_parser.add_argument(
+        "--json", action="store_true", help="Emit the scenario report as JSON"
+    )
+    run_scenario_parser.add_argument(
+        "--report-dir",
+        type=Path,
+        default=None,
+        help="Write a structured JSON report artifact to this directory",
+    )
+
+    subparsers.add_parser(
+        "list-scoring-engines",
+        help="List registered competition scoring engines",
+    )
+
+    scoreboard_parser = subparsers.add_parser(
+        "scoreboard",
+        help="Compute a competition scoreboard from JSON fixtures",
+    )
+    scoreboard_parser.add_argument(
+        "--events", required=True, type=Path, help="JSON array of SolveEvent records"
+    )
+    scoreboard_parser.add_argument(
+        "--challenges",
+        required=True,
+        type=Path,
+        help="JSON array of ChallengeScoringConfig records",
+    )
+    scoreboard_parser.add_argument(
+        "--config", required=True, type=Path, help="JSON CompetitionConfig object"
+    )
+    scoreboard_parser.add_argument(
+        "--engine",
+        default=None,
+        help="Scoring engine name (default: time_decay)",
+    )
+    scoreboard_parser.add_argument(
+        "--as-of",
+        default=None,
+        help="ISO-8601 timestamp; compute a frozen snapshot as of this moment",
+    )
+    scoreboard_parser.add_argument(
+        "--json", action="store_true", help="Emit the scoreboard as JSON"
+    )
+    scoreboard_parser.add_argument(
+        "--report-dir",
+        type=Path,
+        default=None,
+        help="Write a structured JSON report artifact to this directory",
+    )
+
     return parser
 
 
@@ -247,6 +397,24 @@ def main(argv: list[str] | None = None) -> int:
                 for error in errors:
                     print(f"- {error}")
                 return 1
+        # --mode/--cve-ref only take effect when no --from-spec was given
+        # (a loaded spec is already the full source of truth) and only build
+        # a spec at all when either is actually used, so a bare `create`
+        # keeps today's exact behavior (spec stays None, create_challenge
+        # builds its own default spec internally).
+        if spec is None and (args.mode != "red" or args.cve_refs):
+            import dataclasses
+
+            spec = dataclasses.replace(
+                spec_generator.default_spec(
+                    seed=args.seed,
+                    title=args.title,
+                    difficulty=args.difficulty,
+                    family=args.family,
+                ),
+                mode=args.mode,
+                cve_refs=list(args.cve_refs),
+            )
         try:
             result = create_challenge(
                 output_dir=args.output,
@@ -275,6 +443,14 @@ def main(argv: list[str] | None = None) -> int:
         except Exception as exc:  # noqa: BLE001 - surface backend/LLM errors cleanly
             print(f"Spec generation failed: {exc}", file=sys.stderr)
             return 1
+        # --mode/--cve-ref only override when actually used, so a bare `spec`
+        # keeps today's exact output (mode="red", cve_refs=[]).
+        if args.mode != "red" or args.cve_refs:
+            import dataclasses
+
+            generated = dataclasses.replace(
+                generated, mode=args.mode, cve_refs=list(args.cve_refs)
+            )
         errors = spec_generator.validate_spec(generated)
         if errors:
             print("Spec validation failed:")
@@ -424,5 +600,263 @@ def main(argv: list[str] | None = None) -> int:
                 print(f"warning: failed to write HTML dashboard: {exc}", file=sys.stderr)
         return 0
 
+    if args.command == "cve-search":
+        source = _build_cve_source(args.source, args.cache_dir)
+        records = source.fetch(
+            category=args.category,
+            min_cvss=args.min_cvss,
+            keyword=args.keyword,
+            limit=args.limit,
+        )
+        for record in records:
+            print(f"{record.cve_id}  [{record.cvss_severity} {record.cvss_score}]  {record.category}")
+            print(f"    {record.description}")
+        if not records:
+            print("No matching CVEs found")
+        return 0
+
+    if args.command == "cve-show":
+        source = _build_cve_source(args.source, args.cache_dir)
+        record = source.get(args.cve_id)
+        if record is None:
+            print(f"unknown CVE id: {args.cve_id}", file=sys.stderr)
+            return 1
+        for key, value in record.to_mapping().items():
+            print(f"{key}: {value}")
+        return 0
+
+    if args.command == "cve-categories":
+        for category in _cve_categories():
+            print(category)
+        return 0
+
+    if args.command == "create-from-cve":
+        cve_id = args.cve_id_flag or args.cve_id
+        if not cve_id:
+            parser.error("create-from-cve requires a CVE id (positional or --cve-id)")
+        from .generator import create_challenge_from_cve
+
+        source = _build_cve_source(args.source, cache_dir=None)
+        try:
+            result = create_challenge_from_cve(
+                output_dir=args.output,
+                cve_id=cve_id,
+                base_seed=args.seed,
+                difficulty=args.difficulty,
+                family=args.family,
+                title=args.title,
+                force=args.force,
+                source=source,
+            )
+        except (FileExistsError, ValueError) as exc:
+            print(str(exc), file=sys.stderr)
+            return 1
+        subject = {"type": "challenge", "identifier": cve_id}
+        result_payload = {"output": str(result), "cve_id": cve_id}
+        _write_cli_report(args, "create-from-cve", subject, "passed", result_payload)
+        print(f"Generated challenge from {cve_id} at {result}")
+        return 0
+
+    if args.command == "run-scenario":
+        report = _run_scenario_command(args.challenge_dir, max_ticks=args.max_ticks)
+        subject = {"type": "challenge", "identifier": args.challenge_dir.name}
+        result = _serialize_scenario_report(report)
+        _write_cli_report(args, "run-scenario", subject, "passed", result)
+        if args.json:
+            print(json.dumps(result, indent=2, sort_keys=True))
+        else:
+            print(f"Ran scenario for {args.challenge_dir} ({report.ticks_run} ticks)")
+            for event in report.timeline:
+                print(
+                    f"- tick {event.tick} [{event.source}] {event.kind} "
+                    f"-> {event.target or '(none)'} {event.payload}"
+                )
+            print(f"Triggers fired: {report.triggers_fired}")
+            print(f"Attacker moves blocked: {report.attacker_blocked}")
+        return 0
+
+    if args.command == "list-scoring-engines":
+        from .scoring_engine import list_scoring_engines
+
+        default_engine = "time_decay"
+        for name in list_scoring_engines():
+            marker = " (default)" if name == default_engine else ""
+            print(f"{name}{marker}")
+        return 0
+
+    if args.command == "scoreboard":
+        import datetime as _datetime
+
+        from . import scoreboard as scoreboard_module
+        from .scoring_engine import get_scoring_engine
+
+        try:
+            events = scoreboard_module.load_events(args.events)
+            challenges = scoreboard_module.load_challenges(args.challenges)
+            config = scoreboard_module.load_competition_config(args.config)
+        except (OSError, json.JSONDecodeError, KeyError, ValueError) as exc:
+            print(f"Could not load scoreboard inputs: {exc}", file=sys.stderr)
+            return 1
+
+        engine_name = args.engine or "time_decay"
+        try:
+            engine = get_scoring_engine(engine_name)
+        except KeyError as exc:
+            print(str(exc), file=sys.stderr)
+            return 1
+
+        as_of = _datetime.datetime.fromisoformat(args.as_of) if args.as_of else None
+        snapshot = scoreboard_module.compute_scoreboard(
+            events, challenges, config, engine=engine, as_of=as_of
+        )
+        result = report_writer.serialize_scoreboard(snapshot)
+        subject = {"type": "scoreboard", "identifier": config.competition_id}
+        _write_cli_report(args, "scoreboard", subject, "passed", result)
+        if args.json:
+            print(json.dumps(result, indent=2, sort_keys=True))
+        else:
+            print(f"Scoreboard for {config.competition_id} (frozen={snapshot.frozen})")
+            for entry in snapshot.entries:
+                print(
+                    f"{entry.rank}. {entry.team_id} - {entry.score} pts "
+                    f"({entry.solve_count} solves)"
+                )
+        return 0
+
     parser.error(f"unknown command: {args.command}")
     return 2
+
+
+# --- CVE / scenario helpers (Phase 4 platform commands) -----------------------
+#
+# Appended, standalone helpers used only by the cve-*/create-from-cve/
+# run-scenario dispatch branches above. Kept as plain functions (not methods)
+# to match this module's existing style.
+
+
+def _cve_categories() -> tuple[str, ...]:
+    """Lazy import of ``cve_source.CATEGORIES`` (avoids a module-load-time
+    dependency on cve_source for callers that never touch CVE commands)."""
+    from . import cve_source
+
+    return cve_source.CATEGORIES
+
+
+def _build_cve_source(source_name: str, cache_dir: Path | None):
+    """Build a ``CveSource`` for ``source_name``, optionally TTL-cached to disk."""
+    from . import cve_source
+
+    source = cve_source.get_source(source_name)
+    if cache_dir is not None:
+        source = cve_source.CachingCveSource(source, cache_dir)
+    return source
+
+
+def _scenario_spec_from_mapping(data: dict):
+    """Parse a ``private/scenario_timeline.json``-shaped mapping into a
+    ``models.ScenarioSpec``.
+
+    Mirrors the inline scenario-parsing block in
+    ``spec_generator.spec_from_dict`` (which parses a ``ChallengeSpec``'s
+    nested ``"scenario"`` key), but operates directly on the flat mapping
+    written by ``generator.create_challenge`` at
+    ``private/scenario_timeline.json`` (i.e. ``ScenarioSpec.to_mapping()``
+    itself, not a full spec). Duplicated rather than imported/refactored per
+    this project's strict per-file ownership rules.
+    """
+    from .models import ResponseSpec, ScenarioSpec, TriggerSpec
+
+    return ScenarioSpec(
+        enabled=bool(data.get("enabled", False)),
+        triggers=[
+            TriggerSpec(
+                trigger_id=str(t.get("trigger_id", "")),
+                description=str(t.get("description", "")),
+                condition=str(t.get("condition", "")),
+            )
+            for t in data.get("triggers", [])
+            if isinstance(t, dict)
+        ],
+        responses=[
+            ResponseSpec(
+                response_id=str(r.get("response_id", "")),
+                description=str(r.get("description", "")),
+                action=str(r.get("action", "")),
+                payload={str(k): str(v) for k, v in (r.get("payload") or {}).items()},
+            )
+            for r in data.get("responses", [])
+            if isinstance(r, dict)
+        ],
+    )
+
+
+def _run_scenario_command(challenge_dir: Path, max_ticks: int | None):
+    """Run the pure, offline scenario engine for ``challenge_dir``.
+
+    Reads ``private/scenario_timeline.json`` when present (the flat
+    ``ScenarioSpec.to_mapping()`` written by ``generator.create_challenge``).
+    Falls back to an empty/default ``ScenarioSpec`` (no triggers, disabled)
+    when the file is absent -- there is no stdlib YAML reader in this project
+    to round-trip ``challenge.yaml`` back into a full spec (see
+    ``scenario.py``'s module docstring), so a challenge with no recorded
+    timeline simply runs an inert scenario rather than erroring.
+
+    Always offline and deterministic: ``NullEnvironmentController`` (records
+    intent, touches nothing real) plus an empty ``ReplayEventSource`` (no
+    exogenous events -- ``ScenarioSpec`` carries no separate event script).
+    The defender is left to ``scenario.run_scenario``'s own
+    ``_default_defender_from_spec`` derivation from the (possibly empty)
+    scenario spec, per this command's brief.
+    """
+    from . import scenario as scenario_module
+    from .models import ScenarioSpec
+
+    timeline_path = Path(challenge_dir) / "private" / "scenario_timeline.json"
+    if timeline_path.exists():
+        data = json.loads(timeline_path.read_text(encoding="utf-8"))
+        scenario_spec = _scenario_spec_from_mapping(data)
+    else:
+        scenario_spec = ScenarioSpec()
+
+    environment = scenario_module.NullEnvironmentController()
+    event_source = scenario_module.ReplayEventSource({})
+    return scenario_module.run_scenario(
+        challenge_path=challenge_dir,
+        environment=environment,
+        events=event_source,
+        spec=scenario_spec,
+        max_ticks=max_ticks,
+    )
+
+
+def _serialize_scenario_report(report) -> dict:
+    """JSON-safe mapping for a ``scenario.ScenarioRunReport``."""
+    final_state = report.final_state
+    return {
+        "challenge_path": report.challenge_path,
+        "ticks_run": report.ticks_run,
+        "timeline": [event.to_mapping() for event in report.timeline],
+        "triggers_fired": list(report.triggers_fired),
+        "responses_applied": [
+            {
+                "tick": record.tick,
+                "role": record.role,
+                "response_id": record.response_id,
+                "action": record.action,
+                "target": record.target,
+            }
+            for record in report.responses_applied
+        ],
+        "attacker_blocked": list(report.attacker_blocked),
+        "final_state": (
+            {
+                "tick": final_state.tick,
+                "checkpoints": sorted(final_state.checkpoints),
+                "flags": dict(final_state.flags),
+                "fired_triggers": sorted(final_state.fired_triggers),
+                "noise_count": final_state.noise_count,
+            }
+            if final_state is not None
+            else None
+        ),
+    }
