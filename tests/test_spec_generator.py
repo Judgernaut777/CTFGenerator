@@ -11,8 +11,10 @@ from ctf_generator.models import AIResistance, ChallengeSpec, DynamicVariation
 from ctf_generator.spec_generator import (
     AnthropicSpecBackend,
     DeterministicSpecBackend,
+    OpenAISpecBackend,
     build_prompt,
     default_spec,
+    get_backend,
     spec_from_dict,
     spec_from_llm_output,
     spec_to_dict,
@@ -47,6 +49,31 @@ class _FakeMessages:
 class _FakeClient:
     def __init__(self, payload: dict, capture: dict) -> None:
         self.messages = _FakeMessages(payload, capture)
+
+
+class _FakeChatMessage:
+    def __init__(self, content: str) -> None:
+        self.message = type("_Msg", (), {"content": content})()
+
+
+class _FakeChatResponse:
+    def __init__(self, content: str) -> None:
+        self.choices = [_FakeChatMessage(content)]
+
+
+class _FakeCompletions:
+    def __init__(self, payload: dict, capture: dict) -> None:
+        self._payload = payload
+        self._capture = capture
+
+    def create(self, **kwargs):
+        self._capture.update(kwargs)
+        return _FakeChatResponse(json.dumps(self._payload))
+
+
+class _FakeOpenAIClient:
+    def __init__(self, payload: dict, capture: dict) -> None:
+        self.chat = type("_Chat", (), {"completions": _FakeCompletions(payload, capture)})()
 
 
 class DeterministicBackendTests(unittest.TestCase):
@@ -136,6 +163,39 @@ class AnthropicBackendTests(unittest.TestCase):
         self.assertEqual(capture["model"], "claude-opus-4-8")
         self.assertIn("output_config", capture)
         self.assertEqual(capture["thinking"], {"type": "adaptive"})
+
+
+class OpenAIBackendTests(unittest.TestCase):
+    def test_generate_uses_strict_json_schema_and_default_model(self) -> None:
+        payload = {
+            "title": "Ledger Leak",
+            "learning_objectives": ["trace trust", "chain the job", "extract flag"],
+            "checkpoints": ["1", "2", "3", "4", "5"],
+        }
+        capture: dict = {}
+        backend = OpenAISpecBackend(client=_FakeOpenAIClient(payload, capture))
+        spec = backend.generate(family=FAMILY, difficulty="hard", seed="s1", title="fallback")
+
+        self.assertEqual(spec.title, "Ledger Leak")
+        self.assertEqual(spec.checkpoints, ["1", "2", "3", "4", "5"])
+        self.assertEqual(spec.seed, "s1")
+        self.assertEqual(validate_spec(spec), [])
+        # Security-relevant knobs are never taken from the model.
+        self.assertEqual(spec.ai_resistance, AIResistance())
+        self.assertEqual(capture["model"], "gpt-5.1")
+        self.assertEqual(capture["response_format"]["type"], "json_schema")
+        self.assertTrue(capture["response_format"]["json_schema"]["strict"])
+
+
+class GetBackendTests(unittest.TestCase):
+    def test_resolves_each_provider(self) -> None:
+        self.assertIsInstance(get_backend("deterministic"), DeterministicSpecBackend)
+        self.assertIsInstance(get_backend("anthropic"), AnthropicSpecBackend)
+        self.assertIsInstance(get_backend("openai"), OpenAISpecBackend)
+
+    def test_unknown_backend_raises(self) -> None:
+        with self.assertRaises(ValueError):
+            get_backend("bogus")
 
 
 class SpecCliTests(unittest.TestCase):

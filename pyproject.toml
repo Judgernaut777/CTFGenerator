@@ -22,12 +22,17 @@ classifiers = [
 
 [project.optional-dependencies]
 dev = ["pytest>=8"]
-# LLM-backed spec generation (`ctfgen spec --backend llm`). Optional so the core
-# tool stays dependency-free.
-llm = ["anthropic>=0.49"]
+# LLM-backed spec generation. Each provider is an independent optional extra so
+# the core tool stays dependency-free.
+anthropic = ["anthropic>=0.49"]
+openai = ["openai>=1.40"]
+# Run CTFGenerator as an MCP server (`ctfgen-mcp`) so an MCP host drives it with
+# the user's own model/subscription.
+mcp = ["mcp>=1.2"]
 
 [project.scripts]
 ctfgen = "ctf_generator.cli:main"
+ctfgen-mcp = "ctf_generator.mcp_server:main"
 
 [project.urls]
 Homepage = "https://github.com/Judgernaut777/CTFGenerator"

@@ -85,7 +85,8 @@ _FAMILY_BRIEF = {
     ),
 }
 
-DEFAULT_MODEL = "claude-opus-4-8"
+ANTHROPIC_DEFAULT_MODEL = "claude-opus-4-8"
+OPENAI_DEFAULT_MODEL = "gpt-5.1"
 
 
 def build_prompt(family: str, difficulty: str) -> tuple[str, str]:
@@ -130,23 +131,42 @@ def spec_from_llm_output(
     )
 
 
-def _extract_json(response: object) -> dict:
-    """Pull the JSON object out of a structured-output Messages response."""
+def _extract_json_anthropic(response: object) -> dict:
+    """Pull the JSON object out of an Anthropic structured-output response."""
     for block in getattr(response, "content", []) or []:
         if getattr(block, "type", None) == "text":
             return json.loads(block.text)
-    raise RuntimeError("LLM response contained no text block to parse")
+    raise RuntimeError("Anthropic response contained no text block to parse")
 
 
-def _make_client():  # pragma: no cover - exercised only with real credentials
+def _extract_json_openai(response: object) -> dict:
+    """Pull the JSON object out of an OpenAI chat-completion response."""
+    choices = getattr(response, "choices", None) or []
+    if not choices:
+        raise RuntimeError("OpenAI response contained no choices to parse")
+    return json.loads(choices[0].message.content)
+
+
+def _make_anthropic_client():  # pragma: no cover - needs real credentials
     try:
         import anthropic
-    except ImportError as exc:  # noqa: F841
+    except ImportError:
         raise RuntimeError(
-            "the LLM backend requires the 'anthropic' package; install it with "
-            "'pip install ctf-generator[llm]'"
+            "the anthropic backend requires the 'anthropic' package; install it "
+            "with 'pip install ctf-generator[anthropic]'"
         ) from None
     return anthropic.Anthropic()
+
+
+def _make_openai_client():  # pragma: no cover - needs real credentials
+    try:
+        import openai
+    except ImportError:
+        raise RuntimeError(
+            "the openai backend requires the 'openai' package; install it with "
+            "'pip install ctf-generator[openai]'"
+        ) from None
+    return openai.OpenAI()
 
 
 class AnthropicSpecBackend:
@@ -156,14 +176,16 @@ class AnthropicSpecBackend:
     logic can be unit-tested without network access or credentials.
     """
 
-    def __init__(self, model: str = DEFAULT_MODEL, client: object | None = None) -> None:
+    def __init__(
+        self, model: str = ANTHROPIC_DEFAULT_MODEL, client: object | None = None
+    ) -> None:
         self._model = model
         self._client = client
 
     def generate(
         self, family: str, difficulty: str, seed: str, title: str
     ) -> ChallengeSpec:
-        client = self._client or _make_client()
+        client = self._client or _make_anthropic_client()
         system, user = build_prompt(family, difficulty)
         response = client.messages.create(
             model=self._model,
@@ -173,17 +195,58 @@ class AnthropicSpecBackend:
             system=system,
             messages=[{"role": "user", "content": user}],
         )
-        data = _extract_json(response)
+        data = _extract_json_anthropic(response)
         return spec_from_llm_output(
             data, family=family, difficulty=difficulty, seed=seed, fallback_title=title
         )
 
 
-def get_backend(name: str, model: str = DEFAULT_MODEL) -> SpecBackend:
+class OpenAISpecBackend:
+    """Generate a spec with OpenAI, then validate before it is trusted.
+
+    Uses Chat Completions structured outputs (json_schema, strict). The client is
+    injectable so the prompt/parse logic is unit-tested without network access.
+    """
+
+    def __init__(
+        self, model: str = OPENAI_DEFAULT_MODEL, client: object | None = None
+    ) -> None:
+        self._model = model
+        self._client = client
+
+    def generate(
+        self, family: str, difficulty: str, seed: str, title: str
+    ) -> ChallengeSpec:
+        client = self._client or _make_openai_client()
+        system, user = build_prompt(family, difficulty)
+        response = client.chat.completions.create(
+            model=self._model,
+            messages=[
+                {"role": "system", "content": system},
+                {"role": "user", "content": user},
+            ],
+            response_format={
+                "type": "json_schema",
+                "json_schema": {
+                    "name": "challenge_spec",
+                    "schema": _LLM_SCHEMA,
+                    "strict": True,
+                },
+            },
+        )
+        data = _extract_json_openai(response)
+        return spec_from_llm_output(
+            data, family=family, difficulty=difficulty, seed=seed, fallback_title=title
+        )
+
+
+def get_backend(name: str, model: str | None = None) -> SpecBackend:
     if name == "deterministic":
         return DeterministicSpecBackend()
-    if name == "llm":
-        return AnthropicSpecBackend(model=model)
+    if name == "anthropic":
+        return AnthropicSpecBackend(model=model or ANTHROPIC_DEFAULT_MODEL)
+    if name == "openai":
+        return OpenAISpecBackend(model=model or OPENAI_DEFAULT_MODEL)
     raise ValueError(f"unknown spec backend: {name}")
 
 

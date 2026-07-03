@@ -86,13 +86,16 @@ def build_parser() -> argparse.ArgumentParser:
     spec.add_argument(
         "--backend",
         default="deterministic",
-        choices=["deterministic", "llm"],
-        help="deterministic (offline default) or llm (Claude-backed, needs ctf-generator[llm])",
+        choices=["deterministic", "anthropic", "openai"],
+        help=(
+            "deterministic (offline default), anthropic (Claude-backed, needs "
+            "ctf-generator[anthropic]), or openai (needs ctf-generator[openai])"
+        ),
     )
     spec.add_argument(
         "--model",
-        default=spec_generator.DEFAULT_MODEL,
-        help="Model id for the llm backend",
+        default=None,
+        help="Model id for the anthropic/openai backend (defaults per provider)",
     )
 
     validate = subparsers.add_parser("validate", help="Validate generated challenge files")
