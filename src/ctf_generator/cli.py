@@ -2,13 +2,41 @@ from __future__ import annotations
 
 import argparse
 import json
+import sys
 from pathlib import Path
 
+from . import report_writer
 from .generator import create_challenge
 from .runtime_validator import validate_runtime
 from .score import score_challenge
 from .sibling_validator import validate_siblings
 from .validator import validate_challenge
+
+
+def _write_cli_report(
+    args: argparse.Namespace,
+    command: str,
+    subject: dict,
+    status: str,
+    result: dict,
+) -> None:
+    """Best-effort report artifact write. No-ops when --report-dir is unset.
+
+    Any failure is warned to stderr and never alters the exit code or stdout.
+    """
+    report_dir = getattr(args, "report_dir", None)
+    if report_dir is None:
+        return
+    try:
+        report = report_writer.build_report(
+            command=command,
+            subject=subject,
+            result=result,
+            status=status,
+        )
+        report_writer.write_report(report_dir, report)
+    except Exception as exc:  # noqa: BLE001 - report writing must never be fatal
+        print(f"warning: failed to write report: {exc}", file=sys.stderr)
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -32,6 +60,12 @@ def build_parser() -> argparse.ArgumentParser:
 
     validate = subparsers.add_parser("validate", help="Validate generated challenge files")
     validate.add_argument("challenge_path", type=Path)
+    validate.add_argument(
+        "--report-dir",
+        type=Path,
+        default=None,
+        help="Write a structured JSON report artifact to this directory",
+    )
 
     validate_runtime_parser = subparsers.add_parser(
         "validate-runtime",
@@ -44,6 +78,12 @@ def build_parser() -> argparse.ArgumentParser:
         "--keep-running",
         action="store_true",
         help="Leave containers running after validation",
+    )
+    validate_runtime_parser.add_argument(
+        "--report-dir",
+        type=Path,
+        default=None,
+        help="Write a structured JSON report artifact to this directory",
     )
 
     siblings = subparsers.add_parser(
@@ -66,6 +106,12 @@ def build_parser() -> argparse.ArgumentParser:
         help="Also run Docker runtime validation for each sibling sequentially",
     )
     siblings.add_argument("--timeout", default=90, type=int)
+    siblings.add_argument(
+        "--report-dir",
+        type=Path,
+        default=None,
+        help="Write a structured JSON report artifact to this directory",
+    )
 
     score = subparsers.add_parser(
         "score",
@@ -78,6 +124,12 @@ def build_parser() -> argparse.ArgumentParser:
         type=float,
         default=None,
         help="Exit non-zero if the total score is below this threshold",
+    )
+    score.add_argument(
+        "--report-dir",
+        type=Path,
+        default=None,
+        help="Write a structured JSON report artifact to this directory",
     )
 
     return parser
@@ -101,6 +153,10 @@ def main(argv: list[str] | None = None) -> int:
 
     if args.command == "validate":
         report = validate_challenge(args.challenge_path)
+        subject = {"type": "challenge", "identifier": args.challenge_path.name}
+        result = report_writer.serialize_validation(report)
+        status = report_writer.status_of(report.errors)
+        _write_cli_report(args, "validate", subject, status, result)
         if report.errors:
             print("Validation failed:")
             for error in report.errors:
@@ -118,6 +174,10 @@ def main(argv: list[str] | None = None) -> int:
             timeout_seconds=args.timeout,
             keep_running=args.keep_running,
         )
+        subject = {"type": "challenge", "identifier": args.challenge_path.name}
+        result = report_writer.serialize_runtime(report)
+        status = report_writer.status_of(report.errors)
+        _write_cli_report(args, "validate-runtime", subject, status, result)
         for log in report.logs:
             print(log.rstrip())
         if report.errors:
@@ -139,6 +199,10 @@ def main(argv: list[str] | None = None) -> int:
             runtime=args.runtime,
             timeout_seconds=args.timeout,
         )
+        subject = {"type": "sibling-set", "identifier": args.seed}
+        result = report_writer.serialize_siblings(report)
+        status = report_writer.status_of(report.errors)
+        _write_cli_report(args, "validate-siblings", subject, status, result)
         for log in report.logs:
             print(log.rstrip())
         if report.errors:
@@ -158,7 +222,10 @@ def main(argv: list[str] | None = None) -> int:
 
     if args.command == "score":
         report = score_challenge(args.challenge_path)
+        subject = {"type": "challenge", "identifier": args.challenge_path.name}
+        result = report.to_mapping()
         if report.errors:
+            _write_cli_report(args, "score", subject, "failed", result)
             print("Scoring failed:")
             for error in report.errors:
                 print(f"- {error}")
@@ -173,7 +240,10 @@ def main(argv: list[str] | None = None) -> int:
                     print(f"    {note}")
             for warning in report.warnings:
                 print(f"warning: {warning}")
-        if args.min_score is not None and report.total < args.min_score:
+        below_min = args.min_score is not None and report.total < args.min_score
+        status = "failed" if below_min else "passed"
+        _write_cli_report(args, "score", subject, status, result)
+        if below_min:
             print(f"score {report.total:.1f} is below threshold {args.min_score:.1f}")
             return 1
         return 0

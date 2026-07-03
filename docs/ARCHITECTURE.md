@@ -18,6 +18,9 @@ ctfgen validate-siblings -> sibling generation, variant comparison, optional run
 ctfgen score -> static AI-resistance scoring across five dimensions
 ```
 
+The validation and scoring commands accept `--report-dir` to persist their
+result as a JSON artifact (see Persisted Validation Reports below).
+
 Generated challenge folders contain:
 
 ```text
@@ -53,6 +56,7 @@ structured spec
   -> private solver replay            implemented
   -> sibling variant replay           implemented for generated private solvers
   -> AI-resistance scoring            implemented as static artifact analysis
+  -> persisted validation reports     implemented as JSON report artifacts
   -> AI-agent evaluation
   -> human review
   -> publish
@@ -77,6 +81,42 @@ weighted dimensions, then reports a band (`strong`/`good`/`moderate`/`weak`):
 Scores are computed from the actual artifacts, not just the spec's declared
 values, so a challenge that claims live interaction but ships a hardcoded solver
 is flagged and scored down. `--min-score` turns the score into a CI gate.
+
+## Persisted Validation Reports
+
+`validate`, `validate-runtime`, `validate-siblings`, and `score` accept
+`--report-dir <dir>` to persist their result as a JSON artifact. The writer
+lives in `report_writer.py`; the pure validator/score functions are unchanged
+and serialization plus I/O happen only at the CLI layer.
+
+Each report is a versioned envelope:
+
+```json
+{
+  "schema_version": "1.0",
+  "command": "score",
+  "subject": {"type": "challenge", "identifier": "invoice-drift"},
+  "timestamp": "2026-07-03T05:05:48.619538+00:00",
+  "git_commit": "f0b0fc3f...",
+  "status": "passed",
+  "result": { "...per-command payload..." }
+}
+```
+
+Design guarantees:
+
+- **Never overwrites.** Filenames combine the envelope timestamp, command,
+  subject slug, and an sha1 content discriminator; a collision falls back to an
+  exclusive-create retry with a numeric suffix.
+- **Never fatal.** A failed report write is caught, warned to stderr, and leaves
+  the command's exit code and stdout untouched.
+- **Best-effort git.** `git_commit` is captured when available and is an empty
+  string when git is missing, hangs, or the tree is not a repository.
+- **Filename matches the envelope.** The timestamp encoded in the filename is
+  derived from the report's own `timestamp` field, so the two never diverge.
+
+`status` mirrors the process exit condition, so a report directory doubles as an
+auditable pass/fail trail across runs.
 
 ## AI-Resistance Model
 
