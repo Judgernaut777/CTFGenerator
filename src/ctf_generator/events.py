@@ -15,6 +15,7 @@ for new events with :meth:`EventStore.since`.
 from __future__ import annotations
 
 import json
+import threading
 import time
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
@@ -83,6 +84,7 @@ class InMemoryEventStore:
         self._clock: Clock = clock or _default_clock
         self._events: list[Event] = []
         self._next_seq = 1
+        self._lock = threading.Lock()
 
     def append(
         self,
@@ -91,17 +93,21 @@ class InMemoryEventStore:
         challenge_id: str,
         payload: dict | None = None,
     ) -> Event:
-        event = Event(
-            seq=self._next_seq,
-            ts=_format_ts(self._clock()),
-            type=type,
-            team_id=team_id,
-            challenge_id=challenge_id,
-            payload=dict(payload) if payload else {},
-        )
-        self._events.append(event)
-        self._next_seq += 1
-        return event
+        # Serialize the read-increment-append so concurrent callers (one
+        # thread per connection under ThreadingHTTPServer) cannot collide on
+        # ``seq`` -- the monotonicity guarantee callers poll ``since`` against.
+        with self._lock:
+            event = Event(
+                seq=self._next_seq,
+                ts=_format_ts(self._clock()),
+                type=type,
+                team_id=team_id,
+                challenge_id=challenge_id,
+                payload=dict(payload) if payload else {},
+            )
+            self._events.append(event)
+            self._next_seq += 1
+            return event
 
     def since(self, seq: int) -> list[Event]:
         return [event for event in self._events if event.seq > seq]
@@ -126,6 +132,7 @@ class JsonlEventStore:
         self._clock: Clock = clock or _default_clock
         self._events: list[Event] = self._read_existing()
         self._next_seq = self._events[-1].seq + 1 if self._events else 1
+        self._lock = threading.Lock()
 
     def append(
         self,
@@ -134,21 +141,24 @@ class JsonlEventStore:
         challenge_id: str,
         payload: dict | None = None,
     ) -> Event:
-        event = Event(
-            seq=self._next_seq,
-            ts=_format_ts(self._clock()),
-            type=type,
-            team_id=team_id,
-            challenge_id=challenge_id,
-            payload=dict(payload) if payload else {},
-        )
-        self._path.parent.mkdir(parents=True, exist_ok=True)
-        with self._path.open("a", encoding="utf-8") as handle:
-            handle.write(json.dumps(_event_to_dict(event), sort_keys=True))
-            handle.write("\n")
-        self._events.append(event)
-        self._next_seq += 1
-        return event
+        # Serialize seq assignment *and* the file append so concurrent writers
+        # cannot duplicate a ``seq`` or interleave partial JSONL lines.
+        with self._lock:
+            event = Event(
+                seq=self._next_seq,
+                ts=_format_ts(self._clock()),
+                type=type,
+                team_id=team_id,
+                challenge_id=challenge_id,
+                payload=dict(payload) if payload else {},
+            )
+            self._path.parent.mkdir(parents=True, exist_ok=True)
+            with self._path.open("a", encoding="utf-8") as handle:
+                handle.write(json.dumps(_event_to_dict(event), sort_keys=True))
+                handle.write("\n")
+            self._events.append(event)
+            self._next_seq += 1
+            return event
 
     def since(self, seq: int) -> list[Event]:
         return [event for event in self._events if event.seq > seq]

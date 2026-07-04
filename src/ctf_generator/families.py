@@ -6,7 +6,7 @@ from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Callable, Protocol
 
 from .models import ChallengeSpec
-from .spec_generator import _FAMILY_BRIEF
+from .spec_generator import _DEFAULT_CHECKPOINTS, _DEFAULT_OBJECTIVES, _FAMILY_BRIEF
 from .templates import binary, cloud, crypto, forensics, mobile, network, scada_ics
 from .templates.tenant_export import render_tenant_export
 from .validator import REQUIRED_FILES
@@ -64,6 +64,13 @@ class Family:
     llm_brief: str = "A security challenge."
     default_spec_builder: DefaultSpecBuilder | None = None
     scoring_hints: ScoringHints = field(default_factory=ScoringHints)
+    # Family-appropriate pedagogical defaults used by ``spec_generator.
+    # default_spec`` so a generated challenge.yaml/checkpoints.yaml describes
+    # THIS family rather than the historical tenant-export defaults. The
+    # defaults below reproduce the tenant-export text so the tenant_export
+    # family (which does not override them) is byte-for-byte unchanged.
+    learning_objectives: tuple[str, ...] = tuple(_DEFAULT_OBJECTIVES)
+    checkpoints: tuple[str, ...] = tuple(_DEFAULT_CHECKPOINTS)
 
 
 # --- Registry --------------------------------------------------------------------
@@ -171,7 +178,116 @@ register(
 # COMPOSE_MARKERS/SCORING_HINTS/REQUIRED_FILES/render) described in their own
 # docstrings; this loop just wires each one into the registry uniformly.
 
+# Per-family pedagogical defaults, keyed by FAMILY_NAME. Each pair is
+# (learning_objectives, checkpoints) tracing that family's actual solve path,
+# so the default (no-LLM) spec no longer stamps every family with the
+# tenant-export objectives/checkpoints. Families absent here fall back to the
+# tenant-export defaults on the ``Family`` record.
+_FAMILY_SPEC_DEFAULTS: dict[str, tuple[tuple[str, ...], tuple[str, ...]]] = {
+    "binary_heap_exploit": (
+        (
+            "Reverse the service's line-oriented wire protocol from its responses",
+            "Infer the heap struct layout from the fixed per-session buffer size",
+            "Overflow the client-controlled note into the adjacent admin flag field",
+        ),
+        (
+            "connects to the service and enumerates its command verbs",
+            "identifies the client-declared length trusted during the note copy",
+            "computes the offset from the note buffer to the admin flag",
+            "sends an overlong note that overflows into the admin flag",
+            "invokes the privileged command and reads the flag",
+        ),
+    ),
+    "network_lateral_pivot": (
+        (
+            "Discover the default administrative credentials on the edge jump host",
+            "Abuse the diagnostics/relay feature to reach an internal-only host",
+            "Read a flag exposed only inside the internal network segment",
+        ),
+        (
+            "logs into the edge service with default credentials",
+            "enumerates the diagnostics and relay endpoints",
+            "pivots through the relay to the internal host",
+            "requests the internal-only resource holding the flag",
+            "extracts the flag from the internal response",
+        ),
+    ),
+    "crypto_token_forgery": (
+        (
+            "Analyze how the console issues and verifies HMAC-signed session tokens",
+            "Identify the legacy 'alg: none' verification bypass (CWE-347)",
+            "Forge an unsigned admin token to reach the protected endpoint",
+        ),
+        (
+            "obtains a normal signed session token from the console",
+            "decodes the token and identifies the signing scheme",
+            "discovers the verifier still accepts alg:none tokens",
+            "forges an unsigned token asserting admin privilege",
+            "reaches the admin endpoint and reads the flag",
+        ),
+    ),
+    "cloud_metadata_ssrf": (
+        (
+            "Coerce the asset-fetch service into a server-side request (SSRF, CWE-918)",
+            "Retrieve temporary IAM credentials from the instance metadata endpoint",
+            "Replay the stolen credentials against the internal storage service",
+        ),
+        (
+            "identifies the URL parameter the fetch service will follow",
+            "points the fetch at the 169.254.169.254 instance metadata endpoint",
+            "recovers temporary IAM credentials from the metadata response",
+            "authenticates to the internal storage service with those credentials",
+            "reads the flag object from storage",
+        ),
+    ),
+    "forensics_incident_triage": (
+        (
+            "Correlate access, auth, and payload-strings artifacts from a compromise",
+            "Identify the exploited CVE from the attacker's activity",
+            "Assemble the recovered indicators of compromise into the flag",
+        ),
+        (
+            "reviews the access log for anomalous requests",
+            "correlates the auth log to the attacker session",
+            "extracts the payload strings tied to the exploit",
+            "identifies the exploited CVE from the evidence",
+            "assembles the indicators of compromise into the flag",
+        ),
+    ),
+    "mobile_insecure_storage": (
+        (
+            "Locate the hardcoded cipher key in the decompiled sources (CWE-798)",
+            "Recover the sensitive note from SharedPreferences and the device backup (CWE-312)",
+            "Decrypt the note to obtain the flag",
+        ),
+        (
+            "decompiles the app and reviews the storage code",
+            "finds the hardcoded encryption key",
+            "extracts the ciphertext from SharedPreferences or the backup",
+            "decrypts the note with the recovered key",
+            "reads the flag from the decrypted plaintext",
+        ),
+    ),
+    "scada_ics_modbus_takeover": (
+        (
+            "Enumerate coils and holding registers on an unauthenticated Modbus/TCP PLC (CWE-306)",
+            "Disable the safety-interlock coil guarding the control logic",
+            "Push a setpoint register past its safe limit to bypass the interlock",
+        ),
+        (
+            "connects to the PLC and enumerates coils and holding registers",
+            "identifies the safety-interlock coil and the setpoint register",
+            "clears the interlock coil",
+            "writes an out-of-range setpoint to trigger the control-logic bypass",
+            "reads the exposed flag",
+        ),
+    ),
+}
+
 for _module in (scada_ics, network, crypto, cloud, forensics, binary, mobile):
+    _objectives, _checkpoints = _FAMILY_SPEC_DEFAULTS.get(
+        _module.FAMILY_NAME, (tuple(_DEFAULT_OBJECTIVES), tuple(_DEFAULT_CHECKPOINTS))
+    )
     register(
         Family(
             name=_module.FAMILY_NAME,
@@ -184,6 +300,8 @@ for _module in (scada_ics, network, crypto, cloud, forensics, binary, mobile):
             cve_driven=_module.CVE_DRIVEN,
             llm_brief=_module.LLM_BRIEF,
             scoring_hints=ScoringHints(**_module.SCORING_HINTS),
+            learning_objectives=_objectives,
+            checkpoints=_checkpoints,
         )
     )
 

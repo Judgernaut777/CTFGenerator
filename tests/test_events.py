@@ -172,5 +172,43 @@ class JsonlEventStoreTests(unittest.TestCase):
             self.assertEqual(store.since(0), [])
 
 
+class ConcurrencyTests(unittest.TestCase):
+    """Under ThreadingHTTPServer the dashboard appends one event per
+    connection thread; ``seq`` must stay strictly monotonic and unique."""
+
+    def _hammer(self, store, threads: int = 16, per_thread: int = 200) -> list[int]:
+        import threading
+
+        barrier = threading.Barrier(threads)
+
+        def worker() -> None:
+            barrier.wait()  # maximize contention on the read-increment-append
+            for _ in range(per_thread):
+                store.append("solve", "team", "chal")
+
+        workers = [threading.Thread(target=worker) for _ in range(threads)]
+        for t in workers:
+            t.start()
+        for t in workers:
+            t.join()
+        return [event.seq for event in store.all()]
+
+    def test_in_memory_seqs_are_unique_and_contiguous_under_threads(self) -> None:
+        store = InMemoryEventStore()
+        seqs = self._hammer(store)
+        self.assertEqual(len(seqs), 16 * 200)
+        self.assertEqual(len(set(seqs)), len(seqs))  # no duplicates
+        self.assertEqual(sorted(seqs), list(range(1, len(seqs) + 1)))
+
+    def test_jsonl_seqs_are_unique_when_reread_from_disk(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "events.jsonl"
+            self._hammer(JsonlEventStore(path))
+            reread = JsonlEventStore(path)
+            seqs = [event.seq for event in reread.all()]
+            self.assertEqual(len(seqs), 16 * 200)
+            self.assertEqual(len(set(seqs)), len(seqs))
+
+
 if __name__ == "__main__":
     unittest.main()

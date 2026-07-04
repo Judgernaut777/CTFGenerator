@@ -8,6 +8,73 @@ from ctf_generator import mcp_server
 
 FAMILY = "web_business_logic_tenant_export"
 
+_ORIGINAL_WORKSPACE = mcp_server.get_workspace_root()
+
+
+def setUpModule() -> None:
+    # These tests write challenges under ``tempfile.TemporaryDirectory()``
+    # dirs, all of which live under the system temp root. Point the MCP
+    # workspace sandbox there so those absolute paths resolve inside it.
+    mcp_server.set_workspace_root(tempfile.gettempdir())
+
+
+def tearDownModule() -> None:
+    mcp_server.set_workspace_root(_ORIGINAL_WORKSPACE)
+
+
+class WorkspaceSandboxTests(unittest.TestCase):
+    """The write tools must reject paths that escape the workspace root, so a
+    model host cannot use output_dir traversal (+ force=True rmtree) as an
+    arbitrary host write/delete primitive."""
+
+    def test_create_challenge_rejects_parent_traversal(self) -> None:
+        with tempfile.TemporaryDirectory() as root:
+            mcp_server.set_workspace_root(root)
+            try:
+                result = mcp_server.create_challenge(
+                    output_dir="../../../../tmp/mcp_escape_poc", seed="poc"
+                )
+                self.assertFalse(result["ok"])
+                self.assertTrue(any("escapes the MCP workspace" in e for e in result["errors"]))
+                self.assertFalse(Path("/tmp/mcp_escape_poc").exists())
+            finally:
+                mcp_server.set_workspace_root(tempfile.gettempdir())
+
+    def test_create_challenge_rejects_absolute_outside_root(self) -> None:
+        with tempfile.TemporaryDirectory() as root:
+            mcp_server.set_workspace_root(root)
+            try:
+                result = mcp_server.create_challenge(
+                    output_dir="/tmp/mcp_abs_escape_poc", seed="poc"
+                )
+                self.assertFalse(result["ok"])
+                self.assertFalse(Path("/tmp/mcp_abs_escape_poc").exists())
+            finally:
+                mcp_server.set_workspace_root(tempfile.gettempdir())
+
+    def test_create_challenge_allows_path_inside_root(self) -> None:
+        with tempfile.TemporaryDirectory() as root:
+            mcp_server.set_workspace_root(root)
+            try:
+                result = mcp_server.create_challenge(output_dir="chal", seed="poc")
+                self.assertTrue(result["ok"], result)
+                self.assertTrue((Path(root) / "chal" / "challenge.yaml").exists())
+            finally:
+                mcp_server.set_workspace_root(tempfile.gettempdir())
+
+    def test_create_from_spec_rejects_parent_traversal(self) -> None:
+        with tempfile.TemporaryDirectory() as root:
+            mcp_server.set_workspace_root(root)
+            try:
+                built = mcp_server.build_spec(family=FAMILY, difficulty="easy", seed="s")
+                result = mcp_server.create_from_spec(
+                    built["spec"], "../../../../tmp/mcp_spec_escape_poc"
+                )
+                self.assertFalse(result["ok"])
+                self.assertFalse(Path("/tmp/mcp_spec_escape_poc").exists())
+            finally:
+                mcp_server.set_workspace_root(tempfile.gettempdir())
+
 
 class ListingTests(unittest.TestCase):
     def test_list_families(self) -> None:

@@ -20,12 +20,55 @@ from __future__ import annotations
 
 import dataclasses
 import json
+import os
 from pathlib import Path
 
 from . import families, report_index, spec_generator
 from .generator import create_challenge as _create_challenge
 from .score import score_challenge as _score_challenge
 from .validator import validate_challenge as _validate_challenge
+
+# --- Filesystem sandbox -------------------------------------------------------
+#
+# The write tools (create_challenge / create_from_spec) render files to a
+# caller-named directory and, with force=True, ``shutil.rmtree`` it first. A
+# model host is only semi-trusted (prompt injection, a manipulated turn), so an
+# unconstrained ``output_dir`` would be an arbitrary host write + recursive
+# delete primitive. All caller paths are therefore resolved against a workspace
+# root and rejected if they escape it (absolute paths outside the root or ``..``
+# traversal). The root defaults to the process CWD and is overridable via the
+# ``CTFGEN_MCP_WORKSPACE`` env var (or ``set_workspace_root`` in tests).
+
+
+class WorkspaceError(ValueError):
+    """Raised when a caller path escapes the configured MCP workspace root."""
+
+
+_workspace_root: Path = Path(os.environ.get("CTFGEN_MCP_WORKSPACE") or Path.cwd()).resolve()
+
+
+def set_workspace_root(path: str | Path) -> None:
+    """Set the sandbox root that all MCP tool paths must resolve inside."""
+    global _workspace_root
+    _workspace_root = Path(path).resolve()
+
+
+def get_workspace_root() -> Path:
+    return _workspace_root
+
+
+def _resolve_in_workspace(user_path: str) -> Path:
+    root = _workspace_root
+    candidate = Path(user_path)
+    combined = candidate if candidate.is_absolute() else root / candidate
+    resolved = combined.resolve()
+    if resolved != root and root not in resolved.parents:
+        raise WorkspaceError(
+            f"path {user_path!r} escapes the MCP workspace root {root}. MCP "
+            "tools may only write inside the workspace; set CTFGEN_MCP_WORKSPACE "
+            "to relocate it."
+        )
+    return resolved
 
 # The design guidance handed to a host model before it calls build_spec. It is
 # exposed as an MCP prompt so an interactive client can prime the model with the
@@ -153,8 +196,12 @@ def create_from_spec(
     if errors:
         return {"ok": False, "errors": errors}
     try:
+        safe_output_dir = _resolve_in_workspace(output_dir)
+    except WorkspaceError as exc:
+        return {"ok": False, "errors": [str(exc)]}
+    try:
         path = _create_challenge(
-            output_dir=Path(output_dir),
+            output_dir=safe_output_dir,
             seed=parsed.seed,
             title=parsed.title,
             difficulty=parsed.difficulty,
@@ -205,8 +252,12 @@ def create_challenge(
             return {"ok": False, "errors": errors}
 
     try:
+        safe_output_dir = _resolve_in_workspace(output_dir)
+    except WorkspaceError as exc:
+        return {"ok": False, "errors": [str(exc)]}
+    try:
         path = _create_challenge(
-            output_dir=Path(output_dir),
+            output_dir=safe_output_dir,
             seed=seed,
             title=title,
             difficulty=difficulty,

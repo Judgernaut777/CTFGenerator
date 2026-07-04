@@ -88,16 +88,32 @@ _DEFAULT_CHECKPOINTS = [
 ]
 
 
+def _family_spec_defaults(family: str) -> tuple[str, list[str], list[str]]:
+    """Resolve (category, learning_objectives, checkpoints) for ``family``.
+
+    Registered families supply their own values so a generated challenge is
+    filed under its real domain and its checkpoints describe its own solve
+    path; unregistered/legacy families keep the historical web/tenant-export
+    defaults. Uses the lazy registry import to avoid a module-scope cycle.
+    """
+    families = _families_module()
+    if families.is_registered(family):
+        fam = families.get(family)
+        return fam.category, list(fam.learning_objectives), list(fam.checkpoints)
+    return "web", list(_DEFAULT_OBJECTIVES), list(_DEFAULT_CHECKPOINTS)
+
+
 def default_spec(seed: str, title: str, difficulty: str, family: str) -> ChallengeSpec:
     """The built-in, fully deterministic spec used when no backend is chosen."""
+    category, objectives, checkpoints = _family_spec_defaults(family)
     return ChallengeSpec(
         title=title,
-        category="web",
+        category=category,
         difficulty=difficulty,
         family=family,
         seed=seed,
-        learning_objectives=list(_DEFAULT_OBJECTIVES),
-        checkpoints=list(_DEFAULT_CHECKPOINTS),
+        learning_objectives=objectives,
+        checkpoints=checkpoints,
     )
 
 
@@ -188,9 +204,12 @@ def spec_from_llm_output(
     title = str(data.get("title") or fallback_title).strip() or fallback_title
     objectives = [str(o).strip() for o in data.get("learning_objectives", []) if str(o).strip()]
     checkpoints = [str(c).strip() for c in data.get("checkpoints", []) if str(c).strip()]
+    # The LLM supplies pedagogical text (title/objectives/checkpoints); the
+    # category is authoritative from the family registry, never LLM-controlled.
+    category, _, _ = _family_spec_defaults(family)
     return ChallengeSpec(
         title=title,
-        category="web",
+        category=category,
         difficulty=difficulty,
         family=family,
         seed=seed,

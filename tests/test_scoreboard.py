@@ -81,6 +81,62 @@ class DeterminismTests(unittest.TestCase):
         self.assertEqual(snap1.to_mapping(), snap2.to_mapping())
 
 
+class DuplicateSolveTests(unittest.TestCase):
+    """A team re-submitting an already-correct flag (double-click, retry,
+    replayed event) must not inflate score or a challenge's solve_count."""
+
+    def test_duplicate_solves_do_not_inflate_score(self):
+        config = make_config()
+        challenges = {"web-1": make_challenge()}
+        engine = StaticPointsEngine()
+        events = [
+            solve("alpha", "web-1", START + timedelta(minutes=5), submission_id="s1"),
+            solve("alpha", "web-1", START + timedelta(minutes=6), submission_id="s2"),
+            solve("alpha", "web-1", START + timedelta(minutes=7), submission_id="s3"),
+        ]
+
+        snap = scoreboard.compute_scoreboard(events, challenges, config, engine)
+
+        self.assertEqual(len(snap.entries), 1)
+        self.assertEqual(snap.entries[0].score, 500)  # not 1500
+        self.assertEqual(snap.entries[0].solve_count, 1)
+
+    def test_duplicate_solves_do_not_inflate_challenge_value_solve_count(self):
+        config = make_config()
+        challenges = {"web-1": make_challenge()}
+        events = [
+            solve("alpha", "web-1", START + timedelta(minutes=5), submission_id="s1"),
+            solve("alpha", "web-1", START + timedelta(minutes=6), submission_id="s2"),
+        ]
+
+        values = scoreboard.compute_challenge_values(
+            events, challenges, config, DynamicDecayEngine()
+        )
+        by_id = {v.challenge_id: v for v in values}
+
+        # One distinct solver, so decay reflects a single solve, not two.
+        self.assertEqual(by_id["web-1"].solve_count, 1)
+
+    def test_canonical_solve_is_the_earliest(self):
+        config = make_config()
+        challenges = {"web-1": make_challenge()}
+        bonus = FirstBloodBonusConfig(enabled=True, bonus_points=50, bonus_percent=0)
+        challenges["web-1"] = make_challenge(first_blood_bonus=bonus)
+        # beta solves first; alpha's later duplicate must not steal first blood
+        # nor add points twice.
+        events = [
+            solve("beta", "web-1", START + timedelta(minutes=1), submission_id="b1"),
+            solve("alpha", "web-1", START + timedelta(minutes=5), submission_id="a1"),
+            solve("alpha", "web-1", START + timedelta(minutes=9), submission_id="a2"),
+        ]
+
+        snap = scoreboard.compute_scoreboard(events, challenges, config, StaticPointsEngine())
+        scores = {e.team_id: e.score for e in snap.entries}
+
+        self.assertEqual(scores["beta"], 550)  # 500 + 50 first blood
+        self.assertEqual(scores["alpha"], 500)  # single credit, no bonus
+
+
 class RetroactiveDecayTests(unittest.TestCase):
     def test_dynamic_decay_value_is_shared_by_all_solvers(self):
         # linear decay: value drops from 500 to 100 over 4 solves.
