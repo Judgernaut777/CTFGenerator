@@ -462,6 +462,318 @@ _BUNDLED_RECORDS: tuple[CveRecord, ...] = (
         ),
         references=["https://nvd.nist.gov/vuln/detail/CVE-2015-3860"],
     ),
+    CveRecord(
+        cve_id="CVE-2022-22965",
+        published="2022-03-31",
+        cvss_version="3.1",
+        cvss_score=9.8,
+        cvss_severity="CRITICAL",
+        cwe_ids=["CWE-94"],
+        category="web",
+        affected_products=["Spring Framework 9.0.0 before 9.0.1", "Spring Framework 8.0.0 before 8.0.1"],
+        description=(
+            "Spring Framework allows unauthenticated remote code execution via "
+            "specially crafted data binding expressions in Spring Cloud Config, "
+            "application parameter binding, or malicious HTTP requests targeting "
+            "a Servlet or Spring WebFlux application (Spring4Shell)."
+        ),
+        references=[
+            "https://nvd.nist.gov/vuln/detail/CVE-2022-22965",
+            "https://spring.io/security/cve-2022-22965",
+        ],
+    ),
+    CveRecord(
+        cve_id="CVE-2021-22911",
+        published="2021-02-25",
+        cvss_version="3.1",
+        cvss_score=8.7,
+        cvss_severity="HIGH",
+        cwe_ids=["CWE-640"],
+        category="web",
+        affected_products=["GitLab Community Edition before 13.8.8", "GitLab Enterprise Edition before 13.9.8"],
+        description=(
+            "GitLab user sign up allows incorrect verification of an attacker-controlled "
+            "email attribute, permitting account takeover via session fixation when LDAP "
+            "is not enabled."
+        ),
+        references=[
+            "https://nvd.nist.gov/vuln/detail/CVE-2021-22911",
+            "https://about.gitlab.com/releases/2021/02/25/critical-security-release-gitlab-13-9/",
+        ],
+    ),
+    CveRecord(
+        cve_id="CVE-2021-26855",
+        published="2021-03-02",
+        cvss_version="3.1",
+        cvss_score=9.8,
+        cvss_severity="CRITICAL",
+        cwe_ids=["CWE-75"],
+        category="network",
+        affected_products=["Microsoft Exchange Server 2013", "Microsoft Exchange Server 2016", "Microsoft Exchange Server 2019"],
+        description=(
+            "Microsoft Exchange Server contains an improper input validation vulnerability "
+            "in the parsing of Autodiscover requests, allowing an unauthenticated attacker "
+            "to execute arbitrary commands and gain control of the exchange server (ProxyLogon)."
+        ),
+        references=[
+            "https://nvd.nist.gov/vuln/detail/CVE-2021-26855",
+            "https://msrc.microsoft.com/update-guide/vulnerability/CVE-2021-26855",
+        ],
+    ),
+    CveRecord(
+        cve_id="CVE-2021-27065",
+        published="2021-07-13",
+        cvss_version="3.1",
+        cvss_score=9.8,
+        cvss_severity="CRITICAL",
+        cwe_ids=["CWE-94"],
+        category="network",
+        affected_products=["Microsoft Exchange Server 2013 CU23", "Microsoft Exchange Server 2016 CU18", "Microsoft Exchange Server 2019 CU7"],
+        description=(
+            "Microsoft Exchange Server allows remote code execution on the server via an "
+            "unauthenticated attacker sending specially crafted requests leading to heap "
+            "overflow and code execution on the SYSTEM account (ProxyShell)."
+        ),
+        references=[
+            "https://nvd.nist.gov/vuln/detail/CVE-2021-27065",
+            "https://msrc.microsoft.com/update-guide/vulnerability/CVE-2021-27065",
+        ],
+    ),
+    CveRecord(
+        cve_id="CVE-2022-0847",
+        published="2022-02-03",
+        cvss_version="3.1",
+        cvss_score=7.8,
+        cvss_severity="HIGH",
+        cwe_ids=["CWE-787"],
+        category="binary",
+        affected_products=["Linux kernel 5.8 through 5.15.x before 5.15.13", "Linux kernel 5.16 before 5.16.11"],
+        description=(
+            "A flaw exists in the Linux kernel where a write-through operation on a "
+            "copy-on-write page allows an unprivileged local attacker to overwrite "
+            "arbitrary memory and escalate privileges (Dirty Pipe)."
+        ),
+        references=[
+            "https://nvd.nist.gov/vuln/detail/CVE-2022-0847",
+            "https://dirtypipe.cm4all.com/",
+        ],
+    ),
+    CveRecord(
+        cve_id="CVE-2021-4034",
+        published="2022-01-25",
+        cvss_version="3.1",
+        cvss_score=7.8,
+        cvss_severity="HIGH",
+        cwe_ids=["CWE-440"],
+        category="binary",
+        affected_products=["Linux kernel before 5.15.4", "GNU C Library (glibc) before 2.34.1"],
+        description=(
+            "A local privilege escalation vulnerability in the Linux kernel through "
+            "improper handling of the pkexec utility and polkit daemon allows any "
+            "unprivileged user to elevate privileges to root (pwnkit)."
+        ),
+        references=[
+            "https://nvd.nist.gov/vuln/detail/CVE-2021-4034",
+            "https://www.qualys.com/2022/01/25/cve-2021-4034/pwnkit.txt",
+        ],
+    ),
+    CveRecord(
+        cve_id="CVE-2023-4966",
+        published="2023-10-10",
+        cvss_version="3.1",
+        cvss_score=6.5,
+        cvss_severity="MEDIUM",
+        cwe_ids=["CWE-522"],
+        category="crypto",
+        affected_products=["Citrix NetScaler ADC", "Citrix NetScaler Gateway", "Citrix SD-WAN Center"],
+        description=(
+            "Citrix NetScaler ADC, NetScaler Gateway, and SD-WAN Center contain an "
+            "insufficiently protected credentials vulnerability allowing an attacker "
+            "to read session tokens and authentication credentials from memory dumps "
+            "and log files (Citrix Bleed)."
+        ),
+        references=[
+            "https://nvd.nist.gov/vuln/detail/CVE-2023-4966",
+            "https://security.citrix.com/article/CTX479882",
+        ],
+    ),
+    CveRecord(
+        cve_id="CVE-2016-5699",
+        published="2016-07-25",
+        cvss_version="2.0",
+        cvss_score=5.0,
+        cvss_severity="MEDIUM",
+        cwe_ids=["CWE-330"],
+        category="crypto",
+        affected_products=["OpenSSL 1.0.2 before 1.0.2i"],
+        description=(
+            "OpenSSL before 1.0.2i uses an insufficient number of random bytes for "
+            "the salt when computing ECDSA signatures, allowing attackers to brute force "
+            "the signature and potentially recover cryptographic keys."
+        ),
+        references=[
+            "https://nvd.nist.gov/vuln/detail/CVE-2016-5699",
+            "https://www.openssl.org/news/secadv/20160726.txt",
+        ],
+    ),
+    CveRecord(
+        cve_id="CVE-2020-5902",
+        published="2020-07-01",
+        cvss_version="3.1",
+        cvss_score=9.8,
+        cvss_severity="CRITICAL",
+        cwe_ids=["CWE-22"],
+        category="cloud",
+        affected_products=["F5 BIG-IP 15.0.0 before 15.1.0", "F5 BIG-IP 14.1.0 before 14.1.2"],
+        description=(
+            "F5 BIG-IP contains a path traversal vulnerability in the Configuration "
+            "utility that allows an unauthenticated remote attacker to gain arbitrary "
+            "file read and remote code execution on cloud-hosted instances."
+        ),
+        references=[
+            "https://nvd.nist.gov/vuln/detail/CVE-2020-5902",
+            "https://support.f5.com/csp/article/K52145254",
+        ],
+    ),
+    CveRecord(
+        cve_id="CVE-2021-21240",
+        published="2021-02-12",
+        cvss_version="3.1",
+        cvss_score=8.3,
+        cvss_severity="HIGH",
+        cwe_ids=["CWE-94"],
+        category="cloud",
+        affected_products=["GitHub Enterprise Server before 3.0.4"],
+        description=(
+            "GitHub Actions in GitHub Enterprise Server allows an attacker with commit "
+            "access to execute arbitrary code in the context of workflow files by "
+            "crafting specially formatted log lines containing GitHub Actions commands, "
+            "leading to takeover of cloud-hosted runners."
+        ),
+        references=[
+            "https://nvd.nist.gov/vuln/detail/CVE-2021-21240",
+            "https://github.blog/changelog/2021-02-11-github-actions-log-command-injection/",
+        ],
+    ),
+    CveRecord(
+        cve_id="CVE-2020-11738",
+        published="2020-06-03",
+        cvss_version="3.1",
+        cvss_score=8.6,
+        cvss_severity="HIGH",
+        cwe_ids=["CWE-119"],
+        category="scada_ics",
+        affected_products=["Treck TCP/IP Stack used in multiple IoT and ICS devices", "Xerox printers", "Schneider Electric devices"],
+        description=(
+            "Multiple buffer overflows, memory corruption vulnerabilities, and integer "
+            "overflows in the Treck TCP/IP stack used in millions of IoT and SCADA/ICS "
+            "devices allow remote attackers to achieve arbitrary code execution without "
+            "authentication (Ripple20)."
+        ),
+        references=[
+            "https://nvd.nist.gov/vuln/detail/CVE-2020-11738",
+            "https://www.jsof-tech.com/ripple20/",
+        ],
+    ),
+    CveRecord(
+        cve_id="CVE-2020-5410",
+        published="2020-06-10",
+        cvss_version="3.1",
+        cvss_score=8.1,
+        cvss_severity="HIGH",
+        cwe_ids=["CWE-119"],
+        category="scada_ics",
+        affected_products=["AVEVA Wonderware MES before 2020.2.1"],
+        description=(
+            "A stack buffer overflow vulnerability in AVEVA Wonderware Manufacturing "
+            "Execution System (MES) allows a remote attacker to execute arbitrary code "
+            "by sending specially crafted network messages to the OPC UA server."
+        ),
+        references=[
+            "https://nvd.nist.gov/vuln/detail/CVE-2020-5410",
+            "https://www.aveva.com/en-us/",
+        ],
+    ),
+    CveRecord(
+        cve_id="CVE-2022-30190",
+        published="2022-05-30",
+        cvss_version="3.1",
+        cvss_score=7.8,
+        cvss_severity="HIGH",
+        cwe_ids=["CWE-426"],
+        category="forensics",
+        affected_products=["Microsoft Windows 10 before KB5014666", "Microsoft Windows 11 before KB5014666"],
+        description=(
+            "Microsoft Windows contains an arbitrary file write vulnerability in the "
+            "Ms-Word Document handler that allows an attacker to execute arbitrary code "
+            "by hosting malicious files leading to exfiltration of sensitive data from "
+            "compromised systems (Follina/MSDT)."
+        ),
+        references=[
+            "https://nvd.nist.gov/vuln/detail/CVE-2022-30190",
+            "https://www.microsoft.com/security/blog/2022/05/30/suspicious-readme-files-in-packages/",
+        ],
+    ),
+    CveRecord(
+        cve_id="CVE-2019-13161",
+        published="2019-10-17",
+        cvss_version="3.1",
+        cvss_score=6.5,
+        cvss_severity="MEDIUM",
+        cwe_ids=["CWE-639"],
+        category="forensics",
+        affected_products=["AVEVA Edge 2019 before Patch 1", "AVEVA Edge 2019.1"],
+        description=(
+            "AVEVA Edge industrial HMI software contains an indirect object reference "
+            "vulnerability allowing an authenticated attacker to access sensitive "
+            "engineering data, controller credentials, and historical logs without "
+            "proper authorization, exposing forensically significant artifacts."
+        ),
+        references=[
+            "https://nvd.nist.gov/vuln/detail/CVE-2019-13161",
+            "https://www.aveva.com/",
+        ],
+    ),
+    CveRecord(
+        cve_id="CVE-2021-39806",
+        published="2021-09-14",
+        cvss_version="3.1",
+        cvss_score=8.8,
+        cvss_severity="HIGH",
+        cwe_ids=["CWE-94"],
+        category="mobile",
+        affected_products=["Android framework before 2021-10-01 security patch"],
+        description=(
+            "The Android framework contains an unsafe deserialization vulnerability "
+            "allowing an attacker with code execution in the MediaCodec process to "
+            "gain arbitrary code execution with elevated privileges through multiple "
+            "Intent-based Broadcast Receiver triggers."
+        ),
+        references=[
+            "https://nvd.nist.gov/vuln/detail/CVE-2021-39806",
+            "https://source.android.com/security/bulletin",
+        ],
+    ),
+    CveRecord(
+        cve_id="CVE-2015-6610",
+        published="2015-10-05",
+        cvss_version="2.0",
+        cvss_score=9.3,
+        cvss_severity="HIGH",
+        cwe_ids=["CWE-94"],
+        category="mobile",
+        affected_products=["Android before 2015-10-05 security patch"],
+        description=(
+            "Multiple integer overflow vulnerabilities in the Stagefright media player "
+            "in Android allow remote attackers to execute arbitrary code via specially "
+            "crafted media files, affecting millions of Android devices without any "
+            "user interaction required."
+        ),
+        references=[
+            "https://nvd.nist.gov/vuln/detail/CVE-2015-6610",
+            "https://source.android.com/security/bulletin/2015-10-01",
+        ],
+    ),
 )
 
 

@@ -3,6 +3,9 @@ from __future__ import annotations
 import json
 import unittest
 from datetime import datetime, timedelta, timezone
+from unittest import mock
+
+import ctf_generator.dashboard_server as ds
 
 from ctf_generator.competition_service import ChallengeCatalog, ChallengeMeta, CompetitionService
 from ctf_generator.dashboard_server import (
@@ -429,6 +432,244 @@ class NotFoundTests(unittest.TestCase):
         response = h.call(DashboardRequest(method="GET", path="/nope"))
 
         self.assertEqual(response.status, 404)
+
+
+def make_service_with_teams(teams: dict[str, str]) -> CompetitionService:
+    store = InMemoryEventStore(clock=lambda: 1700000000.0)
+    return CompetitionService(
+        store=store,
+        catalog=make_catalog(),
+        config=make_config(),
+        scoring_engine=StaticPointsEngine(),
+        teams=teams,
+    )
+
+
+def html_get(path: str, **kwargs) -> DashboardRequest:
+    headers = dict(kwargs.pop("headers", {}) or {})
+    headers.setdefault("Accept", "text/html")
+    return DashboardRequest(method="GET", path=path, headers=headers, **kwargs)
+
+
+class HtmlRouteTests(unittest.TestCase):
+    def test_login_page_is_html_with_password_field(self) -> None:
+        h = Harness()
+        response = h.call(html_get("/login"))
+
+        self.assertEqual(response.status, 200)
+        self.assertIn("text/html", response.headers["Content-Type"])
+        self.assertIn('type="password"', response.body)
+
+    def test_root_html_unauthenticated_redirects_to_login(self) -> None:
+        h = Harness()
+        response = h.call(html_get("/"))
+
+        self.assertEqual(response.status, 302)
+        self.assertEqual(response.headers.get("Location"), "/login")
+
+    def test_root_html_authenticated_returns_dashboard(self) -> None:
+        h = Harness()
+        token, _ = h.login()
+
+        response = h.call(html_get("/", cookies={SESSION_COOKIE: token}))
+
+        self.assertEqual(response.status, 200)
+        self.assertIn("text/html", response.headers["Content-Type"])
+        self.assertIn("Admin Dashboard", response.body)
+
+    def test_root_without_html_accept_still_returns_json(self) -> None:
+        # Back-compat: an API client (no Accept: text/html) hits the JSON
+        # dashboard handler unchanged.
+        h = Harness()
+        token, _ = h.login()
+
+        response = h.call(DashboardRequest(method="GET", path="/", cookies={SESSION_COOKIE: token}))
+
+        self.assertEqual(response.status, 200)
+        self.assertIn("application/json", response.headers["Content-Type"])
+        payload = json.loads(response.body)
+        self.assertIn("progress", payload)
+
+    def test_dashboard_html_escapes_malicious_team_name(self) -> None:
+        service = make_service_with_teams({"alpha": "<script>alert('xss')</script>"})
+        service.record_event("solve", "alpha", "web-1", payload={"submission_id": "s1"})
+        sessions = InMemorySessionStore(token_factory=SequentialTokens())
+        auth = make_auth()
+        clock = ScriptedClock([START + timedelta(seconds=i) for i in range(10)])
+
+        login = dispatch(login_request(), service=service, sessions=sessions, auth=auth, clock=clock)
+        token = login.cookies[SESSION_COOKIE]
+
+        response = dispatch(
+            html_get("/", cookies={SESSION_COOKIE: token}),
+            service=service,
+            sessions=sessions,
+            auth=auth,
+            clock=clock,
+        )
+
+        self.assertEqual(response.status, 200)
+        # The raw injected tag must never appear; it must be entity-encoded.
+        self.assertNotIn("<script>alert('xss')</script>", response.body)
+        self.assertIn("&lt;script&gt;", response.body)
+
+    def test_public_html_reachable_with_token(self) -> None:
+        h = Harness()
+        response = h.call(html_get("/public", query={"token": h.auth.public_token}))
+
+        self.assertEqual(response.status, 200)
+        self.assertIn("text/html", response.headers["Content-Type"])
+
+    def test_public_html_rejects_admin_session_without_token(self) -> None:
+        h = Harness()
+        token, _ = h.login()
+
+        response = h.call(html_get("/public", cookies={SESSION_COOKIE: token}))
+
+        self.assertEqual(response.status, 401)
+
+    def test_admin_dashboard_not_reachable_with_public_token(self) -> None:
+        h = Harness()
+        # Public token stuffed into the session cookie must not unlock the
+        # admin HTML page -- it redirects to login instead.
+        response = h.call(html_get("/", cookies={SESSION_COOKIE: h.auth.public_token}))
+
+        self.assertEqual(response.status, 302)
+        self.assertEqual(response.headers.get("Location"), "/login")
+
+
+class MultiAdminTests(unittest.TestCase):
+    def make_multi_auth(self) -> AuthConfig:
+        return AuthConfig.from_users(
+            [("admin", "hunter2"), ("root", "toor")],
+            public_token="pub-token-fixed",
+            session_ttl_seconds=300,
+            pbkdf2_iterations=1000,
+            salt=b"fixed-salt-16bb",
+        )
+
+    def _login(self, auth: AuthConfig, username: str, password: str):
+        sessions = InMemorySessionStore(token_factory=SequentialTokens())
+        clock = ScriptedClock([START + timedelta(seconds=i) for i in range(5)])
+        return dispatch(
+            login_request(username=username, password=password),
+            service=make_service(),
+            sessions=sessions,
+            auth=auth,
+            clock=clock,
+        )
+
+    def test_both_admins_can_log_in(self) -> None:
+        auth = self.make_multi_auth()
+
+        first = self._login(auth, "admin", "hunter2")
+        second = self._login(auth, "root", "toor")
+
+        self.assertEqual(first.status, 200)
+        self.assertIn(SESSION_COOKIE, first.cookies)
+        self.assertEqual(second.status, 200)
+        self.assertIn(SESSION_COOKIE, second.cookies)
+
+    def test_wrong_password_rejected_for_multi_admin(self) -> None:
+        auth = self.make_multi_auth()
+
+        response = self._login(auth, "root", "wrong")
+
+        self.assertEqual(response.status, 401)
+
+    def test_unknown_user_rejected_for_multi_admin(self) -> None:
+        auth = self.make_multi_auth()
+
+        response = self._login(auth, "ghost", "toor")
+
+        self.assertEqual(response.status, 401)
+
+    def test_single_admin_create_still_logs_in(self) -> None:
+        # Back-compat: a config built via create() (no admins roster) still
+        # authenticates via the verify_any fallback.
+        auth = make_auth()
+
+        response = self._login(auth, "admin", "hunter2")
+
+        self.assertEqual(response.status, 200)
+
+
+class LoginTimingTests(unittest.TestCase):
+    """Regression: login must not leak whether a username exists via response
+    timing. We can't assert wall-clock timing deterministically/offline, so we
+    assert the underlying invariant that produces it: the number of (expensive)
+    PBKDF2 evaluations is identical for a valid vs. an unknown username."""
+
+    def _count_pbkdf2(self, fn) -> int:
+        real = ds.hashlib.pbkdf2_hmac
+        calls = {"n": 0}
+
+        def counting(*args, **kwargs):
+            calls["n"] += 1
+            return real(*args, **kwargs)
+
+        with mock.patch.object(ds.hashlib, "pbkdf2_hmac", counting):
+            fn()
+        return calls["n"]
+
+    def test_single_admin_hashes_regardless_of_username(self) -> None:
+        auth = make_auth()  # single admin "admin"
+        known = self._count_pbkdf2(lambda: auth.verify_any("admin", "nope"))
+        unknown = self._count_pbkdf2(lambda: auth.verify_any("ghost", "nope"))
+        self.assertGreaterEqual(known, 1)
+        self.assertEqual(known, unknown)
+
+    def test_verify_password_hashes_regardless_of_username(self) -> None:
+        auth = make_auth()
+        known = self._count_pbkdf2(lambda: auth.verify_password("admin", "nope"))
+        unknown = self._count_pbkdf2(lambda: auth.verify_password("ghost", "nope"))
+        self.assertGreaterEqual(known, 1)
+        self.assertEqual(known, unknown)
+
+    def test_multi_admin_hashes_regardless_of_username(self) -> None:
+        auth = AuthConfig.from_users(
+            [("admin", "hunter2"), ("root", "toor")],
+            public_token="pub-token-fixed",
+            pbkdf2_iterations=1000,
+            salt=b"fixed-salt-16bb",
+        )
+        known = self._count_pbkdf2(lambda: auth.verify_any("root", "nope"))
+        unknown = self._count_pbkdf2(lambda: auth.verify_any("ghost", "nope"))
+        self.assertGreaterEqual(known, 1)
+        self.assertEqual(known, unknown)
+
+    def test_constant_time_fix_preserves_correctness(self) -> None:
+        auth = make_auth()
+        self.assertTrue(auth.verify_any("admin", "hunter2"))
+        self.assertFalse(auth.verify_any("admin", "wrong"))
+        self.assertFalse(auth.verify_any("ghost", "hunter2"))
+        self.assertTrue(auth.verify_password("admin", "hunter2"))
+        self.assertFalse(auth.verify_password("ghost", "hunter2"))
+
+    def test_uses_constant_time_compare_digest(self) -> None:
+        # The secret comparisons must go through hmac/secrets.compare_digest,
+        # never ``==``. Assert compare_digest is actually invoked on a login.
+        auth = make_auth()
+        real = ds.secrets.compare_digest
+        calls = {"n": 0}
+
+        def counting(*args, **kwargs):
+            calls["n"] += 1
+            return real(*args, **kwargs)
+
+        with mock.patch.object(ds.secrets, "compare_digest", counting):
+            auth.verify_any("admin", "hunter2")
+        self.assertGreater(calls["n"], 0)
+
+
+class Pbkdf2StrengthTests(unittest.TestCase):
+    def test_default_iterations_meet_owasp_2023_minimum(self) -> None:
+        auth = AuthConfig.create("admin", "pw", public_token="x")
+        self.assertGreaterEqual(auth.pbkdf2_iterations, 600_000)
+
+    def test_from_users_default_iterations_meet_owasp_2023_minimum(self) -> None:
+        auth = AuthConfig.from_users([("admin", "pw")], public_token="x")
+        self.assertGreaterEqual(auth.pbkdf2_iterations, 600_000)
 
 
 if __name__ == "__main__":

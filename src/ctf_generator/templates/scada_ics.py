@@ -680,6 +680,32 @@ def _mode_narrative(spec: ChallengeSpec, v: Variant) -> str:
     )
 
 
+def _deliverable_section(spec: ChallengeSpec, v: Variant) -> str:
+    """Mode-specific "what to submit" framing -- empty for red (unchanged today)."""
+    if spec.mode == "blue":
+        return f"""
+## Deliverable
+
+This is a defensive challenge: no live exploitation of the `plc` service is
+required or expected. Submit the flag exactly as recorded in the anomalous
+`read_holding_registers` log entry's `response_payload` field, produced by a
+source outside the engineering subnet (`{v.engineer_subnet}`) with
+`session: none`.
+"""
+    if spec.mode == "purple":
+        return f"""
+## Deliverable
+
+Reach the flag via either path (or both): the live control-logic bypass, or
+the anomalous entry in the register-write log. Whichever path you take,
+identify the anomalous source IP outside the engineering subnet
+(`{v.engineer_subnet}`) and note it alongside the flag -- a purple-mode
+submission should show both how the bypass was reached and how a defender
+would have detected it in the log.
+"""
+    return ""
+
+
 def _description(spec: ChallengeSpec, v: Variant, cve_record: "CveRecord | None") -> str:
     return f"""# {spec.title}
 
@@ -703,7 +729,7 @@ space (0-63) to find them.
 The flag format is `ctf{{...}}`. This challenge is generated with per-instance
 ports, register addresses, safe limits, and network identities; the exact
 values may differ across generated instances.
-"""
+{_deliverable_section(spec, v)}"""
 
 
 # --- public/hints.yaml -----------------------------------------------------------
@@ -737,8 +763,7 @@ def _hints(spec: ChallengeSpec, v: Variant) -> str:
 # --- private/solution.md --------------------------------------------------------
 
 
-def _solution(spec: ChallengeSpec, v: Variant) -> str:
-    flag_regs = _flag_registers(v.flag)
+def _solution_vuln_section(v: Variant) -> str:
     return f"""# Private Solution
 
 ## Vulnerability
@@ -751,7 +776,12 @@ registers `{v.flag_reg_start}..{v.flag_reg_start + v.flag_reg_count - 1}` are
 zeroed until the bypass condition fires: interlock coil OFF **and** setpoint
 register value greater than `{v.safe_limit}`.
 
-## Live exploit path (red / purple)
+"""
+
+
+def _solution_live_section(v: Variant) -> str:
+    flag_regs = _flag_registers(v.flag)
+    return f"""## Live exploit path (red / purple)
 
 1. Read coils `0..15` (function 0x01) and holding registers `0..63` (function
    0x03) to find the interlock coil `{v.interlock_coil}` and setpoint register
@@ -764,7 +794,11 @@ register value greater than `{v.safe_limit}`.
    ASCII bytes, big-endian, and concatenate: registers `{flag_regs}` decode to
    the flag.
 
-## Log analysis path (blue / purple)
+"""
+
+
+def _solution_log_section(v: Variant) -> str:
+    return f"""## Log analysis path (blue / purple)
 
 In `public/evidence/register_write_log.jsonl`, baseline writes originate from
 `{v.engineer_ip}` (inside `{v.engineer_subnet}`, `session: engineering_workstation`).
@@ -778,12 +812,82 @@ The anomalous sequence originates from `{v.attacker_ip}` (`session: none`):
    recorded the response payload directly: `response_payload` on that event
    is the flag.
 
-## Flag
+"""
+
+
+def _solution_flag_section(v: Variant) -> str:
+    return f"""## Flag
 
 ```
 {v.flag}
 ```
 """
+
+
+def _solution_blue_response_section(v: Variant) -> str:
+    """Blue-only deliverable: no offensive steps -- an incident-response writeup."""
+    return f"""## Indicators of compromise
+
+| field | value |
+| --- | --- |
+| anomalous source IP | `{v.attacker_ip}` |
+| expected engineering subnet | `{v.engineer_subnet}` |
+| forced-off interlock coil | `{v.interlock_coil}` |
+| setpoint register pushed out of range | `{v.setpoint_reg}` (value `{v.malicious_setpoint}` > safe limit `{v.safe_limit}`) |
+| exfiltration channel | `read_holding_registers` at `{v.flag_reg_start}`, response payload recorded verbatim by the historian |
+
+## Recommended remediation
+
+1. Block Modbus/TCP writes to `{v.plant_name}`'s PLC from any address outside
+   `{v.engineer_subnet}` at the network layer -- the protocol itself has no
+   authentication to enforce this.
+2. Add an interlock-state alarm: any `write_single_coil` on address
+   `{v.interlock_coil}` that clears the interlock outside a maintenance window
+   should page on-call staff immediately.
+3. Add a setpoint bounds check independent of the PLC logic (e.g. in the
+   historian or a network-layer Modbus proxy) that rejects
+   `write_single_register` values on `{v.setpoint_reg}` above `{v.safe_limit}`.
+
+## Deliverable
+
+The incident-response submission is the flag recorded verbatim in the
+anomalous `read_holding_registers` log entry's `response_payload` field --
+no live exploitation of the `plc` service is required or expected in this
+mode.
+
+"""
+
+
+def _solution_purple_correlation_section(v: Variant) -> str:
+    """Purple-only addendum: ties the live exploit to the detection signature."""
+    return f"""## Detection & response guidance (purple)
+
+The write sequence in step 2-3 above is exactly the anomaly a defender should
+flag in `public/evidence/register_write_log.jsonl`: a `session: none` source
+outside `{v.engineer_subnet}` writing coil `{v.interlock_coil}` OFF followed by
+a `{v.setpoint_reg}` write above `{v.safe_limit}`. A complete purple-mode
+answer correlates the live bypass with that log signature and recommends the
+same remediation as the blue-only deliverable: source-address filtering on
+Modbus writes, an interlock-state alarm, and an independent setpoint bounds
+check on `{v.setpoint_reg}`.
+
+"""
+
+
+def _solution(spec: ChallengeSpec, v: Variant) -> str:
+    vuln = _solution_vuln_section(v)
+    live = _solution_live_section(v)
+    log = _solution_log_section(v)
+    flag_section = _solution_flag_section(v)
+
+    if spec.mode == "blue":
+        # No offensive/live-exploit section: a defensive deliverable only.
+        return vuln + log + _solution_blue_response_section(v) + flag_section
+    if spec.mode == "purple":
+        return vuln + live + log + _solution_purple_correlation_section(v) + flag_section
+    # red (and any unrecognized mode): unchanged from the original, byte-identical
+    # combined write-up that already passes real-Docker validation.
+    return vuln + live + log + flag_section
 
 
 # --- private/solver.py -----------------------------------------------------------
@@ -893,7 +997,76 @@ if __name__ == "__main__":
 '''
 
 
+# --- private/solver.py (blue-only variant: no offensive/live-exploit code) -------
+#
+# Blue mode ships a distinct, defensive-only solver: it never speaks Modbus/TCP
+# to the live plc, and has no ModbusClient class at all -- it is an
+# incident-responder's log-triage script, not an attacker's exploit script.
+
+_BLUE_SOLVER_TEMPLATE = '''from __future__ import annotations
+
+import argparse
+import json
+import sys
+from pathlib import Path
+
+# Generated per-instance layout.
+ENGINEER_SUBNET_PREFIX = "__ENGINEER_SUBNET_PREFIX__"
+ATTACKER_PREFIX = "__ATTACKER_PREFIX__"
+
+
+def solve_from_log(log_path: Path) -> str:
+    """Incident-response triage: find the anomalous read-with-payload event.
+
+    The anomaly is a Modbus session with no engineering-workstation session
+    (``session: none``) whose source address falls outside the engineering
+    subnet -- the same signature a defender would flag by hand.
+    """
+    for line in log_path.read_text(encoding="utf-8").splitlines():
+        if not line.strip():
+            continue
+        event = json.loads(line)
+        if event.get("session") == "none" and event.get("src_ip", "").startswith(ATTACKER_PREFIX):
+            payload = event.get("response_payload")
+            if payload:
+                return payload
+    raise RuntimeError("anomalous read-with-payload event not found in log")
+
+
+def main() -> int:
+    parser = argparse.ArgumentParser(
+        description="Incident-response triage script: no live PLC exploitation.",
+    )
+    parser.add_argument(
+        "--log-path",
+        default="public/evidence/register_write_log.jsonl",
+        help="path to the register-write log",
+    )
+    args = parser.parse_args()
+
+    flag = solve_from_log(Path(args.log_path))
+    print(flag)
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())
+'''
+
+
+def _blue_solver(v: Variant) -> str:
+    attacker_prefix = v.attacker_ip.rsplit(".", 1)[0] + "."
+    text = _BLUE_SOLVER_TEMPLATE
+    text = text.replace(
+        "__ENGINEER_SUBNET_PREFIX__", v.engineer_subnet.split("/")[0].rsplit(".", 1)[0] + "."
+    )
+    text = text.replace("__ATTACKER_PREFIX__", attacker_prefix)
+    return text
+
+
 def _solver(v: Variant, spec: ChallengeSpec) -> str:
+    if spec.mode == "blue":
+        return _blue_solver(v)
     default_mode = "live" if spec.mode == "red" else "log"
     attacker_prefix = v.attacker_ip.rsplit(".", 1)[0] + "."
     text = _SOLVER_TEMPLATE

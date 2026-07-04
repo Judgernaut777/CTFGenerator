@@ -8,10 +8,21 @@ reading the instance's IAM role temporary credentials from the (mocked)
 metadata service, then replays those credentials against an internal
 storage service to read the flag object.
 
-RED mode ships the fetch API, the mock metadata service, and the storage
-service. PURPLE mode additionally frames a detection rule for the SSRF
-egress traffic (still emitted in RED mode too, but inert/reference-only
-there) so the same ``REQUIRED_FILES`` set applies to every supported mode.
+RED mode ships a pure offense challenge: exploit the fetch API, steal the
+IAM credentials from the mock metadata service, and read the flag object
+from storage. Its player-facing framing and private solution are exploit-
+only; the detection rule file is still emitted (so ``REQUIRED_FILES`` stays
+identical across modes) but is explicitly disabled and marked reference-
+only, and there is no detection/response deliverable expected of the player.
+
+PURPLE mode is a hybrid challenge: the player must both (a) complete the
+same exploit chain as RED, and (b) produce a detection/response deliverable
+-- confirming the (enabled) SSRF-egress detection rule at
+``detection/ssrf_egress_rule.yaml`` would have fired on the attack traffic
+they just generated, and proposing concrete remediations. The public
+description and the private solution both carry this additional purple-only
+section, so the two modes are materially different challenges even though
+they share the same vulnerable services.
 
 Pure module: ``render`` is a pure function of ``(spec, rng, cve_record)``.
 No network, filesystem, or clock access -- mirrors ``templates/tenant_export.py``.
@@ -130,7 +141,7 @@ def render(
         "services/storage/app.py": _storage_app(variant, object_path),
         "public/description.md": _description(spec, variant, cve_record),
         "public/hints.yaml": dump_yaml({"hints": public_hints}),
-        "private/solution.md": _solution(variant, object_path),
+        "private/solution.md": _solution(spec, variant, object_path),
         "private/solver.py": _solver(variant, object_path),
         "private/variant.json": _variant_json(spec, variant, object_path),
         "private/checkpoints.yaml": dump_yaml(
@@ -448,12 +459,24 @@ def _description(spec: ChallengeSpec, v: Variant, cve_record: "CveRecord | None"
     purple_paragraph = ""
     if spec.mode == "purple":
         purple_paragraph = (
-            "\n## Blue objective\n\n"
-            "Alongside the exploit, validate the detection rule at "
-            f"`detection/ssrf_egress_rule.yaml` (id `{v.rule_id}`): it should fire on "
-            "outbound requests from the `api` service to the metadata address "
-            f"`{METADATA_IP}`. Confirm the rule's match conditions against the traffic "
-            "your exploit generates.\n"
+            "\n## Blue objective (in addition to the exploit above)\n\n"
+            "This is a hybrid red/blue challenge: capturing the flag is only half "
+            "the task. You must also deliver a short detection-and-response "
+            "write-up covering:\n\n"
+            f"1. **Detection.** The rule at `detection/ssrf_egress_rule.yaml` "
+            f"(id `{v.rule_id}`) is enabled in this instance. Show that its match "
+            "conditions (`src_service: api`, "
+            f"`dest_ip: {METADATA_IP}`) would have fired on the egress traffic your "
+            "own exploit generated -- cite the specific request(s) that trip it.\n"
+            "2. **Impact.** State which credentials/data the rule would have let a "
+            "responder catch in time to revoke, had this been monitored live.\n"
+            "3. **Remediation.** Propose at least two concrete fixes to the `api` "
+            "service, e.g. enforcing an allow-list of fetch destinations instead of "
+            "a denylist, blocking link-local ranges (`169.254.0.0/16`) outright, or "
+            "requiring an IMDSv2-style hop-limited token for the metadata call so a "
+            "single-request SSRF proxy cannot complete the credential handshake.\n\n"
+            "Your private solution deliverable for this mode is the exploit chain "
+            "*plus* this write-up, not the exploit alone.\n"
         )
 
     return f"""# {spec.title}
@@ -479,7 +502,37 @@ differ across generated instances.
 """
 
 
-def _solution(v: Variant, object_path: str) -> str:
+def _solution(spec: ChallengeSpec, v: Variant, object_path: str) -> str:
+    purple_deliverable = ""
+    if spec.mode == "purple":
+        purple_deliverable = f"""
+
+## Additional (purple-mode) deliverable: detection & response write-up
+
+RED mode stops at step 5 above. This PURPLE instance also requires a
+detection/response deliverable, since the SSRF-egress rule at
+`detection/ssrf_egress_rule.yaml` (id `{v.rule_id}`) is enabled here:
+
+1. **Detection.** Every request your solver sends in steps 2-3 above is an
+   outbound call from the `api` service to `{METADATA_IP}` -- exactly the
+   `src_service: api` / `dest_ip: {METADATA_IP}` selection the rule matches
+   on. The write-up should quote those two requests as the triggering
+   events.
+2. **Impact.** A responder alerted by this rule at request time could revoke
+   role `{v.role_name}`'s temporary session token before it is replayed
+   against the storage service, preventing the read of
+   `{object_path}` entirely.
+3. **Remediation.** Recommend replacing the `api` service's hostname
+   denylist with an allow-list of permitted fetch destinations, blocking
+   `169.254.0.0/16` outright, and/or requiring an IMDSv2-style
+   hop-limited token exchange before the metadata service will answer a
+   credential request.
+
+Grading for this mode expects both the flag (from the exploit) and this
+write-up (or an equivalent structured answer covering the same three
+points) as the private deliverable.
+"""
+
     return f"""# Private Solution
 
 The `api` service fetches any attacker-supplied URL and only checks a small
@@ -506,7 +559,7 @@ Solve path:
 This teaches SSRF-to-cloud-credential-theft: input validation on the fetch
 service is necessary but not sufficient without also constraining what the
 service's own network identity can reach.
-"""
+""" + purple_deliverable
 
 
 def _solver(v: Variant, object_path: str) -> str:

@@ -32,6 +32,10 @@ cve = []
 # the user's own model/subscription.
 mcp = ["mcp>=1.2"]
 openai = ["openai>=1.40"]
+# Durable Postgres-backed event store (postgres_events.py) for real
+# competitions; a fake connection is injected in tests, so this extra is
+# only needed when connecting from a DSN with a real driver.
+postgres = ["psycopg[binary]>=3.1"]
 # The live dashboard (dashboard_server.py) is stdlib-only (http.server/hmac/
 # hashlib/secrets/pbkdf2); this extra is the opt-in gate / future home for
 # production niceties (e.g. a real WSGI server), not a package dependency.
