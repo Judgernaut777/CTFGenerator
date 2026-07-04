@@ -73,11 +73,29 @@ PUBLIC_TOKEN_HEADER = "X-Public-Token"
 PUBLIC_TOKEN_QUERY = "token"
 
 
+# Defense-in-depth headers sent on every response. The dashboard escapes all
+# server data (and renders it via textContent), so the CSP is a backstop, not
+# the only line of defence -- but it now genuinely exists (the module docstring
+# used to claim a "strict CSP" that was never emitted). The pages are fully
+# self-contained (inline script/style, same-origin fetch), so 'unsafe-inline'
+# script/style + connect-src 'self' is compatible; nothing loads from any
+# external origin.
+_COMMON_SECURITY_HEADERS: dict[str, str] = {
+    "X-Content-Type-Options": "nosniff",
+    "X-Frame-Options": "DENY",
+    "Referrer-Policy": "no-referrer",
+}
+_HTML_CSP = (
+    "default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; "
+    "connect-src 'self'; form-action 'self'; frame-ancestors 'none'; base-uri 'none'"
+)
+
+
 def _json_response(status: int, payload: object, cookies: dict[str, str] | None = None) -> DashboardResponse:
     return DashboardResponse(
         status=status,
         body=json.dumps(payload, sort_keys=True),
-        headers={"Content-Type": "application/json"},
+        headers={"Content-Type": "application/json", **_COMMON_SECURITY_HEADERS},
         cookies=dict(cookies) if cookies else {},
     )
 
@@ -250,6 +268,12 @@ class SessionStore(Protocol):
         session."""
         ...
 
+    def touch(self, token: str, *, now: datetime, ttl_seconds: int) -> Session | None:
+        """Extend a live session's expiry WITHOUT changing its token (sliding
+        expiry for idempotent reads). Returns ``None`` if ``token`` is not a
+        live session."""
+        ...
+
     def delete(self, token: str) -> None:
         ...
 
@@ -285,6 +309,13 @@ class InMemorySessionStore:
         )
         self._sessions[new_session.token] = new_session
         return new_session
+
+    def touch(self, token: str, *, now: datetime, ttl_seconds: int) -> Session | None:
+        session = self._sessions.get(token)
+        if session is None:
+            return None
+        session.expires_at = now + timedelta(seconds=ttl_seconds)
+        return session
 
     def delete(self, token: str) -> None:
         self._sessions.pop(token, None)
@@ -419,7 +450,11 @@ def _html_response(status: int, html: str, cookies: dict[str, str] | None = None
     return DashboardResponse(
         status=status,
         body=html,
-        headers={"Content-Type": "text/html; charset=utf-8"},
+        headers={
+            "Content-Type": "text/html; charset=utf-8",
+            "Content-Security-Policy": _HTML_CSP,
+            **_COMMON_SECURITY_HEADERS,
+        },
         cookies=dict(cookies) if cookies else {},
     )
 
@@ -484,10 +519,24 @@ def _handle_admin(
         return _error(401, "unauthorized")
 
     method = request.method.upper()
-    if method == "POST":
-        csrf = request.header(CSRF_HEADER) or ""
-        if not secrets.compare_digest(csrf, session.csrf_token):
-            return _error(403, "invalid csrf token")
+    if method != "POST":
+        # Idempotent read: validate and slide the expiry, but do NOT rotate the
+        # token. The dashboard fires several concurrent polls
+        # (/api/leaderboard + /api/progress + /api/feed) sharing one cookie;
+        # rotating on GET would invalidate the cookie for all but the first,
+        # 401 the rest, and bounce the whole page to /login on every refresh.
+        sessions.touch(session.token, now=now, ttl_seconds=auth.session_ttl_seconds)
+        body = _route_admin_body(request, method, service=service, now=now)
+        if isinstance(body, DashboardResponse):
+            return body
+        status, payload = body
+        return _json_response(status, payload)
+
+    # State-changing POST: enforce CSRF and rotate the session token (limits
+    # the replay window for the privilege-changing request class).
+    csrf = request.header(CSRF_HEADER) or ""
+    if not secrets.compare_digest(csrf, session.csrf_token):
+        return _error(403, "invalid csrf token")
 
     rotated = sessions.rotate(session.token, now=now, ttl_seconds=auth.session_ttl_seconds)
     if rotated is None:
@@ -561,6 +610,12 @@ def _parse_since(raw: str) -> int:
 # --- Thin http.server adapter (not unit-tested) ---------------------------------
 
 
+# Largest request body the dashboard will read (1 MiB). Event/login payloads
+# are tiny; a larger declared length is rejected rather than read, so a
+# malicious/negative Content-Length can't pin a worker thread reading forever.
+_MAX_BODY_BYTES = 1_048_576
+
+
 def serve(
     host: str,
     port: int,
@@ -569,19 +624,35 @@ def serve(
     sessions: SessionStore | None = None,
     auth: AuthConfig,
     clock: Clock | None = None,
+    secure_cookies: bool = False,
 ) -> ThreadingHTTPServer:
     """Build (and return, not-yet-serving-forever) a ``ThreadingHTTPServer``
     that adapts real HTTP traffic into :func:`dispatch` calls.
 
     Minimal by design -- all real logic lives in :func:`dispatch`, which is
     what tests exercise. Call ``.serve_forever()`` on the returned server.
+
+    ``secure_cookies`` adds the ``Secure`` attribute to Set-Cookie. The
+    built-in server speaks plain HTTP (browsers drop ``Secure`` cookies over
+    HTTP), so it defaults off; enable it when terminating TLS at a proxy.
     """
     sessions = sessions or InMemorySessionStore()
 
     class _Handler(BaseHTTPRequestHandler):
         def _dispatch(self) -> None:
-            length = int(self.headers.get("Content-Length", "0") or "0")
-            body = self.rfile.read(length).decode("utf-8") if length else ""
+            raw_length = self.headers.get("Content-Length", "0") or "0"
+            try:
+                length = int(raw_length)
+            except ValueError:
+                length = 0
+            if length < 0:
+                length = 0
+            if length > _MAX_BODY_BYTES:
+                self.send_response(413)
+                self.send_header("Content-Length", "0")
+                self.end_headers()
+                return
+            body = self.rfile.read(length).decode("utf-8", errors="replace") if length else ""
             split = urlsplit(self.path)
             query = {k: v for k, v in parse_qsl(split.query)}
             cookies: dict[str, str] = {}
@@ -605,11 +676,18 @@ def serve(
             self.send_response(response.status)
             for key, value in response.headers.items():
                 self.send_header(key, value)
+            secure_attr = "; Secure" if secure_cookies else ""
             for name, value in response.cookies.items():
                 if value:
-                    self.send_header("Set-Cookie", f"{name}={value}; Path=/; HttpOnly; SameSite=Lax")
+                    self.send_header(
+                        "Set-Cookie",
+                        f"{name}={value}; Path=/; HttpOnly; SameSite=Lax{secure_attr}",
+                    )
                 else:
-                    self.send_header("Set-Cookie", f"{name}=; Path=/; Max-Age=0; SameSite=Lax")
+                    self.send_header(
+                        "Set-Cookie",
+                        f"{name}=; Path=/; Max-Age=0; SameSite=Lax{secure_attr}",
+                    )
             payload = response.body.encode("utf-8")
             self.send_header("Content-Length", str(len(payload)))
             self.end_headers()

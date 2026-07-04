@@ -33,7 +33,19 @@ def validate_runtime(
     timeout_seconds: int = 90,
     keep_running: bool = False,
     runner: CommandRunner | None = None,
+    sandbox: bool = False,
 ) -> RuntimeValidationReport:
+    """Build/run a challenge's services and run its health check + solver.
+
+    ``sandbox`` controls WHERE the bundle's ``tests/healthcheck.py`` and
+    ``private/solver.py`` run. These are ordinary Python scripts shipped inside
+    the challenge; by default they run on the host with the operator's
+    privileges (fast, fine for challenges you generated yourself). For an
+    UNTRUSTED bundle, set ``sandbox=True`` to run them inside an ephemeral
+    ``python:3.11-slim`` container joined to the host network (so it still
+    reaches the published service port) with the challenge mounted read-only --
+    containing arbitrary bundle code that would otherwise get host execution.
+    """
     runner = runner or _run
     report = RuntimeValidationReport()
 
@@ -49,11 +61,11 @@ def validate_runtime(
         _record(report, runner(["docker", "compose", "-p", project_name, "build"], challenge_path, timeout_seconds))
         _record(report, runner(["docker", "compose", "-p", project_name, "up", "-d"], challenge_path, timeout_seconds))
         started = True
-        _wait_for_health(challenge_path, base_url, timeout_seconds, runner, report, manifest)
+        _wait_for_health(challenge_path, base_url, timeout_seconds, runner, report, manifest, sandbox)
         _record(
             report,
             runner(
-                _solve_command(base_url, manifest),
+                _solve_command(base_url, manifest, challenge_path, sandbox),
                 challenge_path,
                 timeout_seconds,
             ),
@@ -90,8 +102,9 @@ def _wait_for_health(
     runner: CommandRunner,
     report: RuntimeValidationReport,
     manifest: dict | None = None,
+    sandbox: bool = False,
 ) -> None:
-    command = _health_command(base_url, manifest)
+    command = _health_command(base_url, manifest, challenge_path, sandbox)
     deadline = time.monotonic() + timeout_seconds
     last_error = ""
     while time.monotonic() < deadline:
@@ -122,18 +135,36 @@ def _load_runtime_manifest(challenge_path: Path) -> dict | None:
     return data if isinstance(data, dict) else None
 
 
-def _health_command(base_url: str, manifest: dict | None) -> list[str]:
+def _health_command(
+    base_url: str, manifest: dict | None, challenge_path: Path | None = None, sandbox: bool = False
+) -> list[str]:
     args = _manifest_args(manifest, "health")
-    if args is not None:
-        return [sys.executable, "tests/healthcheck.py", *args]
-    return [sys.executable, "tests/healthcheck.py", "--base-url", base_url]
+    script_args = args if args is not None else ["--base-url", base_url]
+    return _script_command("tests/healthcheck.py", script_args, challenge_path, sandbox)
 
 
-def _solve_command(base_url: str, manifest: dict | None) -> list[str]:
+def _solve_command(
+    base_url: str, manifest: dict | None, challenge_path: Path | None = None, sandbox: bool = False
+) -> list[str]:
     args = _manifest_args(manifest, "solve")
-    if args is not None:
-        return [sys.executable, "private/solver.py", *args]
-    return [sys.executable, "private/solver.py", "--base-url", base_url]
+    script_args = args if args is not None else ["--base-url", base_url]
+    return _script_command("private/solver.py", script_args, challenge_path, sandbox)
+
+
+def _script_command(
+    script: str, script_args: list[str], challenge_path: Path | None, sandbox: bool
+) -> list[str]:
+    """The argv to run a bundle script -- on the host by default, or inside an
+    ephemeral read-only container when ``sandbox`` is set (see
+    :func:`validate_runtime`)."""
+    if sandbox and challenge_path is not None:
+        abs_path = str(Path(challenge_path).resolve())
+        return [
+            "docker", "run", "--rm", "--network", "host",
+            "-v", f"{abs_path}:/work:ro", "-w", "/work",
+            "python:3.11-slim", "python", script, *script_args,
+        ]
+    return [sys.executable, script, *script_args]
 
 
 def _manifest_args(manifest: dict | None, key: str) -> list[str] | None:
