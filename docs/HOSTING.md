@@ -232,12 +232,20 @@ connection from a DSN, so nothing in the core package depends on it.
   `POST /api/event`) all require a valid, non-expired session cookie issued
   by `POST /login` after a PBKDF2 (200,000-iteration, per-user-salted)
   password check.
-- **Session rotation** — every authenticated request rotates the session
-  token; the old token stops working immediately. Always carry forward the
-  newest `Set-Cookie` value.
+- **Session rotation** — state-changing `POST`s rotate the session token and
+  the old token stops working immediately (carry forward the newest
+  `Set-Cookie`). Idempotent `GET`s do **not** rotate — they only slide the
+  expiry — so the dashboard's concurrent polls don't invalidate each other.
 - **CSRF** — every `POST` additionally requires a matching `X-CSRF-Token`
   header (the token returned once by `/login`), checked with a
   constant-time comparison.
+- **Response headers** — every response carries `X-Content-Type-Options:
+  nosniff`, `X-Frame-Options: DENY`, and `Referrer-Policy: no-referrer`; HTML
+  pages additionally carry a strict `Content-Security-Policy` (self-contained,
+  no external origins).
+- **Cookies over TLS** — the built-in server speaks plain HTTP. When you put
+  it behind a TLS-terminating proxy, pass `serve --secure-cookie` to add the
+  `Secure` attribute to session cookies.
 - **Public routes are a hard boundary** — `/public/scoreboard`, `/public/feed`,
   and the `/public` HTML page require only the separate public token
   (`X-Public-Token` header or `?token=`), are checked with constant-time
@@ -247,6 +255,12 @@ connection from a DSN, so nothing in the core package depends on it.
 - **What the public surface exposes** — a redacted leaderboard (display
   name, rank, score, solve count) and a redacted solve feed; no team ids, no
   per-challenge admin detail.
+- **Validating untrusted bundles** — `validate-runtime` runs a challenge's
+  own `tests/healthcheck.py` and `private/solver.py`. By default these run on
+  the host with your privileges (fine for challenges you generated). For a
+  bundle you did **not** author, pass `validate-runtime --sandbox` to run
+  those scripts inside an ephemeral read-only `python:3.11-slim` container
+  instead of on the host.
 - **MCP / Docker boundary** — if you also run `ctfgen-mcp` to let an MCP
   host draft challenge metadata, note that Docker execution, AI-agent
   evaluation, and this competition dashboard are deliberately **not**

@@ -188,31 +188,54 @@ class AdminAuthTests(unittest.TestCase):
         payload = json.loads(response.body)
         self.assertIn("progress", payload)
 
-    def test_token_rotates_on_each_authenticated_request(self) -> None:
+    def test_get_does_not_rotate_token(self) -> None:
+        # Idempotent reads must NOT rotate: the cookie stays valid so the
+        # dashboard's concurrent polls don't invalidate each other.
         h = Harness()
         token, _ = h.login()
 
         first = h.call(DashboardRequest(method="GET", path="/api/progress", cookies={SESSION_COOKIE: token}))
-        new_token = first.cookies[SESSION_COOKIE]
+        self.assertEqual(first.status, 200)
+        self.assertNotIn(SESSION_COOKIE, first.cookies)  # no rotation cookie set
 
-        self.assertNotEqual(new_token, token)
-        # Old token is now dead.
-        replay = h.call(DashboardRequest(method="GET", path="/api/progress", cookies={SESSION_COOKIE: token}))
-        self.assertEqual(replay.status, 401)
-
-        # New token works, and rotates again.
-        second = h.call(DashboardRequest(method="GET", path="/api/progress", cookies={SESSION_COOKIE: new_token}))
+        # Same token still works on subsequent reads.
+        second = h.call(DashboardRequest(method="GET", path="/api/progress", cookies={SESSION_COOKIE: token}))
         self.assertEqual(second.status, 200)
-        self.assertNotEqual(second.cookies[SESSION_COOKIE], new_token)
 
-    def test_rotated_away_token_rejected(self) -> None:
+    def test_concurrent_polls_sharing_one_cookie_all_succeed(self) -> None:
+        # Regression for the token-rotation self-DoS: the page fires
+        # /api/leaderboard + /api/progress + /api/feed with the same cookie;
+        # before the fix all but the first 401'd and the page bounced to /login.
         h = Harness()
         token, _ = h.login()
-        h.call(DashboardRequest(method="GET", path="/api/leaderboard", cookies={SESSION_COOKIE: token}))
+        for path in ("/api/leaderboard", "/api/progress", "/api/feed"):
+            resp = h.call(DashboardRequest(method="GET", path=path, cookies={SESSION_COOKIE: token}))
+            self.assertEqual(resp.status, 200, f"{path} should not 401")
 
-        stale = h.call(DashboardRequest(method="GET", path="/api/leaderboard", cookies={SESSION_COOKIE: token}))
+    def test_post_rotates_token_and_old_token_dies(self) -> None:
+        h = Harness()
+        token, csrf = h.login()
 
-        self.assertEqual(stale.status, 401)
+        event = {"type": "solve", "team_id": "alpha", "challenge_id": "web-1"}
+        first = h.call(
+            DashboardRequest(
+                method="POST",
+                path="/api/event",
+                body=json.dumps(event),
+                headers={CSRF_HEADER: csrf},
+                cookies={SESSION_COOKIE: token},
+            )
+        )
+        self.assertEqual(first.status, 201)
+        new_token = first.cookies[SESSION_COOKIE]
+        self.assertNotEqual(new_token, token)
+
+        # Old token is dead after a state-changing POST.
+        replay = h.call(DashboardRequest(method="GET", path="/api/progress", cookies={SESSION_COOKIE: token}))
+        self.assertEqual(replay.status, 401)
+        # New token works.
+        ok = h.call(DashboardRequest(method="GET", path="/api/progress", cookies={SESSION_COOKIE: new_token}))
+        self.assertEqual(ok.status, 200)
 
     def test_expired_session_rejected(self) -> None:
         # ttl=1s; clock jumps 10s between login and the next call.
@@ -670,6 +693,23 @@ class Pbkdf2StrengthTests(unittest.TestCase):
     def test_from_users_default_iterations_meet_owasp_2023_minimum(self) -> None:
         auth = AuthConfig.from_users([("admin", "pw")], public_token="x")
         self.assertGreaterEqual(auth.pbkdf2_iterations, 600_000)
+
+
+class SecurityHeaderTests(unittest.TestCase):
+    def test_html_pages_carry_csp_and_hardening_headers(self) -> None:
+        h = Harness()
+        resp = h.call(DashboardRequest(method="GET", path="/login", headers={"Accept": "text/html"}))
+        self.assertEqual(resp.status, 200)
+        self.assertIn("Content-Security-Policy", resp.headers)
+        self.assertIn("frame-ancestors 'none'", resp.headers["Content-Security-Policy"])
+        self.assertEqual(resp.headers["X-Content-Type-Options"], "nosniff")
+        self.assertEqual(resp.headers["X-Frame-Options"], "DENY")
+
+    def test_json_responses_carry_nosniff(self) -> None:
+        h = Harness()
+        token, _ = h.login()
+        resp = h.call(DashboardRequest(method="GET", path="/api/progress", cookies={SESSION_COOKIE: token}))
+        self.assertEqual(resp.headers["X-Content-Type-Options"], "nosniff")
 
 
 class LiveTimeDecayScoringTests(unittest.TestCase):

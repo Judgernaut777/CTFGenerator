@@ -157,6 +157,16 @@ def build_parser() -> argparse.ArgumentParser:
         default=None,
         help="Write a structured JSON report artifact to this directory",
     )
+    validate_runtime_parser.add_argument(
+        "--sandbox",
+        action="store_true",
+        help=(
+            "Run the bundle's healthcheck.py/solver.py inside an ephemeral "
+            "read-only container instead of on the host. Use this for challenge "
+            "bundles you did NOT generate yourself -- they contain code that "
+            "otherwise executes with your privileges."
+        ),
+    )
 
     siblings = subparsers.add_parser(
         "validate-siblings",
@@ -448,6 +458,15 @@ def build_parser() -> argparse.ArgumentParser:
             "to scan into a catalog in-process -- an alternative to --challenges FILE"
         ),
     )
+    serve_parser.add_argument(
+        "--secure-cookie",
+        action="store_true",
+        help=(
+            "Add the Secure attribute to session cookies. Enable only when "
+            "terminating TLS at a proxy -- the built-in server is plain HTTP, "
+            "where browsers drop Secure cookies (breaking login)."
+        ),
+    )
 
     # --- Onboarding commands (catalog / quickstart) --------------------------
 
@@ -593,11 +612,20 @@ def main(argv: list[str] | None = None) -> int:
         return 0
 
     if args.command == "validate-runtime":
+        if not args.sandbox:
+            print(
+                "WARNING: validate-runtime executes this bundle's "
+                "tests/healthcheck.py and private/solver.py on the host with "
+                "your privileges. Only run it on challenges you trust; for an "
+                "untrusted bundle, re-run with --sandbox.",
+                file=sys.stderr,
+            )
         report = validate_runtime(
             challenge_path=args.challenge_path,
             base_url=args.base_url,
             timeout_seconds=args.timeout,
             keep_running=args.keep_running,
+            sandbox=args.sandbox,
         )
         subject = {"type": "challenge", "identifier": args.challenge_path.name}
         result = report_writer.serialize_runtime(report)
@@ -930,7 +958,13 @@ def main(argv: list[str] | None = None) -> int:
         auth = _build_serve_auth(args)
         if args.public_token is None:
             print(f"public scoreboard token: {auth.public_token}")
-        server = dashboard_server.serve(args.host, args.port, service=service, auth=auth)
+        server = dashboard_server.serve(
+            args.host,
+            args.port,
+            service=service,
+            auth=auth,
+            secure_cookies=getattr(args, "secure_cookie", False),
+        )
         print(f"Serving CTFGenerator dashboard on http://{args.host}:{args.port}")
         try:
             server.serve_forever()
