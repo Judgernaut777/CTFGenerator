@@ -83,7 +83,92 @@ def score_challenge(challenge_path: Path) -> ScoreReport:
     report.total = sum(d.weight * d.score for d in report.dimensions)
     report.band = _band(report.total)
     _spec_consistency_warnings(ai, solver, compose, report)
+
+    # Integrity gates: the five dimensions above are DECLARED signals (string
+    # counts and self-reported flags), so a broken or gamed challenge can score
+    # highly on them. These gates catch the two unambiguous "this is not a real
+    # challenge" cases and force the band to "weak" regardless of the declared
+    # total, so a stub solver or a leaked flag can never read as strong.
+    integrity_errors = _integrity_gate(challenge_path, solver, variant, spec)
+    if integrity_errors:
+        report.errors.extend(integrity_errors)
+        report.band = "weak"
     return report
+
+
+# Concrete, seed-derived flag: ``ctf{...}`` ending in the hex suffix families
+# append. Excludes placeholders like ``ctf{...}``/``ctf{FLAG}``.
+_CONCRETE_FLAG = re.compile(r"ctf\{[0-9a-z_]*[0-9a-f]{6}[0-9a-z_]*\}")
+
+
+def _concrete_flag(challenge_path: Path, variant: dict | None) -> str | None:
+    """The instance's real flag: variant.json's ``flag`` when present, else the
+    first concrete flag token found in private/ or services/ source."""
+    if isinstance(variant, dict):
+        candidate = variant.get("flag")
+        if isinstance(candidate, str) and _CONCRETE_FLAG.fullmatch(candidate):
+            return candidate
+    for sub in ("private", "services"):
+        base = challenge_path / sub
+        if not base.is_dir():
+            continue
+        for path in sorted(base.rglob("*")):
+            if not path.is_file():
+                continue
+            try:
+                match = _CONCRETE_FLAG.search(path.read_text(encoding="utf-8"))
+            except (UnicodeDecodeError, OSError):
+                continue
+            if match:
+                return match.group(0)
+    return None
+
+
+def _integrity_gate(
+    challenge_path: Path, solver: str, variant: dict | None, spec_text: str
+) -> list[str]:
+    """Return hard integrity errors that mean 'this is not a genuine, solvable
+    challenge' -- an embedded flag (fake solver) or a flag leaked into a
+    player-facing file (grep-solvable). Empty when the challenge is sound."""
+    errors: list[str] = []
+    flag = _concrete_flag(challenge_path, variant)
+    if not flag:
+        return errors
+
+    # A genuine solver DERIVES the flag at runtime; embedding the literal means
+    # the "solver" is a stub that just prints the answer.
+    if flag in solver:
+        errors.append(
+            "integrity: private/solver.py embeds the literal flag -- a genuine "
+            "solver must recover it, not print it"
+        )
+
+    # The flag must never appear in a file the player is handed, except a
+    # defensive (blue) mode whose whole task is analysing a provided artifact.
+    mode = _read_scalar(spec_text, "mode") or "red"
+    if mode != "blue":
+        public = challenge_path / "public"
+        if public.is_dir():
+            for path in sorted(public.rglob("*")):
+                if not path.is_file():
+                    continue
+                try:
+                    text = path.read_text(encoding="utf-8")
+                except (UnicodeDecodeError, OSError):
+                    continue
+                if flag in text:
+                    rel = path.relative_to(challenge_path)
+                    errors.append(f"integrity: flag leaks into public file {rel}")
+                    break
+    return errors
+
+
+def _read_scalar(text: str, key: str) -> str | None:
+    """Read a top-level ``key: value`` scalar from rendered challenge.yaml."""
+    if not text:
+        return None
+    match = re.search(rf'^{re.escape(key)}:\s*"?([^"\r\n]*?)"?\s*$', text, re.MULTILINE)
+    return match.group(1).strip() if match else None
 
 
 def _resolve_scoring_hints(spec_text: str) -> ScoringHints:
