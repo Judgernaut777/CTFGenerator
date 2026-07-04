@@ -122,19 +122,60 @@ class ComposeAndServiceTests(unittest.TestCase):
         for marker in crypto.COMPOSE_MARKERS:
             self.assertIn(marker, compose)
 
-    def test_app_source_implements_alg_none_bypass(self) -> None:
+    def test_app_source_implements_its_declared_vuln_class(self) -> None:
         spec = _spec()
         files = crypto.render(spec, random.Random(spec.seed))
         app_source = files["services/api/app.py"]
-        self.assertIn('alg == "none"', app_source)
+        vuln_class = json.loads(files["private/variant.json"])["vuln_class"]
+        if vuln_class == "alg_none":
+            self.assertIn('alg == "none"', app_source)
+        else:  # weak_secret: no unsigned-token acceptance path
+            self.assertNotIn('if alg == "none"', app_source)
         compile(app_source, "app.py", "exec")
 
-    def test_solver_source_is_syntactically_valid_and_forges_none_alg(self) -> None:
+    def test_solver_is_adaptive_covering_both_techniques(self) -> None:
+        # The single reference solver ships BOTH techniques regardless of the
+        # instance's class, so it solves any instance (and any sibling).
         spec = _spec()
         files = crypto.render(spec, random.Random(spec.seed))
         solver_source = files["private/solver.py"]
-        self.assertIn('"alg": "none"', solver_source)
+        self.assertIn('"alg": "none"', solver_source)  # forge-unsigned technique
+        self.assertIn("_crack_secret", solver_source)  # dictionary-attack technique
         compile(solver_source, "solver.py", "exec")
+
+
+class PerInstanceVulnClassTests(unittest.TestCase):
+    """Front C: the vulnerability CLASS varies per instance, so a technique
+    tied to one class is not the whole story -- a single-class writeup does not
+    generalise to a differently-classed sibling."""
+
+    def _render_class(self, target: str):
+        for i in range(200):
+            spec = _spec(seed=f"vc-seed-{i}")
+            files = crypto.render(spec, random.Random(spec.seed))
+            if json.loads(files["private/variant.json"])["vuln_class"] == target:
+                return files
+        self.fail(f"no seed produced vuln_class={target}")
+
+    def test_both_classes_are_reachable(self) -> None:
+        for cls in crypto.VULN_CLASSES:
+            with self.subTest(vuln_class=cls):
+                self._render_class(cls)
+
+    def test_alg_none_accepts_unsigned_but_weak_secret_does_not(self) -> None:
+        alg_none_app = self._render_class("alg_none")["services/api/app.py"]
+        weak_app = self._render_class("weak_secret")["services/api/app.py"]
+        # The unsigned-token acceptance branch exists ONLY in alg_none: the
+        # exact behaviour that makes an alg:none writeup work on one instance
+        # and fail on the other.
+        self.assertIn('if alg == "none"', alg_none_app)
+        self.assertNotIn('if alg == "none"', weak_app)
+
+    def test_weak_secret_uses_a_crackable_secret_and_alg_none_does_not(self) -> None:
+        weak_variant = json.loads(self._render_class("weak_secret")["private/variant.json"])
+        none_variant = json.loads(self._render_class("alg_none")["private/variant.json"])
+        self.assertIn(weak_variant["token"]["secret"], crypto._WEAK_SECRETS)
+        self.assertNotIn(none_variant["token"]["secret"], crypto._WEAK_SECRETS)
 
 
 class CheckpointsTests(unittest.TestCase):
