@@ -103,6 +103,19 @@ def _family_spec_defaults(family: str) -> tuple[str, list[str], list[str]]:
     return "web", list(_DEFAULT_OBJECTIVES), list(_DEFAULT_CHECKPOINTS)
 
 
+def _family_default_scenario(family: str):
+    """The family's enabled default live-adversarial ScenarioSpec, or a
+    disabled default ScenarioSpec when the family ships none."""
+    from .models import ScenarioSpec
+
+    families = _families_module()
+    if families.is_registered(family):
+        scenario = families.get(family).default_scenario
+        if scenario is not None:
+            return scenario
+    return ScenarioSpec()
+
+
 def default_spec(seed: str, title: str, difficulty: str, family: str) -> ChallengeSpec:
     """The built-in, fully deterministic spec used when no backend is chosen."""
     category, objectives, checkpoints = _family_spec_defaults(family)
@@ -114,6 +127,7 @@ def default_spec(seed: str, title: str, difficulty: str, family: str) -> Challen
         seed=seed,
         learning_objectives=objectives,
         checkpoints=checkpoints,
+        scenario=_family_default_scenario(family),
     )
 
 
