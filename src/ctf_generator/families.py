@@ -221,14 +221,14 @@ _FAMILY_SPEC_DEFAULTS: dict[str, tuple[tuple[str, ...], tuple[str, ...]]] = {
     "crypto_token_forgery": (
         (
             "Analyze how the console issues and verifies HMAC-signed session tokens",
-            "Identify the legacy 'alg: none' verification bypass (CWE-347)",
-            "Forge an unsigned admin token to reach the protected endpoint",
+            "Identify this instance's token-verification flaw (CWE-347)",
+            "Produce a valid admin token via the matching forgery technique",
         ),
         (
             "obtains a normal signed session token from the console",
-            "decodes the token and identifies the signing scheme",
-            "discovers the verifier still accepts alg:none tokens",
-            "forges an unsigned token asserting admin privilege",
+            "decodes the token and inspects the signing scheme",
+            "identifies the instance's verification flaw (unsigned-token bypass or weak secret)",
+            "produces an admin token via the matching technique (forge or crack-and-sign)",
             "reaches the admin endpoint and reads the flag",
         ),
     ),
