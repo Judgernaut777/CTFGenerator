@@ -5,7 +5,7 @@ import re
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Callable, Protocol
 
-from .models import ChallengeSpec
+from .models import ChallengeSpec, ResponseSpec, ScenarioSpec, TriggerSpec
 from .spec_generator import _DEFAULT_CHECKPOINTS, _DEFAULT_OBJECTIVES, _FAMILY_BRIEF
 from .templates import binary, cloud, crypto, forensics, mobile, network, scada_ics
 from .templates.tenant_export import render_tenant_export
@@ -71,6 +71,12 @@ class Family:
     # family (which does not override them) is byte-for-byte unchanged.
     learning_objectives: tuple[str, ...] = tuple(_DEFAULT_OBJECTIVES)
     checkpoints: tuple[str, ...] = tuple(_DEFAULT_CHECKPOINTS)
+    # A real, enabled live-adversarial scenario for this family (blue reacts
+    # mid-solve). None means the family ships no default scenario. Targets are
+    # STABLE substrings of the family's own attack surface (e.g. an admin path
+    # prefix), so the defender genuinely disrupts the standard solve path on
+    # any instance -- not a hand-matched test literal.
+    default_scenario: ScenarioSpec | None = None
 
 
 # --- Registry --------------------------------------------------------------------
@@ -284,6 +290,67 @@ _FAMILY_SPEC_DEFAULTS: dict[str, tuple[tuple[str, ...], tuple[str, ...]]] = {
     ),
 }
 
+def _http_defense_scenario(
+    detect_id: str,
+    detect_desc: str,
+    patch_id: str,
+    patch_desc: str,
+    target: str,
+) -> ScenarioSpec:
+    """A two-stage blue-team reaction against an HTTP attack surface.
+
+    Stage 1 (tick>=1): the SOC detects the intrusion. Stage 2 (tick>=2): the
+    blue team hardens ``target`` -- a STABLE substring of the challenge's own
+    attack surface -- so any request the attacker's plan sends to it after that
+    point is refused (403) mid-solve. Triggers are time-based so the timeline
+    fires deterministically offline (`run-scenario`) with no exogenous events,
+    and the paired trigger/response lists let ``_default_defender_from_spec``
+    build the defender automatically.
+    """
+    return ScenarioSpec(
+        enabled=True,
+        triggers=[
+            TriggerSpec(trigger_id=detect_id, description=detect_desc, condition="time:>=1"),
+            TriggerSpec(trigger_id=patch_id, description=patch_desc, condition="time:>=2"),
+        ],
+        responses=[
+            ResponseSpec(
+                response_id=f"{detect_id}-alert",
+                description="Raise an incident alert (observability only).",
+                action="notify",
+                payload={"target": target},
+            ),
+            ResponseSpec(
+                response_id=f"{patch_id}-block",
+                description=patch_desc,
+                action="patch_route",
+                payload={"target": target},
+            ),
+        ],
+    )
+
+
+# Per-family default live-adversarial scenarios, keyed by FAMILY_NAME. Only
+# families with a live HTTP attack surface ship one today; the target is a
+# stable path/host substring every solver of that family must touch.
+_FAMILY_SCENARIOS: dict[str, ScenarioSpec] = {
+    "crypto_token_forgery": _http_defense_scenario(
+        "ir-detect-forged-token",
+        "SOC flags anomalous alg:none tokens hitting the admin console",
+        "ir-lock-admin-route",
+        "Blue team requires re-authentication on the admin route",
+        target="/api/admin/",
+    ),
+    "cloud_metadata_ssrf": _http_defense_scenario(
+        "ir-detect-ssrf-egress",
+        "SOC detects SSRF egress toward the instance metadata endpoint",
+        "ir-quarantine-internal-storage",
+        "Blue team quarantines the internal object store after the SSRF",
+        target="/internal/objects",
+    ),
+}
+
+
 for _module in (scada_ics, network, crypto, cloud, forensics, binary, mobile):
     _objectives, _checkpoints = _FAMILY_SPEC_DEFAULTS.get(
         _module.FAMILY_NAME, (tuple(_DEFAULT_OBJECTIVES), tuple(_DEFAULT_CHECKPOINTS))
@@ -302,6 +369,7 @@ for _module in (scada_ics, network, crypto, cloud, forensics, binary, mobile):
             scoring_hints=ScoringHints(**_module.SCORING_HINTS),
             learning_objectives=_objectives,
             checkpoints=_checkpoints,
+            default_scenario=_FAMILY_SCENARIOS.get(_module.FAMILY_NAME),
         )
     )
 
