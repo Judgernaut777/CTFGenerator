@@ -11,6 +11,92 @@ from ctf_generator.score import score_challenge, score_with_agent_eval
 from ctf_generator.spec_generator import default_spec
 
 
+class IntegrityGateTests(unittest.TestCase):
+    """A challenge that games the declared dimensions but is broken or fake
+    must not read as strong. Reproduces the critical-review PoC where a stub
+    solver scored 100/100 'strong'."""
+
+    FLAG = "ctf{not_actually_solved_ab12cd34ef56}"
+
+    def _write_gamed_challenge(self, root: Path, solver_body: str, public_files=None) -> Path:
+        out = root / "gamed"
+        (out / "private").mkdir(parents=True)
+        (out / "public").mkdir(parents=True)
+        # variant.json crafted to max out variant_uniqueness (8 route/token vals).
+        (out / "private" / "variant.json").write_text(
+            json.dumps(
+                {
+                    "flag": self.FLAG,
+                    "routes": {f"r{i}": f"/api/x{i}" for i in range(4)},
+                    "tokens": {f"t{i}": f"v{i}" for i in range(4)},
+                }
+            ),
+            encoding="utf-8",
+        )
+        (out / "private" / "solver.py").write_text(solver_body, encoding="utf-8")
+        # compose + spec crafted to max out the declared dimensions.
+        (out / "docker-compose.yml").write_text(
+            "services:\n  worker:\n    image: x\n  redis:\n    image: redis\n",
+            encoding="utf-8",
+        )
+        (out / "challenge.yaml").write_text(
+            "family: \"web_business_logic_tenant_export\"\n"
+            "mode: \"red\"\n"
+            "ai_resistance:\n"
+            "  require_live_interaction: true\n"
+            "  generic_scanner_usefulness: low\n"
+            "  min_solver_steps: 5\n"
+            "dynamic_variation:\n"
+            "  per_user_schema: true\n"
+            "  per_user_routes: true\n"
+            "  per_user_seed_data: true\n"
+            "  per_user_auth_flow: true\n"
+            "  per_user_flag_path: true\n",
+            encoding="utf-8",
+        )
+        for name, body in (public_files or {}).items():
+            (out / "public" / name).write_text(body, encoding="utf-8")
+        return out
+
+    def test_stub_solver_that_embeds_flag_is_demoted(self) -> None:
+        # The PoC: a "solver" that just prints the flag, padded with the grep
+        # patterns the declared dimensions look for.
+        solver = (
+            "import socket\n"
+            "def get(x):\n    return x\n"
+            "def post_json(x):\n    return x\n"
+            "def main():\n"
+            "    for _ in range(3):\n        get('/api/profile')\n"
+            "    status = 'done'\n"
+            f"    print('{self.FLAG}')\n"
+        )
+        with tempfile.TemporaryDirectory() as tmp:
+            out = self._write_gamed_challenge(Path(tmp), solver)
+            report = score_challenge(out)
+            # Declared dimensions are near-max, but integrity forces weak.
+            self.assertGreaterEqual(report.total, 85.0)
+            self.assertEqual(report.band, "weak")
+            self.assertTrue(any("embeds the literal flag" in e for e in report.errors))
+
+    def test_flag_leaked_into_public_is_demoted(self) -> None:
+        solver = (
+            "import socket\n"
+            "def get(x):\n    return x\n"
+            "def post_json(x):\n    return x\n"
+            "def main():\n"
+            "    for _ in range(3):\n        get('/api/profile')\n"
+            "    status = 'done'\n"
+            "    return recover()\n"
+        )
+        with tempfile.TemporaryDirectory() as tmp:
+            out = self._write_gamed_challenge(
+                Path(tmp), solver, public_files={"leak.txt": f"debug {self.FLAG}\n"}
+            )
+            report = score_challenge(out)
+            self.assertEqual(report.band, "weak")
+            self.assertTrue(any("leaks into public file" in e for e in report.errors))
+
+
 class ScoreTests(unittest.TestCase):
     def _generate(self, temp_dir: str) -> Path:
         output = Path(temp_dir) / "challenge"
