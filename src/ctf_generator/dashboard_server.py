@@ -324,9 +324,9 @@ def dispatch(
         return _handle_logout(request, sessions=sessions)
 
     if path == "/public/scoreboard" and method == "GET":
-        return _handle_public(request, service=service, auth=auth, kind="scoreboard")
+        return _handle_public(request, service=service, auth=auth, kind="scoreboard", clock=clock)
     if path == "/public/feed" and method == "GET":
-        return _handle_public(request, service=service, auth=auth, kind="feed")
+        return _handle_public(request, service=service, auth=auth, kind="feed", clock=clock)
 
     # --- Browser HTML routes (additive). These serve self-contained HTML
     # shells; all live data is still fetched by the page JS from the JSON
@@ -336,7 +336,7 @@ def dispatch(
     if path == "/login" and method == "GET":
         return _html_response(200, dashboard_ui.login_page())
     if path == "/public" and method == "GET":
-        return _handle_public_page(request, service=service, auth=auth)
+        return _handle_public_page(request, service=service, auth=auth, clock=clock)
     if path == "/" and method == "GET" and _wants_html(request):
         return _handle_dashboard_page(
             request, service=service, sessions=sessions, auth=auth, clock=clock
@@ -387,14 +387,19 @@ def _handle_logout(request: DashboardRequest, *, sessions: SessionStore) -> Dash
 
 
 def _handle_public(
-    request: DashboardRequest, *, service: CompetitionService, auth: AuthConfig, kind: str
+    request: DashboardRequest,
+    *,
+    service: CompetitionService,
+    auth: AuthConfig,
+    kind: str,
+    clock: Clock,
 ) -> DashboardResponse:
     token = request.header(PUBLIC_TOKEN_HEADER) or request.query.get(PUBLIC_TOKEN_QUERY, "")
     if not token or not secrets.compare_digest(token, auth.public_token):
         return _error(401, "invalid public token")
 
     if kind == "scoreboard":
-        return _json_response(200, {"scoreboard": service.public_leaderboard()})
+        return _json_response(200, {"scoreboard": service.public_leaderboard(as_of=clock())})
 
     since = _parse_since(request.query.get("since", "0"))
     redacted = [
@@ -426,14 +431,16 @@ def _wants_html(request: DashboardRequest) -> bool:
 
 
 def _handle_public_page(
-    request: DashboardRequest, *, service: CompetitionService, auth: AuthConfig
+    request: DashboardRequest, *, service: CompetitionService, auth: AuthConfig, clock: Clock
 ) -> DashboardResponse:
     """Serve the public scoreboard HTML shell, gated on the public token
     (via ``?token=`` or the public-token header) -- never the admin session."""
     token = request.header(PUBLIC_TOKEN_HEADER) or request.query.get(PUBLIC_TOKEN_QUERY, "")
     if not token or not secrets.compare_digest(token, auth.public_token):
         return _error(401, "invalid public token")
-    return _html_response(200, dashboard_ui.public_scoreboard_page(service.public_leaderboard()))
+    return _html_response(
+        200, dashboard_ui.public_scoreboard_page(service.public_leaderboard(as_of=clock()))
+    )
 
 
 def _handle_dashboard_page(
@@ -457,7 +464,9 @@ def _handle_dashboard_page(
     now = clock()
     if session is None or session.is_expired(now):
         return DashboardResponse(status=302, headers={"Location": "/login"})
-    return _html_response(200, dashboard_ui.admin_dashboard_page(service.public_leaderboard()))
+    return _html_response(
+        200, dashboard_ui.admin_dashboard_page(service.public_leaderboard(as_of=now))
+    )
 
 
 def _handle_admin(
@@ -486,7 +495,7 @@ def _handle_admin(
         # logout) -- treat as unauthenticated rather than crash.
         return _error(401, "unauthorized")
 
-    body = _route_admin_body(request, method, service=service)
+    body = _route_admin_body(request, method, service=service, now=now)
     if isinstance(body, DashboardResponse):
         response = body
     else:
@@ -497,7 +506,7 @@ def _handle_admin(
 
 
 def _route_admin_body(
-    request: DashboardRequest, method: str, *, service: CompetitionService
+    request: DashboardRequest, method: str, *, service: CompetitionService, now: datetime
 ) -> tuple[int, object] | DashboardResponse:
     path = request.path
 
@@ -507,7 +516,7 @@ def _route_admin_body(
         }
         return 200, {
             "progress": progress,
-            "leaderboard": service.leaderboard().to_mapping(),
+            "leaderboard": service.leaderboard(as_of=now).to_mapping(),
         }
 
     if path == "/api/progress" and method == "GET":
@@ -517,7 +526,7 @@ def _route_admin_body(
         return 200, {"progress": progress}
 
     if path == "/api/leaderboard" and method == "GET":
-        return 200, {"leaderboard": service.leaderboard().to_mapping()}
+        return 200, {"leaderboard": service.leaderboard(as_of=now).to_mapping()}
 
     if path == "/api/feed" and method == "GET":
         since = _parse_since(request.query.get("since", "0"))

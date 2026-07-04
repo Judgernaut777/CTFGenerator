@@ -672,5 +672,78 @@ class Pbkdf2StrengthTests(unittest.TestCase):
         self.assertGreaterEqual(auth.pbkdf2_iterations, 600_000)
 
 
+class LiveTimeDecayScoringTests(unittest.TestCase):
+    """The live dashboard must pass its own clock to the leaderboard so the
+    default time-decay engine reports the current value -- not the fully
+    decayed floor. Uses the REAL default engine, not StaticPointsEngine, which
+    is exactly the combination the other dashboard tests never exercise.
+    """
+
+    def _service(self) -> CompetitionService:
+        # Solve recorded at START; default (time_decay) engine; 10h window.
+        store = InMemoryEventStore(clock=lambda: START.timestamp())
+        service = CompetitionService(
+            store=store,
+            catalog=make_catalog(),
+            config=make_config(),  # start=START, end=END
+            teams={"alpha": "Team Alpha"},
+        )
+        service.record_event("solve", "alpha", "web-1", payload={"submission_id": "s1"})
+        return service
+
+    def test_default_engine_bug_baseline(self) -> None:
+        # Documents the defect: calling leaderboard() with no as_of resolves
+        # "now" to end_time, so the challenge reads its fully-decayed minimum.
+        service = self._service()
+        floored = service.leaderboard().entries[0].score
+        live = service.leaderboard(as_of=START + timedelta(seconds=5)).entries[0].score
+        self.assertEqual(floored, 100)  # minimum_value
+        self.assertEqual(live, 500)  # initial_value, essentially undecayed
+
+    def test_dashboard_leaderboard_uses_live_clock_not_floor(self) -> None:
+        service = self._service()
+        tokens = SequentialTokens()
+        sessions = InMemorySessionStore(token_factory=tokens)
+        auth = make_auth()
+        # Clock stays a few seconds past START for every read.
+        clock = ScriptedClock([START + timedelta(seconds=i) for i in range(1, 20)])
+
+        login = dispatch(login_request(), service=service, sessions=sessions, auth=auth, clock=clock)
+        token = login.cookies[SESSION_COOKIE]
+
+        response = dispatch(
+            DashboardRequest(method="GET", path="/api/leaderboard", cookies={SESSION_COOKIE: token}),
+            service=service,
+            sessions=sessions,
+            auth=auth,
+            clock=clock,
+        )
+        self.assertEqual(response.status, 200)
+        score = json.loads(response.body)["leaderboard"]["entries"][0]["score"]
+        # Before the fix this was 100 (floored); now it reflects the live value.
+        self.assertEqual(score, 500)
+
+    def test_public_scoreboard_uses_live_clock_not_floor(self) -> None:
+        service = self._service()
+        sessions = InMemorySessionStore(token_factory=SequentialTokens())
+        auth = make_auth()
+        clock = ScriptedClock([START + timedelta(seconds=3)])
+
+        response = dispatch(
+            DashboardRequest(
+                method="GET",
+                path="/public/scoreboard",
+                headers={PUBLIC_TOKEN_HEADER: auth.public_token},
+            ),
+            service=service,
+            sessions=sessions,
+            auth=auth,
+            clock=clock,
+        )
+        self.assertEqual(response.status, 200)
+        score = json.loads(response.body)["scoreboard"][0]["score"]
+        self.assertEqual(score, 500)
+
+
 if __name__ == "__main__":
     unittest.main()

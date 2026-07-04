@@ -177,11 +177,21 @@ def _variant(rng: random.Random) -> Variant:
 # --- Register-write log (shared by blue-mode evidence + solver + description) --
 
 
-def _log_events(rng: random.Random, v: Variant) -> list[dict]:
+_FLAG_REDACTED = "<redacted: recover via live control-logic bypass>"
+
+
+def _log_events(rng: random.Random, v: Variant, *, reveal_flag: bool = True) -> list[dict]:
     """Build a deterministic register-write log: benign baseline + the IOC.
 
     Timestamps are synthetic (seed-derived offsets from a fixed epoch), never
     wall-clock, so the log is byte-identical for a fixed seed.
+
+    ``reveal_flag`` controls whether the historian's recorded response payload
+    contains the real flag. Blue/purple modes hand this log to the player as
+    the intended defensive artifact, so the flag must be present for them to
+    reconstruct. Red mode publishes the same log for realism but MUST redact
+    the flag -- otherwise the challenge is solvable by ``grep`` with no live
+    exploitation, defeating the whole point of the family.
     """
     base_minute = rng.randrange(0, 600)
     events: list[dict] = []
@@ -254,7 +264,7 @@ def _log_events(rng: random.Random, v: Variant) -> list[dict]:
             "address": v.flag_reg_start,
             "quantity": v.flag_reg_count,
             "note": "control-logic bypass unlocked; historian recorded the response payload",
-            "response_payload": v.flag,
+            "response_payload": v.flag if reveal_flag else _FLAG_REDACTED,
         }
     )
     step += 1
@@ -278,8 +288,8 @@ def _log_events(rng: random.Random, v: Variant) -> list[dict]:
     return events
 
 
-def _evidence_log(rng: random.Random, v: Variant) -> str:
-    events = _log_events(rng, v)
+def _evidence_log(rng: random.Random, v: Variant, *, reveal_flag: bool = True) -> str:
+    events = _log_events(rng, v, reveal_flag=reveal_flag)
     lines = [json.dumps(event, sort_keys=True, separators=(",", ":")) for event in events]
     return "\n".join(lines) + "\n"
 
@@ -294,7 +304,12 @@ def render(
 ) -> dict[str, str]:
     v = _variant(rng)
     log_rng = random.Random(rng.getrandbits(64))
-    log_text = _evidence_log(log_rng, v)
+    # Only blue hands the log to the player as the solvable artifact (its whole
+    # task is log reconstruction). red and purple both require the live Modbus
+    # exploit, so their public log is flag-redacted -- otherwise the challenge
+    # is grep-solvable and the live-exploit requirement is moot.
+    reveal_flag = spec.mode == "blue"
+    log_text = _evidence_log(log_rng, v, reveal_flag=reveal_flag)
 
     files: dict[str, str] = {
         "docker-compose.yml": _compose(v),
@@ -1067,7 +1082,10 @@ def _blue_solver(v: Variant) -> str:
 def _solver(v: Variant, spec: ChallengeSpec) -> str:
     if spec.mode == "blue":
         return _blue_solver(v)
-    default_mode = "live" if spec.mode == "red" else "log"
+    # red and purple both solve live: the public evidence log is flag-redacted
+    # for these modes (only blue is handed the flag-bearing log), so the
+    # canonical solve is the live control-logic bypass, not a log read.
+    default_mode = "live"
     attacker_prefix = v.attacker_ip.rsplit(".", 1)[0] + "."
     text = _SOLVER_TEMPLATE
     text = text.replace("__PLC_PORT__", str(v.plc_port))

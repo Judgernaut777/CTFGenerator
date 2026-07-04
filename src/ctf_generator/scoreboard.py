@@ -98,6 +98,25 @@ def _solve_sort_key(solve: SolveEvent) -> tuple[datetime, str, str]:
     return (solve.solved_at, solve.submission_id, solve.team_id)
 
 
+def _dedupe_solves(solves: Sequence[SolveEvent]) -> list[SolveEvent]:
+    """Collapse repeated solves of the same challenge by the same team to the
+    single canonical (earliest, per :func:`_solve_sort_key`) solve.
+
+    A team re-submitting an already-correct flag (double-click, client retry,
+    replayed event) must not inflate its score or a challenge's solve_count.
+    Only the first solve of a (team_id, challenge_id) pair counts; the
+    returned list preserves at most one solve per pair. Order is not
+    significant to the callers, which re-group and re-sort downstream.
+    """
+    canonical: dict[tuple[str, str], SolveEvent] = {}
+    for solve in solves:
+        key = (solve.team_id, solve.challenge_id)
+        current = canonical.get(key)
+        if current is None or _solve_sort_key(solve) < _solve_sort_key(current):
+            canonical[key] = solve
+    return list(canonical.values())
+
+
 # --- Public pure computation --------------------------------------------------
 
 
@@ -118,7 +137,7 @@ def compute_challenge_values(
     """
     engine = engine or get_scoring_engine("time_decay")
     now = _effective_now(config, as_of)
-    solves = _filter_solves(events, as_of)
+    solves = _dedupe_solves(_filter_solves(events, as_of))
 
     solve_counts: dict[str, int] = defaultdict(int)
     for solve in solves:
@@ -167,7 +186,7 @@ def compute_scoreboard(
     """
     engine = engine or get_scoring_engine("time_decay")
     now = _effective_now(config, as_of)
-    solves = _filter_solves(events, as_of)
+    solves = _dedupe_solves(_filter_solves(events, as_of))
 
     values_by_challenge = {
         snapshot.challenge_id: snapshot
