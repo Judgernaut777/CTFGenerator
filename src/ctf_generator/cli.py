@@ -439,6 +439,48 @@ def build_parser() -> argparse.ArgumentParser:
         default=None,
         help="Fixed public scoreboard token (default: randomly generated, printed once)",
     )
+    serve_parser.add_argument(
+        "--challenges-dir",
+        type=Path,
+        default=None,
+        help=(
+            "Directory of generated challenge folders (each with a challenge.yaml) "
+            "to scan into a catalog in-process -- an alternative to --challenges FILE"
+        ),
+    )
+
+    # --- Onboarding commands (catalog / quickstart) --------------------------
+
+    catalog_parser = subparsers.add_parser(
+        "catalog",
+        help=(
+            "Scan a directory of generated challenges into a ChallengeScoringConfig "
+            "JSON catalog usable by `serve --challenges`"
+        ),
+    )
+    catalog_parser.add_argument(
+        "--challenges-dir",
+        required=True,
+        type=Path,
+        help="Directory containing generated challenge folders (each with a challenge.yaml)",
+    )
+    catalog_parser.add_argument(
+        "--output",
+        "-o",
+        type=Path,
+        default=None,
+        help="Write the catalog JSON to this file (default: print to stdout)",
+    )
+
+    quickstart_parser = subparsers.add_parser(
+        "quickstart",
+        help=(
+            "Generate a small set of sample challenges (web + crypto + a CVE-driven "
+            "one) and print the next commands to catalog + serve them"
+        ),
+    )
+    quickstart_parser.add_argument("--output", "-o", required=True, type=Path)
+    quickstart_parser.add_argument("--seed", default="quickstart-001")
 
     return parser
 
@@ -898,6 +940,20 @@ def main(argv: list[str] | None = None) -> int:
             server.server_close()
         return 0
 
+    if args.command == "catalog":
+        entries = _build_challenge_catalog_entries(args.challenges_dir)
+        payload = json.dumps(entries, indent=2, sort_keys=True)
+        if args.output is not None:
+            args.output.parent.mkdir(parents=True, exist_ok=True)
+            args.output.write_text(payload + "\n", encoding="utf-8")
+            print(f"Wrote catalog with {len(entries)} challenge(s) to {args.output}")
+        else:
+            print(payload)
+        return 0
+
+    if args.command == "quickstart":
+        return _run_quickstart(args.output, args.seed)
+
     parser.error(f"unknown command: {args.command}")
     return 2
 
@@ -1086,6 +1142,21 @@ def _build_serve_service(args: argparse.Namespace):
         else events.InMemoryEventStore()
     )
 
+    # --challenges-dir guarded pre-step (additive alternative to
+    # --challenges FILE): when given, build the catalog in-process from the
+    # directory and return immediately, leaving the existing
+    # --challenges/empty-catalog logic below completely untouched.
+    challenges_dir = getattr(args, "challenges_dir", None)
+    if challenges_dir is not None:
+        catalog = _build_challenge_catalog_from_dir(challenges_dir)
+        config_path = getattr(args, "config", None)
+        config = (
+            load_competition_config(config_path)
+            if config_path is not None
+            else _default_serve_config()
+        )
+        return CompetitionService(store=store, catalog=catalog, config=config)
+
     challenges_path = getattr(args, "challenges", None)
     if challenges_path is not None:
         scoring_configs = load_challenges(challenges_path)
@@ -1113,3 +1184,172 @@ def _build_serve_auth(args: argparse.Namespace):
         password=args.admin_password,
         public_token=getattr(args, "public_token", None),
     )
+
+
+# --- catalog / quickstart onboarding helpers ----------------------------------
+#
+# Appended, standalone helpers used only by the catalog/quickstart dispatch
+# branches above and by the `serve --challenges-dir` pre-step in
+# _build_serve_service. Everything here is pure filesystem scanning + stdlib
+# json/string parsing -- no network, Docker, or clock use, so it is fully
+# exercisable offline in tests.
+
+
+def _iter_challenge_dirs(challenges_dir: Path) -> list[Path]:
+    """Find generated-challenge folders under ``challenges_dir``.
+
+    A "generated challenge folder" is any directory directly containing a
+    ``challenge.yaml`` (the file ``generator.create_challenge`` always
+    writes). Looks at immediate subdirectories of ``challenges_dir`` first
+    (the normal case: a directory of several challenges, as produced by
+    ``quickstart``); if none qualify, falls back to treating
+    ``challenges_dir`` itself as a single challenge when *it* directly
+    contains a ``challenge.yaml``. Returns an empty list for a missing/empty
+    directory rather than raising, since ``catalog``/``serve
+    --challenges-dir`` should degrade to an empty catalog, not crash.
+    """
+    challenges_dir = Path(challenges_dir)
+    if not challenges_dir.is_dir():
+        return []
+    subdirs = sorted(
+        (p for p in challenges_dir.iterdir() if p.is_dir() and (p / "challenge.yaml").is_file()),
+        key=lambda p: p.name,
+    )
+    if subdirs:
+        return subdirs
+    if (challenges_dir / "challenge.yaml").is_file():
+        return [challenges_dir]
+    return []
+
+
+def _parse_yaml_scalar_field(text: str, key: str) -> str:
+    """Best-effort extraction of a single top-level, double-quoted scalar
+    field (e.g. ``title``/``category``) from a ``challenge.yaml`` file
+    written by ``yaml_writer.dump_yaml``.
+
+    This project has no stdlib YAML reader (see
+    ``_run_scenario_command``'s docstring for the same constraint elsewhere
+    in this module) and only ever needs to recover a couple of known-scalar,
+    unindented top-level keys here -- not round-trip a full spec. Returns
+    "" when the key is absent or not a plain quoted scalar.
+    """
+    prefix = f'{key}: "'
+    for line in text.splitlines():
+        if line.startswith(prefix) and line.endswith('"'):
+            raw = line[len(prefix) : -1]
+            return raw.replace('\\"', '"').replace("\\\\", "\\")
+    return ""
+
+
+def _build_challenge_catalog_entries(challenges_dir: Path) -> list[dict]:
+    """Scan ``challenges_dir`` and build one ChallengeScoringConfig-shaped
+    dict per generated challenge found (default scoring values,
+    ``challenge_id`` = the challenge's folder name), with ``title`` and
+    ``category`` display fields appended.
+
+    The extra ``title``/``category`` keys are silently ignored by
+    ``scoreboard.load_challenges`` (``_parse_challenge_scoring`` only reads
+    its known ``ChallengeScoringConfig`` fields), so the returned list is
+    still a valid ``serve --challenges``/``scoreboard --challenges`` JSON
+    input as-is, while also carrying enough display metadata for a human
+    skimming the catalog file.
+    """
+    from .models import ChallengeScoringConfig
+
+    entries: list[dict] = []
+    for challenge_path in _iter_challenge_dirs(Path(challenges_dir)):
+        text = (challenge_path / "challenge.yaml").read_text(encoding="utf-8")
+        mapping = ChallengeScoringConfig(challenge_id=challenge_path.name).to_mapping()
+        mapping["title"] = _parse_yaml_scalar_field(text, "title")
+        mapping["category"] = _parse_yaml_scalar_field(text, "category")
+        entries.append(mapping)
+    return entries
+
+
+def _build_challenge_catalog_from_dir(challenges_dir: Path):
+    """Build a ``competition_service.ChallengeCatalog`` directly from a
+    directory of generated challenge folders -- the in-process equivalent of
+    writing ``_build_challenge_catalog_entries``'s output to a file and
+    re-reading it via ``scoreboard.load_challenges``, except it keeps the
+    ``title``/``category`` metadata that a JSON round-trip through
+    ``load_challenges`` would drop.
+    """
+    from .competition_service import ChallengeCatalog, ChallengeMeta
+    from .models import ChallengeScoringConfig
+
+    entries: dict[str, ChallengeMeta] = {}
+    for mapping in _build_challenge_catalog_entries(challenges_dir):
+        challenge_id = str(mapping["challenge_id"])
+        entries[challenge_id] = ChallengeMeta(
+            scoring=ChallengeScoringConfig(challenge_id=challenge_id),
+            title=str(mapping.get("title", "")),
+            category=str(mapping.get("category", "")),
+        )
+    return ChallengeCatalog.from_entries(entries)
+
+
+def _run_quickstart(output_dir: Path, seed: str) -> int:
+    """Generate a small, deterministic sample catalog spanning a few domains
+    (web, crypto, a real CVE) into ``output_dir``, then print the exact next
+    commands to build a catalog and serve the dashboard.
+
+    Deliberately offline/no-Docker: three plain ``create_challenge``/
+    ``create_challenge_from_cve`` calls (same functions ``create``/
+    ``create-from-cve`` use), each ``force=True`` so re-running quickstart
+    with the same ``--output`` is idempotent rather than erroring.
+    """
+    from .generator import create_challenge_from_cve
+
+    output_dir = Path(output_dir)
+    samples = (
+        ("web", output_dir / "web-sample", "web_business_logic_tenant_export"),
+        ("crypto", output_dir / "crypto-sample", "crypto_token_forgery"),
+    )
+    created: list[tuple[str, Path]] = []
+    for domain, sample_dir, family in samples:
+        create_challenge(
+            output_dir=sample_dir,
+            seed=f"{seed}-{domain}",
+            title=f"Quickstart {domain.title()} Sample",
+            difficulty="easy",
+            family=family,
+            force=True,
+        )
+        created.append((domain, sample_dir))
+
+    cve_dir = output_dir / "cve-log4shell-sample"
+    cve_source = _build_cve_source("snapshot", cache_dir=None)
+    create_challenge_from_cve(
+        output_dir=cve_dir,
+        cve_id="CVE-2021-44228",
+        base_seed=f"{seed}-cve",
+        difficulty="easy",
+        title="Quickstart Log4Shell Sample",
+        force=True,
+        source=cve_source,
+    )
+    created.append(("cve", cve_dir))
+
+    print(f"Generated {len(created)} sample challenge(s) under {output_dir}:")
+    for domain, path in created:
+        print(f"  [{domain}] {path}")
+
+    catalog_path = output_dir / "catalog.json"
+    print()
+    print("Next steps:")
+    print(f"  ctfgen catalog --challenges-dir {output_dir} -o {catalog_path}")
+    print(
+        "  ctfgen serve --admin-user admin --admin-password <password> "
+        f"--challenges {catalog_path}"
+    )
+    print(
+        "  (or skip the catalog file entirely: ctfgen serve --admin-user admin "
+        f"--admin-password <password> --challenges-dir {output_dir})"
+    )
+    print(
+        "Then open http://127.0.0.1:8000/ for the admin dashboard and "
+        "http://127.0.0.1:8000/public/scoreboard (or /public/feed) for the "
+        "public scoreboard -- no external CDN/scripts, everything is served "
+        "inline by the stdlib http.server."
+    )
+    return 0

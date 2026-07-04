@@ -510,7 +510,10 @@ Deliverables:
    support with concrete evidence (a specific file and what it shows) --
    look for both CWE-312 (cleartext storage) and CWE-798 (hardcoded
    credentials) patterns.
-2. Prove impact on the most severe finding: actually recover the plaintext
+2. For each finding, note whether it is *required* to explain the exposure
+   of the protected value or a decoy that is real but unrelated -- a
+   catalog that cannot tell the two apart is not triage, it's grep output.
+3. Prove impact on the most severe finding: actually recover the plaintext
    value the app is supposed to be protecting under the app's
    SharedPreferences, and submit it as the flag (`ctf{{...}}`).
 {cve_note}
@@ -541,14 +544,23 @@ credentials differ across generated instances.
 """
 
 
-def _findings_table(v: Variant) -> str:
-    return f"""| id | CWE     | file                                             | required for flag | evidence |
+def _findings_table(v: Variant, is_blue: bool = False) -> str:
+    table = f"""| id | CWE     | file                                             | required for flag | evidence |
 |----|---------|---------------------------------------------------|--------------------|----------|
 | F1 | CWE-798 | `{_JAVA_DIR}/CryptoVault.java`                      | yes                | `XOR_KEY_HEX` static field holds the only key used to protect/reveal on-device data |
 | F2 | CWE-312 | `public/app/shared_prefs/vault_prefs.xml`           | yes                | `{v.pref_key}` is base64(XOR(plaintext, key)) with the key from F1 sitting in the same bundle -- recoverable, not protected |
 | F3 | CWE-798 | `{_JAVA_DIR}/LoginActivity.java`                    | no (decoy)         | `DEBUG_USER` / `DEBUG_PASSWORD` hardcoded for an internal staging host; unrelated to the protected note |
 | F4 | CWE-312 | `public/app/backup/vault_backup.xml`                | no (decoy)         | `last_session_token` stored fully in the clear, with no CryptoVault call on that path at all |
 """
+    if is_blue:
+        table += (
+            "| F5 | CWE-312 | `public/app/AndroidManifest.xml` + `backup_rules.xml` | "
+            "no (risk amplifier) | `android:allowBackup=\"true\"` plus the "
+            "full-backup `sharedpref` include means F2's exposure needs no "
+            "device access at all -- `adb backup` alone reaches the same "
+            "ciphertext via `public/app/backup/vault_backup.xml` |\n"
+        )
+    return table
 
 
 def _solution(spec: ChallengeSpec, v: Variant, is_blue: bool) -> str:
@@ -564,7 +576,7 @@ duplicated in `public/app/backup/vault_backup.xml` thanks to
 file (CWE-312: cleartext storage of sensitive information).
 
 ## Findings
-{_findings_table(v)}
+{_findings_table(v, is_blue)}
 """
     solve_steps = f"""
 ## Solve path
@@ -595,6 +607,29 @@ against anyone who can read the app's files or take a device backup --
 which for a mobile app includes, at minimum, the app's own decompiled
 source.
 """
+        deliverable = f"""
+## Analyst deliverable (grading rubric)
+
+A complete blue-mode submission is a short triage write-up plus the
+recovered flag, not just the flag. Grade the write-up against:
+
+1. **Findings catalog** -- credits F1 (CWE-798, hardcoded XOR key in
+   `CryptoVault.java`) and F2 (CWE-312, cleartext-equivalent value in
+   `vault_prefs.xml`) as the pair *required* to explain how the protected
+   value is recoverable. F3 (`LoginActivity` debug credentials) and F4
+   (backup session token) are real findings but decoys with respect to the
+   protected note -- reporting them as required for the flag is a
+   misattribution and should be marked down.
+2. **Impact evidence** -- the write-up must show the actual recovered
+   plaintext envelope (`{{"label": "...", "value": "..."}}`), not merely
+   assert that the value "could be" decrypted; `{v.flag}` is the value that
+   must appear.
+3. **Backup exposure (F5)** -- credit for calling out that
+   `android:allowBackup="true"` plus the `backup_rules.xml` full-backup
+   include means F2 is reachable via `adb backup` alone, with no on-device
+   access required at all: `public/app/backup/vault_backup.xml` carries the
+   identical ciphertext.
+"""
     else:
         teaching = """
 This is meant to teach that local "encryption" backed by a key baked into
@@ -604,8 +639,9 @@ secrets requires hardware-backed storage (Android Keystore /
 EncryptedSharedPreferences with a Keystore-wrapped key), not a
 compile-time constant.
 """
+        deliverable = ""
     del spec
-    return header + intro + solve_steps + teaching
+    return header + intro + solve_steps + teaching + deliverable
 
 
 def _solver(v: Variant) -> str:

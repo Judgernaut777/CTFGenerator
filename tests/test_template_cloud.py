@@ -127,5 +127,80 @@ class VariantContentTests(unittest.TestCase):
             self.assertIn("urllib", text)
 
 
+class PerModeDivergenceTests(unittest.TestCase):
+    """Confirm red vs. purple render materially different, valid challenges."""
+
+    def _render(self, mode: str) -> dict[str, str]:
+        spec = _spec(mode=mode)
+        return cloud.render(spec, random.Random(spec.seed))
+
+    def test_each_mode_renders_and_emits_all_required_files(self) -> None:
+        for mode in cloud.MODES:
+            files = self._render(mode)
+            for relative in cloud.REQUIRED_FILES:
+                if relative == "challenge.yaml":
+                    continue
+                self.assertIn(relative, files, f"missing {relative} for mode={mode}")
+                self.assertTrue(files[relative].strip(), f"empty {relative} for mode={mode}")
+
+    def test_each_mode_is_deterministic(self) -> None:
+        for mode in cloud.MODES:
+            spec = _spec(mode=mode)
+            files_a = cloud.render(spec, random.Random(spec.seed))
+            files_b = cloud.render(spec, random.Random(spec.seed))
+            self.assertEqual(files_a, files_b, f"non-deterministic for mode={mode}")
+
+    def test_purple_description_differs_from_red(self) -> None:
+        files_red = self._render("red")
+        files_purple = self._render("purple")
+        self.assertNotEqual(
+            files_red["public/description.md"], files_purple["public/description.md"]
+        )
+        # Purple must spell out the additional blue/detection objective; red
+        # must not (it is a pure-offense challenge).
+        self.assertIn("Blue objective", files_purple["public/description.md"])
+        self.assertNotIn("Blue objective", files_red["public/description.md"])
+
+    def test_purple_private_deliverable_differs_from_red(self) -> None:
+        files_red = self._render("red")
+        files_purple = self._render("purple")
+        self.assertNotEqual(
+            files_red["private/solution.md"], files_purple["private/solution.md"]
+        )
+        # Purple's solution must additionally require the detection/response
+        # write-up; red's solution must remain exploit-only.
+        self.assertIn("purple-mode) deliverable", files_purple["private/solution.md"])
+        self.assertIn("Remediation", files_purple["private/solution.md"])
+        self.assertNotIn("purple-mode) deliverable", files_red["private/solution.md"])
+
+    def test_red_solution_is_byte_identical_to_mode_naive_baseline(self) -> None:
+        # Regression guard: red mode's private solution must not have grown
+        # a trailing artifact from the purple-only appended section.
+        files_red = self._render("red")
+        solution = files_red["private/solution.md"]
+        self.assertTrue(
+            solution.endswith(
+                "This teaches SSRF-to-cloud-credential-theft: input validation on the fetch\n"
+                "service is necessary but not sufficient without also constraining what the\n"
+                "service's own network identity can reach.\n"
+            )
+        )
+
+    def test_purple_detection_rule_referenced_in_private_deliverable(self) -> None:
+        files_purple = self._render("purple")
+        rule_yaml = files_purple["detection/ssrf_egress_rule.yaml"]
+        solution = files_purple["private/solution.md"]
+        description = files_purple["public/description.md"]
+        # Extract the generated rule id and confirm it's cross-referenced in
+        # both the public description and the private deliverable, tying the
+        # exploit, the detection rule, and the response write-up together.
+        rule_id_line = next(
+            line for line in rule_yaml.splitlines() if line.strip().startswith("id:")
+        )
+        rule_id = rule_id_line.split(":", 1)[1].strip().strip('"')
+        self.assertIn(rule_id, solution)
+        self.assertIn(rule_id, description)
+
+
 if __name__ == "__main__":
     unittest.main()

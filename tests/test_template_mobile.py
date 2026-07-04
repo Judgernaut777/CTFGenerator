@@ -218,5 +218,79 @@ class CheckpointsTests(unittest.TestCase):
             self.assertIn(name, checkpoints_yaml)
 
 
+class PerModeTests(unittest.TestCase):
+    """Every declared mode must render a materially distinct, valid challenge."""
+
+    def test_every_mode_renders_all_required_files(self) -> None:
+        expected = set(mobile.REQUIRED_FILES) - {"challenge.yaml"}
+        for mode in mobile.MODES:
+            spec = _spec(mode=mode)
+            files = mobile.render(spec, random.Random(f"per-mode-{mode}"))
+            self.assertEqual(set(files), expected, msg=f"mode={mode}")
+            for relative, content in files.items():
+                self.assertTrue(content, f"mode={mode}: {relative} must not be empty")
+
+    def test_every_mode_is_deterministic(self) -> None:
+        for mode in mobile.MODES:
+            spec = _spec(mode=mode)
+            first = mobile.render(spec, random.Random(f"det-{mode}"))
+            second = mobile.render(spec, random.Random(f"det-{mode}"))
+            self.assertEqual(first, second, msg=f"mode={mode}")
+
+    def test_every_mode_produces_valid_shared_prefs_and_solvable_flag(self) -> None:
+        # Every mode must still yield a valid, solvable static bundle: the
+        # shared_prefs XML parses and XOR-decrypts to the flag recorded in
+        # variant.json, regardless of narrative framing.
+        for mode in mobile.MODES:
+            spec = _spec(mode=mode)
+            files = mobile.render(spec, random.Random(f"valid-{mode}"))
+            variant = json.loads(files["private/variant.json"])
+            key = bytes.fromhex(variant["credentials"]["hardcoded_xor_key_hex"])
+            root = ET.fromstring(files["public/app/shared_prefs/vault_prefs.xml"])
+            pref_key = variant["storage"]["pref_key"]
+            value = next(
+                elem.text for elem in root.findall("string") if elem.get("name") == pref_key
+            )
+            raw = base64.b64decode(value)
+            decrypted = bytes(b ^ key[i % len(key)] for i, b in enumerate(raw)).decode("utf-8")
+            envelope = json.loads(decrypted)
+            self.assertEqual(envelope["value"], variant["flag"], msg=f"mode={mode}")
+
+    def test_blue_description_differs_materially_from_red(self) -> None:
+        red = mobile.render(_spec(mode="red"), random.Random("shared-seed"))
+        blue = mobile.render(_spec(mode="blue"), random.Random("shared-seed"))
+        red_desc = red["public/description.md"]
+        blue_desc = blue["public/description.md"]
+        self.assertNotEqual(red_desc, blue_desc)
+        # Blue is framed as defensive triage with an explicit findings
+        # catalog + severity/decoy deliverable; red is framed as an
+        # attacker recovering a secret directly.
+        self.assertIn("AppSec engineer", blue_desc)
+        self.assertIn("Catalog every insecure-storage", blue_desc)
+        self.assertIn("decoy", blue_desc.lower())
+        self.assertNotIn("AppSec engineer", red_desc)
+
+    def test_blue_private_deliverable_differs_from_red(self) -> None:
+        red = mobile.render(_spec(mode="red"), random.Random("shared-seed"))
+        blue = mobile.render(_spec(mode="blue"), random.Random("shared-seed"))
+        red_solution = red["private/solution.md"]
+        blue_solution = blue["private/solution.md"]
+        self.assertNotEqual(red_solution, blue_solution)
+        # Blue-mode private solution carries an analyst grading rubric
+        # (mode-appropriate deliverable) that red-mode does not.
+        self.assertIn("Analyst deliverable (grading rubric)", blue_solution)
+        self.assertNotIn("Analyst deliverable (grading rubric)", red_solution)
+        self.assertIn("F5", blue_solution)
+        self.assertNotIn("F5", red_solution)
+
+    def test_blue_findings_table_includes_backup_exposure_row(self) -> None:
+        spec = _spec(mode="blue")
+        files = mobile.render(spec, random.Random(spec.seed))
+        solution = files["private/solution.md"]
+        self.assertIn("F5", solution)
+        self.assertIn("backup", solution.lower())
+        self.assertIn("adb backup", solution)
+
+
 if __name__ == "__main__":
     unittest.main()

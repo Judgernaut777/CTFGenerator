@@ -161,5 +161,89 @@ class PurpleModeContentTests(unittest.TestCase):
         self.assertNotIn("Blue-team objective", files["public/description.md"])
 
 
+class ModeDifferentiationTests(unittest.TestCase):
+    """Every declared mode must render a materially distinct, valid challenge."""
+
+    def test_every_declared_mode_renders_all_required_files_deterministically(self) -> None:
+        required = {p for p in network.REQUIRED_FILES if p != "challenge.yaml"}
+        for mode in network.MODES:
+            with self.subTest(mode=mode):
+                spec = _spec(mode=mode)
+                first = network.render(spec, random.Random("mode-loop-seed"))
+                second = network.render(spec, random.Random("mode-loop-seed"))
+                self.assertEqual(set(first), required)
+                for path, content in first.items():
+                    self.assertTrue(content, f"{path} was emitted empty for mode={mode}")
+                self.assertEqual(first, second, f"non-deterministic render for mode={mode}")
+
+    def test_purple_description_differs_from_red(self) -> None:
+        red = network.render(_spec(mode="red"), random.Random(_spec().seed))
+        purple = network.render(_spec(mode="purple"), random.Random(_spec().seed))
+        self.assertNotEqual(
+            red["public/description.md"], purple["public/description.md"]
+        )
+        self.assertIn("Blue-team deliverable", purple["public/description.md"])
+        self.assertIn("detection-writeup-submitted", purple["public/description.md"])
+        self.assertNotIn("detection-writeup-submitted", red["public/description.md"])
+
+    def test_purple_private_deliverable_differs_from_red(self) -> None:
+        red = network.render(_spec(mode="red"), random.Random(_spec().seed))
+        purple = network.render(_spec(mode="purple"), random.Random(_spec().seed))
+        # The private solution write-up is a genuinely different deliverable
+        # in purple mode: it adds grading notes for the detection narrative.
+        self.assertNotEqual(
+            red["private/solution.md"], purple["private/solution.md"]
+        )
+        self.assertIn("Blue-team deliverable (grading notes)", purple["private/solution.md"])
+        self.assertNotIn(
+            "Blue-team deliverable (grading notes)", red["private/solution.md"]
+        )
+        # The detection notes deepen into concrete grading guidance in purple.
+        self.assertNotEqual(
+            red["private/detection_notes.md"], purple["private/detection_notes.md"]
+        )
+        self.assertIn(
+            "Grading this instance's `detection-writeup-submitted` checkpoint",
+            purple["private/detection_notes.md"],
+        )
+
+    def test_purple_checkpoints_add_detection_writeup_requirement(self) -> None:
+        spec = _spec()
+        red = network.render(_spec(mode="red"), random.Random(spec.seed))
+        purple = network.render(_spec(mode="purple"), random.Random(spec.seed))
+        red_yaml = red["private/checkpoints.yaml"]
+        purple_yaml = purple["private/checkpoints.yaml"]
+        self.assertNotIn("detection-writeup-submitted", red_yaml)
+        self.assertIn("detection-writeup-submitted", purple_yaml)
+        # Purple keeps every spec-declared checkpoint too; it only adds one.
+        for name in spec.checkpoints:
+            self.assertIn(name, red_yaml)
+            self.assertIn(name, purple_yaml)
+        self.assertNotEqual(red_yaml, purple_yaml)
+        self.assertEqual(
+            network._checkpoint_entries(_spec(mode="red")),
+            [{"name": name, "required": True} for name in spec.checkpoints],
+        )
+        self.assertEqual(
+            network._checkpoint_entries(_spec(mode="purple")),
+            [{"name": name, "required": True} for name in spec.checkpoints]
+            + [{"name": "detection-writeup-submitted", "required": True}],
+        )
+
+    def test_red_mode_render_is_byte_identical_to_baseline_solution_and_notes(self) -> None:
+        # Regression guard: red mode must not regress now that purple mode
+        # has mode-conditional branches added throughout the same helpers.
+        spec = _spec(mode="red")
+        files = network.render(spec, random.Random(spec.seed))
+        self.assertNotIn("Blue-team", files["public/description.md"])
+        self.assertNotIn("Blue-team", files["private/solution.md"])
+        self.assertNotIn("detection-writeup-submitted", files["private/checkpoints.yaml"])
+        self.assertTrue(
+            files["private/solution.md"].rstrip("\n").endswith(
+                "guessing passwords from scratch."
+            )
+        )
+
+
 if __name__ == "__main__":
     unittest.main()

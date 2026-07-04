@@ -428,6 +428,17 @@ dashboard are deliberately not exposed over MCP** — `validate-runtime`,
 this server never hands it container builds, host execution, or a live
 scoreboard/admin surface. Run those from the CLI.
 
+## Host a competition
+
+Want to run a live event end-to-end — generate a batch of challenges, build a
+catalog, launch the session-authenticated admin dashboard, publish a public
+scoreboard, and record solves? See **[docs/HOSTING.md](docs/HOSTING.md)** for
+the full copy-pasteable walkthrough, including `ctfgen quickstart`, `ctfgen
+catalog`, `ctfgen serve --challenges-dir`, the browser admin UI at `/login`
+and `/`, the public scoreboard at `/public?token=...`, scoring-engine choices,
+the optional `[postgres]` durable event store, and the session/CSRF/public-
+token security model.
+
 ## Development
 
 To work on the tool without installing it, run the package directly from the

@@ -33,6 +33,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from typing import Callable, Protocol
 from urllib.parse import parse_qsl, urlsplit
 
+from . import dashboard_ui
 from .competition_service import CompetitionService
 
 # --- Wire types --------------------------------------------------------------
@@ -103,7 +104,13 @@ class AuthConfig:
     password_salt: bytes
     public_token: str
     session_ttl_seconds: int = 900
-    pbkdf2_iterations: int = 200_000
+    # OWASP Password Storage Cheat Sheet (2023) minimum for PBKDF2-HMAC-SHA256.
+    pbkdf2_iterations: int = 600_000
+    # Multi-admin roster: an immutable tuple of ``(username, hash, salt)``
+    # triples (empty for a single-admin config built via :meth:`create`, in
+    # which case only the top-level ``admin_username``/``password_*`` fields
+    # apply -- back-compat). Populated by :meth:`from_users`.
+    admins: tuple[tuple[str, bytes, bytes], ...] = ()
 
     @classmethod
     def create(
@@ -113,7 +120,7 @@ class AuthConfig:
         *,
         public_token: str | None = None,
         session_ttl_seconds: int = 900,
-        pbkdf2_iterations: int = 200_000,
+        pbkdf2_iterations: int = 600_000,
         salt: bytes | None = None,
     ) -> "AuthConfig":
         salt = salt if salt is not None else secrets.token_bytes(16)
@@ -128,12 +135,84 @@ class AuthConfig:
         )
 
     def verify_password(self, username: str, password: str) -> bool:
-        if not secrets.compare_digest(username, self.admin_username):
-            return False
+        # Always run PBKDF2 -- even when the username does not match -- so login
+        # response time is independent of whether the username exists. Bailing
+        # out early on a username miss (before hashing) would turn the
+        # ~PBKDF2-cost delay into a username-enumeration oracle (CWE-208). Both
+        # the username and password checks use constant-time compare_digest,
+        # and are evaluated fully before the ``and`` combines the results.
         candidate = hashlib.pbkdf2_hmac(
             "sha256", password.encode("utf-8"), self.password_salt, self.pbkdf2_iterations
         )
-        return secrets.compare_digest(candidate, self.password_hash)
+        user_ok = secrets.compare_digest(username, self.admin_username)
+        pass_ok = secrets.compare_digest(candidate, self.password_hash)
+        return user_ok and pass_ok
+
+    @classmethod
+    def from_users(
+        cls,
+        users: "list[tuple[str, str]]",
+        *,
+        public_token: str | None = None,
+        session_ttl_seconds: int = 900,
+        pbkdf2_iterations: int = 600_000,
+        salt: bytes | None = None,
+    ) -> "AuthConfig":
+        """Build a multi-admin config from ``(username, password)`` pairs.
+
+        Each admin gets its own PBKDF2 hash. A per-user random salt is used
+        unless ``salt`` is supplied (which pins the salt for all users, for
+        deterministic tests). The first user is also mirrored into the
+        back-compat top-level ``admin_username``/``password_*`` fields so a
+        ``from_users`` config is a strict superset of a single-admin one.
+        """
+        admins: list[tuple[str, bytes, bytes]] = []
+        for username, password in users:
+            user_salt = salt if salt is not None else secrets.token_bytes(16)
+            pwd_hash = hashlib.pbkdf2_hmac(
+                "sha256", password.encode("utf-8"), user_salt, pbkdf2_iterations
+            )
+            admins.append((username, pwd_hash, user_salt))
+        if not admins:
+            raise ValueError("from_users requires at least one (username, password) pair")
+        first_user, first_hash, first_salt = admins[0]
+        return cls(
+            admin_username=first_user,
+            password_hash=first_hash,
+            password_salt=first_salt,
+            public_token=public_token if public_token is not None else secrets.token_urlsafe(24),
+            session_ttl_seconds=session_ttl_seconds,
+            pbkdf2_iterations=pbkdf2_iterations,
+            admins=tuple(admins),
+        )
+
+    def verify_any(self, username: str, password: str) -> bool:
+        """Validate ``(username, password)`` against any configured admin.
+
+        Checks the multi-admin :attr:`admins` roster first, then falls back
+        to the single-admin :meth:`verify_password` -- so this is correct for
+        both configs built via :meth:`from_users` and via :meth:`create`.
+
+        Every roster entry is hashed regardless of whether its username
+        matches, and there is no early ``return`` on the first match, so the
+        total PBKDF2 work is a function only of the roster size -- never of
+        *which* (or whether any) username was supplied. This keeps login
+        timing free of a username-enumeration side channel (CWE-208).
+        """
+        matched = False
+        for admin_user, admin_hash, admin_salt in self.admins:
+            candidate = hashlib.pbkdf2_hmac(
+                "sha256", password.encode("utf-8"), admin_salt, self.pbkdf2_iterations
+            )
+            user_ok = secrets.compare_digest(username, admin_user)
+            pass_ok = secrets.compare_digest(candidate, admin_hash)
+            if user_ok and pass_ok:
+                matched = True
+        # Single-admin fallback (also constant-work) covers a create()-built
+        # config and the first user mirrored into the top-level fields.
+        if self.verify_password(username, password):
+            matched = True
+        return matched
 
 
 # --- Sessions ------------------------------------------------------------------
@@ -249,6 +328,20 @@ def dispatch(
     if path == "/public/feed" and method == "GET":
         return _handle_public(request, service=service, auth=auth, kind="feed")
 
+    # --- Browser HTML routes (additive). These serve self-contained HTML
+    # shells; all live data is still fetched by the page JS from the JSON
+    # routes above/below. GET "/" only serves HTML when the client asks for
+    # it (Accept: text/html); an API client with no such header falls
+    # through to the existing JSON dashboard handler unchanged.
+    if path == "/login" and method == "GET":
+        return _html_response(200, dashboard_ui.login_page())
+    if path == "/public" and method == "GET":
+        return _handle_public_page(request, service=service, auth=auth)
+    if path == "/" and method == "GET" and _wants_html(request):
+        return _handle_dashboard_page(
+            request, service=service, sessions=sessions, auth=auth, clock=clock
+        )
+
     if path in ("/", "/api/progress", "/api/leaderboard", "/api/feed") or (
         path == "/api/event" and method == "POST"
     ):
@@ -267,7 +360,7 @@ def _handle_login(
 
     username = str(payload.get("username", ""))
     password = str(payload.get("password", ""))
-    if not auth.verify_password(username, password):
+    if not auth.verify_any(username, password):
         return _error(401, "invalid credentials")
 
     now = clock()
@@ -315,6 +408,56 @@ def _handle_public(
         if event.type == "solve"
     ]
     return _json_response(200, {"feed": redacted})
+
+
+def _html_response(status: int, html: str, cookies: dict[str, str] | None = None) -> DashboardResponse:
+    return DashboardResponse(
+        status=status,
+        body=html,
+        headers={"Content-Type": "text/html; charset=utf-8"},
+        cookies=dict(cookies) if cookies else {},
+    )
+
+
+def _wants_html(request: DashboardRequest) -> bool:
+    """True when the client's ``Accept`` header prefers HTML (a browser)."""
+    accept = (request.header("Accept") or "").lower()
+    return "text/html" in accept
+
+
+def _handle_public_page(
+    request: DashboardRequest, *, service: CompetitionService, auth: AuthConfig
+) -> DashboardResponse:
+    """Serve the public scoreboard HTML shell, gated on the public token
+    (via ``?token=`` or the public-token header) -- never the admin session."""
+    token = request.header(PUBLIC_TOKEN_HEADER) or request.query.get(PUBLIC_TOKEN_QUERY, "")
+    if not token or not secrets.compare_digest(token, auth.public_token):
+        return _error(401, "invalid public token")
+    return _html_response(200, dashboard_ui.public_scoreboard_page(service.public_leaderboard()))
+
+
+def _handle_dashboard_page(
+    request: DashboardRequest,
+    *,
+    service: CompetitionService,
+    sessions: SessionStore,
+    auth: AuthConfig,
+    clock: Clock,
+) -> DashboardResponse:
+    """Serve the admin dashboard HTML shell to an authenticated session.
+
+    This is a read-only shell load -- it validates (but does not rotate) the
+    session, so a browser refresh never invalidates a live session mid-flight.
+    Unauthenticated (or public-token-as-cookie) requests are redirected to the
+    login page. Live/mutating traffic still goes through the JSON handlers,
+    which enforce rotation + CSRF.
+    """
+    token = request.cookies.get(SESSION_COOKIE)
+    session = sessions.get(token) if token else None
+    now = clock()
+    if session is None or session.is_expired(now):
+        return DashboardResponse(status=302, headers={"Location": "/login"})
+    return _html_response(200, dashboard_ui.admin_dashboard_page(service.public_leaderboard()))
 
 
 def _handle_admin(
@@ -455,9 +598,9 @@ def serve(
                 self.send_header(key, value)
             for name, value in response.cookies.items():
                 if value:
-                    self.send_header("Set-Cookie", f"{name}={value}; Path=/; HttpOnly")
+                    self.send_header("Set-Cookie", f"{name}={value}; Path=/; HttpOnly; SameSite=Lax")
                 else:
-                    self.send_header("Set-Cookie", f"{name}=; Path=/; Max-Age=0")
+                    self.send_header("Set-Cookie", f"{name}=; Path=/; Max-Age=0; SameSite=Lax")
             payload = response.body.encode("utf-8")
             self.send_header("Content-Length", str(len(payload)))
             self.end_headers()

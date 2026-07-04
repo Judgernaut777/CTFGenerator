@@ -171,5 +171,113 @@ class EmbeddedSourceValidityTests(unittest.TestCase):
             json.loads(line)  # must not raise
 
 
+class PerModeDifferentiationTests(unittest.TestCase):
+    """red = offensive-only, blue = defensive-only, purple = hybrid -- each mode
+    must render, emit every required file, be deterministic, and (blue/purple)
+    be materially different from red in both the public description and the
+    private deliverable, never merely a cosmetic label swap."""
+
+    def test_each_mode_renders_and_emits_every_required_file(self) -> None:
+        for mode in scada_ics.MODES:
+            with self.subTest(mode=mode):
+                files = scada_ics.render(_spec(mode=mode), random.Random("per-mode-render"))
+                for relative in scada_ics.REQUIRED_FILES:
+                    if relative == "challenge.yaml":
+                        continue
+                    self.assertIn(relative, files, f"mode {mode} missing {relative}")
+                    self.assertTrue(files[relative].strip(), f"mode {mode} has empty {relative}")
+
+    def test_each_mode_is_internally_deterministic(self) -> None:
+        for mode in scada_ics.MODES:
+            with self.subTest(mode=mode):
+                spec = _spec(mode=mode)
+                first = scada_ics.render(spec, random.Random("per-mode-determinism"))
+                second = scada_ics.render(spec, random.Random("per-mode-determinism"))
+                self.assertEqual(first, second)
+
+    def test_red_mode_output_is_unchanged_by_mode_differentiation(self) -> None:
+        """Locks in that today's red-mode bytes (already validated in real
+        Docker) are not regressed by blue/purple-specific content additions."""
+        files = scada_ics.render(_spec(mode="red"), random.Random("red-lock"))
+        solution = files["private/solution.md"]
+        self.assertIn("## Live exploit path (red / purple)", solution)
+        self.assertIn("## Log analysis path (blue / purple)", solution)
+        self.assertNotIn("Indicators of compromise", solution)
+        self.assertNotIn("Detection & response guidance", solution)
+        description = files["public/description.md"]
+        self.assertNotIn("## Deliverable", description)
+        solver = files["private/solver.py"]
+        self.assertIn("class ModbusClient", solver)
+        self.assertIn('default="live"', solver)
+
+    def test_blue_description_differs_from_red_and_is_defensive_framing(self) -> None:
+        red = scada_ics.render(_spec(mode="red"), random.Random("mode-diff"))
+        blue = scada_ics.render(_spec(mode="blue"), random.Random("mode-diff"))
+        self.assertNotEqual(red["public/description.md"], blue["public/description.md"])
+        blue_desc = blue["public/description.md"]
+        self.assertIn("## Deliverable", blue_desc)
+        self.assertIn("no live exploitation", blue_desc.lower())
+
+    def test_purple_description_differs_from_red_and_covers_both_paths(self) -> None:
+        red = scada_ics.render(_spec(mode="red"), random.Random("mode-diff"))
+        purple = scada_ics.render(_spec(mode="purple"), random.Random("mode-diff"))
+        self.assertNotEqual(red["public/description.md"], purple["public/description.md"])
+        purple_desc = purple["public/description.md"]
+        self.assertIn("## Deliverable", purple_desc)
+        self.assertIn("either path", purple_desc.lower())
+
+    def test_blue_private_deliverable_differs_from_red_and_has_no_offensive_solver(self) -> None:
+        red = scada_ics.render(_spec(mode="red"), random.Random("mode-diff-2"))
+        blue = scada_ics.render(_spec(mode="blue"), random.Random("mode-diff-2"))
+        self.assertNotEqual(red["private/solution.md"], blue["private/solution.md"])
+        self.assertNotEqual(red["private/solver.py"], blue["private/solver.py"])
+
+        blue_solution = blue["private/solution.md"]
+        self.assertIn("Indicators of compromise", blue_solution)
+        self.assertIn("Recommended remediation", blue_solution)
+        self.assertNotIn("## Live exploit path (red / purple)", blue_solution)
+
+        blue_solver = blue["private/solver.py"]
+        self.assertNotIn("ModbusClient", blue_solver)
+        self.assertNotIn("solve_live", blue_solver)
+        self.assertIn("def solve_from_log", blue_solver)
+        compile(blue_solver, "private/solver.py", "exec")
+
+    def test_purple_private_deliverable_differs_from_red_and_has_both_paths(self) -> None:
+        red = scada_ics.render(_spec(mode="red"), random.Random("mode-diff-3"))
+        purple = scada_ics.render(_spec(mode="purple"), random.Random("mode-diff-3"))
+        self.assertNotEqual(red["private/solution.md"], purple["private/solution.md"])
+
+        purple_solution = purple["private/solution.md"]
+        self.assertIn("## Live exploit path (red / purple)", purple_solution)
+        self.assertIn("## Log analysis path (blue / purple)", purple_solution)
+        self.assertIn("Detection & response guidance (purple)", purple_solution)
+
+        # Purple's flag is reachable via the same value from either path.
+        self.assertEqual(
+            json.loads(red["private/variant.json"])["flag"],
+            json.loads(purple["private/variant.json"])["flag"],
+        )
+
+    def test_blue_solver_solves_from_the_rendered_evidence_log(self) -> None:
+        """The blue-only solver is a real, runnable deliverable: given the
+        rendered evidence log it must recover the exact flag, offline, with
+        no live PLC/network access."""
+        files = scada_ics.render(_spec(mode="blue"), random.Random("blue-solver-check"))
+        variant = json.loads(files["private/variant.json"])
+        namespace: dict[str, object] = {"__name__": "blue_solver_under_test"}
+        exec(compile(files["private/solver.py"], "private/solver.py", "exec"), namespace)
+
+        import tempfile
+        from pathlib import Path
+
+        with tempfile.TemporaryDirectory() as tmp:
+            log_path = Path(tmp) / "log.jsonl"
+            log_path.write_text(files["public/evidence/register_write_log.jsonl"], encoding="utf-8")
+            solved = namespace["solve_from_log"](log_path)  # type: ignore[operator]
+
+        self.assertEqual(solved, variant["flag"])
+
+
 if __name__ == "__main__":
     unittest.main()

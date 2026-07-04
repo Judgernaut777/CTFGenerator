@@ -40,7 +40,9 @@ LLM_BRIEF = (
     "A jump-host edge service with default administrative credentials exposes a "
     "diagnostics/relay feature that lets an attacker pivot laterally to an "
     "internal-only host and read a flag reachable only from inside the network "
-    "segment."
+    "segment. Purple mode additionally requires identifying the three-event "
+    "login/diagnostics/relay detection signature and submitting a short "
+    "incident narrative to satisfy an extra detection-writeup checkpoint."
 )
 COMPOSE_MARKERS: tuple[str, ...] = ("edge:", "internal:")
 SCORING_HINTS: dict[str, object] = {
@@ -128,12 +130,10 @@ def render(
         "services/internal/app.py": _internal_app(variant),
         "public/description.md": _description(spec, variant, cve_record),
         "public/hints.yaml": dump_yaml({"hints": public_hints}),
-        "private/solution.md": _solution(variant),
+        "private/solution.md": _solution(spec, variant),
         "private/solver.py": _solver(variant),
         "private/variant.json": _variant_json(spec, variant),
-        "private/checkpoints.yaml": dump_yaml(
-            {"checkpoints": [{"name": name, "required": True} for name in spec.checkpoints]}
-        ),
+        "private/checkpoints.yaml": dump_yaml({"checkpoints": _checkpoint_entries(spec)}),
         "private/detection_notes.md": _detection_notes(spec, variant),
         "tests/healthcheck.py": _healthcheck(),
         "tests/validate_variant.py": _validate_variant(variant),
@@ -176,6 +176,23 @@ def _variant(rng: random.Random) -> Variant:
         ops_note_id=ops_note_id,
         flag=flag,
     )
+
+
+def _checkpoint_entries(spec: ChallengeSpec) -> list[dict[str, object]]:
+    """Build the checkpoint list for ``private/checkpoints.yaml``.
+
+    Red mode emits exactly the spec-declared checkpoints (unchanged from
+    prior behavior). Purple mode is a hybrid exploit-plus-detection
+    challenge, so it additionally requires a detection/incident-response
+    deliverable: a ``detection-writeup-submitted`` checkpoint on top of the
+    spec-declared ones.
+    """
+    entries: list[dict[str, object]] = [
+        {"name": name, "required": True} for name in spec.checkpoints
+    ]
+    if spec.mode == "purple":
+        entries.append({"name": "detection-writeup-submitted", "required": True})
+    return entries
 
 
 # --- docker-compose.yml ---------------------------------------------------------
@@ -436,13 +453,22 @@ def _description(spec: ChallengeSpec, v: Variant, cve_record: "CveRecord | None"
     if spec.mode == "purple":
         purple_section = f"""
 
-## Blue-team objective
+## Blue-team deliverable
 
-In parallel with the attack path above, review `private/detection_notes.md`
-(released to blue-team participants) and identify which edge service log
-lines would let a defender detect the pivot: the login against
-`/api/{v.login_route}`, the admin-only `/api/{v.diag_route}` lookup, and the
-outbound `/api/{v.relay_route}` request into the internal network segment.
+This is a **purple-team** exercise: capturing the flag is only half of it.
+Once you complete the pivot above, this challenge also requires a short
+written incident narrative -- submitted alongside the flag, not committed to
+this repository -- naming the three-event detection signature a defender
+would use to catch the attack:
+
+1. a `POST /api/{v.login_route}` success from an unexpected source address,
+2. a `GET /api/{v.diag_route}` lookup in that same admin session, and
+3. a `GET /api/{v.relay_route}` request whose `target` parameter lands on
+   the internal network segment.
+
+Grading checkpoint `detection-writeup-submitted` requires this narrative.
+Use `private/detection_notes.md` as the reference guidance your writeup will
+be checked against.
 """
 
     return f"""# {spec.title}
@@ -470,7 +496,28 @@ across generated instances.
 # --- private/solution.md ------------------------------------------------------------
 
 
-def _solution(v: Variant) -> str:
+def _solution(spec: ChallengeSpec, v: Variant) -> str:
+    purple_deliverable = ""
+    if spec.mode == "purple":
+        purple_deliverable = f"""
+
+## Blue-team deliverable (grading notes)
+
+This instance is `purple` mode, so a complete solve is graded on more than
+the flag. In addition to the exploit path above, the checkpoint
+`detection-writeup-submitted` requires the solver to produce a short
+incident narrative naming:
+
+1. the `POST /api/{v.login_route}` success from an unexpected source
+   address,
+2. the `GET /api/{v.diag_route}` lookup in that same admin session, and
+3. the `GET /api/{v.relay_route}` request whose `target` parameter lands on
+   the internal `backend` network segment.
+
+This is the same three-event signature documented for defenders in
+`private/detection_notes.md`. A grader should reject a submission that only
+contains the flag with no reference to that sequence.
+"""
     return f"""# Private Solution
 
 The edge host's public bulletins feed (`/api/{v.ops_route}`) leaks the
@@ -503,7 +550,7 @@ This is meant to teach that a management interface's *diagnostics/relay*
 convenience feature is itself a lateral-movement primitive once an attacker
 gets a foothold via unrotated default credentials -- not a puzzle about
 guessing passwords from scratch.
-"""
+{purple_deliverable}"""
 
 
 # --- private/solver.py --------------------------------------------------------------
@@ -626,6 +673,14 @@ regardless of which specific credentials or route names a given instance
 uses. Recommend: rotate the default `{v.edge_user}` credential, rate-limit
 `/api/{v.diag_route}`, and restrict `/api/{v.relay_route}` targets to an
 allowlist.
+
+### Grading this instance's `detection-writeup-submitted` checkpoint
+
+Accept a solver's writeup if it names all three events above (the
+`/api/{v.login_route}` auth, the `/api/{v.diag_route}` lookup, and the
+`/api/{v.relay_route}` call targeting the internal segment) in the correct
+order. A submission containing only the flag, with no reference to this
+sequence, does not satisfy the checkpoint.
 """
     else:
         depth = f"""

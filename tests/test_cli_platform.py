@@ -654,6 +654,164 @@ class ServeHelperTests(unittest.TestCase):
         self.assertFalse(auth.verify_password("admin", "wrong"))
 
 
+class CatalogCommandTests(unittest.TestCase):
+    """Offline: only filesystem scanning of real, locally-generated challenge
+    folders -- no network/Docker/sockets."""
+
+    def test_catalog_scans_two_generated_challenges(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            challenges_dir = Path(temp_dir) / "challenges"
+            create_challenge(
+                output_dir=challenges_dir / "chal-a",
+                seed="cat-a",
+                title="Catalog Sample A",
+                difficulty="easy",
+                family="web_business_logic_tenant_export",
+            )
+            create_challenge(
+                output_dir=challenges_dir / "chal-b",
+                seed="cat-b",
+                title="Catalog Sample B",
+                difficulty="easy",
+                family="crypto_token_forgery",
+            )
+            out_path = Path(temp_dir) / "catalog.json"
+            code, out, _ = _run(
+                ["catalog", "--challenges-dir", str(challenges_dir), "-o", str(out_path)]
+            )
+            self.assertEqual(code, 0)
+            self.assertIn("2 challenge(s)", out)
+
+            entries = json.loads(out_path.read_text(encoding="utf-8"))
+            self.assertEqual(len(entries), 2)
+            ids = {entry["challenge_id"] for entry in entries}
+            self.assertEqual(ids, {"chal-a", "chal-b"})
+            titles = {entry["challenge_id"]: entry["title"] for entry in entries}
+            self.assertEqual(titles["chal-a"], "Catalog Sample A")
+            self.assertEqual(titles["chal-b"], "Catalog Sample B")
+
+            # Compatible with `serve --challenges` / `scoreboard --challenges`:
+            # scoreboard.load_challenges must parse it without error and key
+            # it by challenge_id, ignoring the extra title/category fields.
+            from ctf_generator.scoreboard import load_challenges
+
+            loaded = load_challenges(out_path)
+            self.assertEqual(set(loaded), {"chal-a", "chal-b"})
+            self.assertEqual(loaded["chal-a"].challenge_id, "chal-a")
+
+    def test_catalog_without_output_prints_json_to_stdout(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            challenges_dir = Path(temp_dir) / "challenges"
+            create_challenge(
+                output_dir=challenges_dir / "chal-only",
+                seed="cat-only",
+                title="Catalog Sample Only",
+                difficulty="easy",
+                family="web_business_logic_tenant_export",
+            )
+            code, out, _ = _run(["catalog", "--challenges-dir", str(challenges_dir)])
+            self.assertEqual(code, 0)
+            entries = json.loads(out)
+            self.assertEqual([entry["challenge_id"] for entry in entries], ["chal-only"])
+
+    def test_catalog_empty_dir_yields_empty_array(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            empty_dir = Path(temp_dir) / "empty"
+            empty_dir.mkdir()
+            code, out, _ = _run(["catalog", "--challenges-dir", str(empty_dir)])
+            self.assertEqual(code, 0)
+            self.assertEqual(json.loads(out), [])
+
+
+class QuickstartCommandTests(unittest.TestCase):
+    """Offline, no Docker: generates real (small) challenge folders on disk
+    via create_challenge/create_challenge_from_cve, same as create/
+    create-from-cve use."""
+
+    def test_quickstart_creates_sample_challenges_and_exits_zero(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            output_dir = Path(temp_dir) / "quickstart-out"
+            code, out, _ = _run(
+                ["quickstart", "--output", str(output_dir), "--seed", "qs-test"]
+            )
+            self.assertEqual(code, 0)
+
+            for name in ("web-sample", "crypto-sample", "cve-log4shell-sample"):
+                self.assertTrue(
+                    (output_dir / name / "challenge.yaml").is_file(),
+                    f"expected {name}/challenge.yaml to exist",
+                )
+
+            # Prints the exact next commands, referencing both the catalog
+            # step and the browser UI (/ and /public).
+            self.assertIn("ctfgen catalog --challenges-dir", out)
+            self.assertIn("ctfgen serve", out)
+            self.assertIn("--challenges-dir", out)
+            self.assertIn("/public", out)
+            self.assertNotIn("docker", out.lower())
+
+    def test_quickstart_is_idempotent_with_same_output(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            output_dir = Path(temp_dir) / "quickstart-out"
+            code1, _, _ = _run(["quickstart", "--output", str(output_dir), "--seed", "qs-again"])
+            code2, _, _ = _run(["quickstart", "--output", str(output_dir), "--seed", "qs-again"])
+            self.assertEqual(code1, 0)
+            self.assertEqual(code2, 0)
+
+
+class ServeChallengesDirTests(unittest.TestCase):
+    """Offline: exercises _build_serve_service directly with --challenges-dir,
+    never dashboard_server.serve()/serve_forever() (no real socket)."""
+
+    def test_build_serve_service_builds_nonempty_catalog_from_dir(self) -> None:
+        from ctf_generator.cli import _build_serve_service
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            challenges_dir = Path(temp_dir) / "challenges"
+            create_challenge(
+                output_dir=challenges_dir / "chal-x",
+                seed="dir-x",
+                title="Dir Sample X",
+                difficulty="easy",
+                family="web_business_logic_tenant_export",
+            )
+            args = argparse_namespace(
+                events_file=None,
+                challenges=None,
+                challenges_dir=challenges_dir,
+                config=None,
+            )
+            service = _build_serve_service(args)
+            self.assertEqual(service.catalog.ids(), ["chal-x"])
+            meta = service.catalog.get("chal-x")
+            self.assertEqual(meta.title, "Dir Sample X")
+
+    def test_challenges_dir_takes_precedence_over_challenges_file(self) -> None:
+        from ctf_generator.cli import _build_serve_service
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            challenges_dir = Path(temp_dir) / "challenges"
+            create_challenge(
+                output_dir=challenges_dir / "chal-y",
+                seed="dir-y",
+                title="Dir Sample Y",
+                difficulty="easy",
+                family="web_business_logic_tenant_export",
+            )
+            challenges_file = Path(temp_dir) / "other.json"
+            challenges_file.write_text(
+                json.dumps([{"challenge_id": "from-file"}]), encoding="utf-8"
+            )
+            args = argparse_namespace(
+                events_file=None,
+                challenges=challenges_file,
+                challenges_dir=challenges_dir,
+                config=None,
+            )
+            service = _build_serve_service(args)
+            self.assertEqual(service.catalog.ids(), ["chal-y"])
+
+
 def argparse_namespace(**kwargs):
     import argparse
 

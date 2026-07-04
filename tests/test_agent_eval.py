@@ -1,14 +1,18 @@
 from __future__ import annotations
 
+import json
 import random
 import subprocess
 import tempfile
 import unittest
 from pathlib import Path
+from types import SimpleNamespace
 
 from ctf_generator.agent_eval import (
     ADVERSARIAL_COMPOSE_PROFILE,
     EVAL_PROFILES,
+    LLM_ANTHROPIC_DEFAULT_MODEL,
+    LLM_OPENAI_DEFAULT_MODEL,
     AgentEvalReport,
     AgentTranscript,
     HTTPResponse,
@@ -59,6 +63,57 @@ class FakeHTTPClient:
         if url.endswith("/api/flag") and headers.get("X-Session") == self.secret:
             return HTTPResponse(status=200, body=f"here you go: {self.flag}", headers={})
         return HTTPResponse(status=403, body="forbidden", headers={})
+
+
+def _tool_use_block(call_id: str, name: str, tool_input: dict) -> SimpleNamespace:
+    return SimpleNamespace(type="tool_use", id=call_id, name=name, input=tool_input)
+
+
+def _text_block(text: str) -> SimpleNamespace:
+    return SimpleNamespace(type="text", text=text)
+
+
+class FakeAnthropicClient:
+    """Deterministic fake ``anthropic.Anthropic()``: scripted, cycling turns.
+
+    ``turns`` is a list of "content" lists (each a list of blocks as
+    ``client.messages.create(...).content`` would return); calls beyond the
+    list length wrap around via modulo, so the same client can be reused
+    across two ``solve()`` runs (e.g. the baseline and adversarial legs of
+    :func:`run_adversarial_delta`, which share one injected agent/client).
+    """
+
+    def __init__(self, turns: list[list[SimpleNamespace]]) -> None:
+        self._turns = list(turns)
+        self.calls = 0
+        self.messages = SimpleNamespace(create=self._create)
+
+    def _create(self, **kwargs) -> SimpleNamespace:
+        content = self._turns[self.calls % len(self._turns)]
+        self.calls += 1
+        return SimpleNamespace(content=content)
+
+
+def _openai_tool_call(call_id: str, name: str, arguments: dict) -> SimpleNamespace:
+    return SimpleNamespace(id=call_id, function=SimpleNamespace(name=name, arguments=json.dumps(arguments)))
+
+
+def _openai_message(text: str | None = None, tool_calls: list[SimpleNamespace] | None = None) -> SimpleNamespace:
+    return SimpleNamespace(content=text, tool_calls=tool_calls or [])
+
+
+class FakeOpenAIClient:
+    """Deterministic fake ``openai.OpenAI()``: scripted, cycling messages."""
+
+    def __init__(self, messages: list[SimpleNamespace]) -> None:
+        self._messages = list(messages)
+        self.calls = 0
+        self.chat = SimpleNamespace(completions=SimpleNamespace(create=self._create))
+
+    def _create(self, **kwargs) -> SimpleNamespace:
+        message = self._messages[self.calls % len(self._messages)]
+        self.calls += 1
+        return SimpleNamespace(choices=[SimpleNamespace(message=message)])
 
 
 class ExtractPlanTests(unittest.TestCase):
@@ -139,7 +194,8 @@ class ScriptedSolverAgentTests(unittest.TestCase):
 class EvalProfilesTests(unittest.TestCase):
     def test_expected_profiles_registered(self) -> None:
         self.assertEqual(
-            list_eval_profiles(), ["one_shot_prompt", "tool_using_agent", "writeup_replay"]
+            list_eval_profiles(),
+            ["llm_agent", "one_shot_prompt", "tool_using_agent", "writeup_replay"],
         )
 
     def test_one_shot_prompt_has_smallest_budget(self) -> None:
@@ -325,6 +381,10 @@ class LlmSolverAgentTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             LlmSolverAgent(provider="not-a-real-provider")
 
+    def test_default_models_selected_per_provider(self) -> None:
+        self.assertEqual(LlmSolverAgent(provider="anthropic").model, LLM_ANTHROPIC_DEFAULT_MODEL)
+        self.assertEqual(LlmSolverAgent(provider="openai").model, LLM_OPENAI_DEFAULT_MODEL)
+
     def test_solve_without_sdk_raises_clear_error(self) -> None:
         agent = LlmSolverAgent(provider="anthropic")
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -338,6 +398,177 @@ class LlmSolverAgentTests(unittest.TestCase):
                     max_steps=1,
                     deadline=float("inf"),
                 )
+
+    def test_solve_drives_tool_loop_to_flag_offline(self) -> None:
+        """Fake Anthropic client + fake HTTPClient, no network, no SDK."""
+        with tempfile.TemporaryDirectory() as temp_dir:
+            challenge = _write_challenge(Path(temp_dir))
+            http = FakeHTTPClient()
+            decision = [
+                _tool_use_block(
+                    "call-1",
+                    "http_request",
+                    {"method": "GET", "path": "/api/flag", "headers": {"X-Session": "letmein"}},
+                )
+            ]
+            client = FakeAnthropicClient([decision])
+            agent = LlmSolverAgent(provider="anthropic", client=client)
+
+            transcript = agent.solve(
+                base_url="http://fake-app",
+                public_dir=challenge / "public",
+                http=http,
+                rng=random.Random(0),
+                max_steps=5,
+                deadline=float("inf"),
+            )
+
+        self.assertIsInstance(transcript, AgentTranscript)
+        self.assertTrue(transcript.solved)
+        self.assertEqual(transcript.steps, 1)
+        self.assertEqual(transcript.flag, "ctf{fake_flag_123456}")
+        self.assertEqual(client.calls, 1)
+        self.assertEqual(http.calls[0][2].get("X-Session"), "letmein")
+
+    def test_solve_stops_when_model_gives_up(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            challenge = _write_challenge(Path(temp_dir))
+            http = FakeHTTPClient(secret="different-secret")
+            turns = [
+                [_tool_use_block("call-1", "http_request", {"method": "GET", "path": "/api/flag", "headers": {}})],
+                [_text_block("Nothing else worth trying; giving up.")],
+            ]
+            client = FakeAnthropicClient(turns)
+            agent = LlmSolverAgent(provider="anthropic", client=client)
+
+            transcript = agent.solve(
+                base_url="http://fake-app",
+                public_dir=challenge / "public",
+                http=http,
+                rng=random.Random(0),
+                max_steps=5,
+                deadline=float("inf"),
+            )
+
+        self.assertFalse(transcript.solved)
+        self.assertIsNone(transcript.flag)
+        self.assertEqual(transcript.steps, 1)
+        self.assertEqual(client.calls, 2)
+
+    def test_solve_respects_max_steps_budget(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            challenge = _write_challenge(Path(temp_dir))
+            http = FakeHTTPClient(secret="different-secret")
+            decision = [_tool_use_block("call-1", "http_request", {"method": "GET", "path": "/api/flag", "headers": {}})]
+            client = FakeAnthropicClient([decision])
+            agent = LlmSolverAgent(provider="anthropic", client=client)
+
+            transcript = agent.solve(
+                base_url="http://fake-app",
+                public_dir=challenge / "public",
+                http=http,
+                rng=random.Random(0),
+                max_steps=3,
+                deadline=float("inf"),
+            )
+
+        self.assertFalse(transcript.solved)
+        self.assertEqual(transcript.steps, 3)
+        self.assertEqual(client.calls, 3)
+
+    def test_solve_openai_provider_offline(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            challenge = _write_challenge(Path(temp_dir))
+            http = FakeHTTPClient()
+            tool_call = _openai_tool_call(
+                "call-1", "http_request", {"method": "GET", "path": "/api/flag", "headers": {"X-Session": "letmein"}}
+            )
+            client = FakeOpenAIClient([_openai_message(tool_calls=[tool_call])])
+            agent = LlmSolverAgent(provider="openai", client=client)
+
+            transcript = agent.solve(
+                base_url="http://fake-app",
+                public_dir=challenge / "public",
+                http=http,
+                rng=random.Random(0),
+                max_steps=5,
+                deadline=float("inf"),
+            )
+
+        self.assertTrue(transcript.solved)
+        self.assertEqual(transcript.flag, "ctf{fake_flag_123456}")
+        self.assertEqual(client.calls, 1)
+
+    def test_run_agent_eval_with_llm_agent_profile(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            challenge = _write_challenge(Path(temp_dir))
+            http = FakeHTTPClient()
+            decision = [
+                _tool_use_block(
+                    "call-1",
+                    "http_request",
+                    {"method": "GET", "path": "/api/flag", "headers": {"X-Session": "letmein"}},
+                )
+            ]
+            agent = LlmSolverAgent(provider="anthropic", client=FakeAnthropicClient([decision]))
+
+            report = run_agent_eval(
+                challenge,
+                "llm_agent",
+                base_url="http://fake-app",
+                http=http,
+                already_running=True,
+                agent=agent,
+            )
+
+        self.assertIsInstance(report, AgentEvalReport)
+        self.assertTrue(report.solved)
+        self.assertEqual(report.steps, 1)
+
+
+class RunAdversarialDeltaWithLlmAgentTests(unittest.TestCase):
+    def _defender(self) -> ScriptedDefender:
+        trigger = TriggerSpec(trigger_id="rotate", condition="time:>=0")
+        response = ResponseSpec(
+            response_id="rotate-session",
+            description="rotate the leaked session secret",
+            action="rotate_credential",
+            payload={"target": "letmein"},
+        )
+        return ScriptedDefender([trigger], {"rotate": [response]})
+
+    def test_llm_agent_success_dropped_under_defense(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            challenge = _write_challenge(Path(temp_dir))
+            http = FakeHTTPClient()
+            # Cycling single-turn client: always asks for the same request, so
+            # it can be reused (baseline solves turn 1; the defended leg keeps
+            # retrying the now-broken plan until its step budget runs out).
+            decision = [
+                _tool_use_block(
+                    "call-1",
+                    "http_request",
+                    {"method": "GET", "path": "/api/flag", "headers": {"X-Session": "letmein"}},
+                )
+            ]
+            agent = LlmSolverAgent(provider="anthropic", client=FakeAnthropicClient([decision]))
+
+            report = run_adversarial_delta(
+                challenge,
+                "llm_agent",
+                base_url="http://fake-app",
+                http=http,
+                already_running=True,
+                agent=agent,
+                defender=self._defender(),
+                max_ticks=3,
+            )
+
+        self.assertTrue(report.baseline.solved)
+        self.assertFalse(report.adversarial.solved)
+        self.assertTrue(report.success_dropped)
+        self.assertEqual(report.baseline.steps, 1)
+        self.assertEqual(report.adversarial.steps, EVAL_PROFILES["llm_agent"].max_steps)
 
 
 if __name__ == "__main__":
