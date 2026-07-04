@@ -137,6 +137,82 @@ def family_of(challenge_yaml_text: str) -> str | None:
     return None
 
 
+# --- Default live-adversarial scenarios --------------------------------------
+
+
+def _http_defense_scenario(
+    detect_id: str,
+    detect_desc: str,
+    patch_id: str,
+    patch_desc: str,
+    target: str,
+) -> ScenarioSpec:
+    """A two-stage blue-team reaction against an HTTP attack surface.
+
+    Stage 1 (tick>=1): the SOC detects the intrusion. Stage 2 (tick>=2): the
+    blue team hardens ``target`` -- a STABLE substring of the challenge's own
+    attack surface -- so any request the attacker's plan sends to it after that
+    point is refused (403) mid-solve. Triggers are time-based so the timeline
+    fires deterministically offline (`run-scenario`) with no exogenous events,
+    and the paired trigger/response lists let ``_default_defender_from_spec``
+    build the defender automatically.
+    """
+    return ScenarioSpec(
+        enabled=True,
+        triggers=[
+            TriggerSpec(trigger_id=detect_id, description=detect_desc, condition="time:>=1"),
+            TriggerSpec(trigger_id=patch_id, description=patch_desc, condition="time:>=2"),
+        ],
+        responses=[
+            ResponseSpec(
+                response_id=f"{detect_id}-alert",
+                description="Raise an incident alert (observability only).",
+                action="notify",
+                payload={"target": target},
+            ),
+            ResponseSpec(
+                response_id=f"{patch_id}-block",
+                description=patch_desc,
+                action="patch_route",
+                payload={"target": target},
+            ),
+        ],
+    )
+
+
+# Per-family default live-adversarial scenarios, keyed by FAMILY_NAME. Only
+# families with a live HTTP attack surface ship one today; the target is a
+# stable path/host substring every solver of that family must touch.
+_FAMILY_SCENARIOS: dict[str, ScenarioSpec] = {
+    "crypto_token_forgery": _http_defense_scenario(
+        "ir-detect-forged-token",
+        "SOC flags anomalous alg:none tokens hitting the admin console",
+        "ir-lock-admin-route",
+        "Blue team requires re-authentication on the admin route",
+        target="/api/admin/",
+    ),
+    "cloud_metadata_ssrf": _http_defense_scenario(
+        "ir-detect-ssrf-egress",
+        "SOC detects SSRF egress toward the instance metadata endpoint",
+        "ir-quarantine-internal-storage",
+        "Blue team quarantines the internal object store after the SSRF",
+        target="/internal/objects",
+    ),
+    "network_lateral_pivot": _http_defense_scenario(
+        "ir-detect-relay-pivot",
+        "SOC detects the jump host relaying to the internal-only flag service",
+        "ir-block-internal-relay",
+        "Blue team blocks the relay's path to the internal flag endpoint",
+        target="/internal/flag",
+    ),
+    # NOTE: web_business_logic_tenant_export ALSO has a verified genuine target
+    # ("/download/", a stable suffix on its randomized export route). It is
+    # intentionally deferred: that family is the canonical "plain, no-scenario"
+    # fixture across ~9 tests (byte-identical score baseline, dim counts, "no
+    # scenario" assertions), so enabling it needs a dedicated fixture-test pass.
+}
+
+
 # --- Bootstrap: existing tenant_export family -------------------------------------
 
 
@@ -173,6 +249,7 @@ register(
             live_interaction=True,
             decoy_density="medium",
         ),
+        default_scenario=_FAMILY_SCENARIOS.get("web_business_logic_tenant_export"),
     )
 )
 
@@ -289,67 +366,6 @@ _FAMILY_SPEC_DEFAULTS: dict[str, tuple[tuple[str, ...], tuple[str, ...]]] = {
         ),
     ),
 }
-
-def _http_defense_scenario(
-    detect_id: str,
-    detect_desc: str,
-    patch_id: str,
-    patch_desc: str,
-    target: str,
-) -> ScenarioSpec:
-    """A two-stage blue-team reaction against an HTTP attack surface.
-
-    Stage 1 (tick>=1): the SOC detects the intrusion. Stage 2 (tick>=2): the
-    blue team hardens ``target`` -- a STABLE substring of the challenge's own
-    attack surface -- so any request the attacker's plan sends to it after that
-    point is refused (403) mid-solve. Triggers are time-based so the timeline
-    fires deterministically offline (`run-scenario`) with no exogenous events,
-    and the paired trigger/response lists let ``_default_defender_from_spec``
-    build the defender automatically.
-    """
-    return ScenarioSpec(
-        enabled=True,
-        triggers=[
-            TriggerSpec(trigger_id=detect_id, description=detect_desc, condition="time:>=1"),
-            TriggerSpec(trigger_id=patch_id, description=patch_desc, condition="time:>=2"),
-        ],
-        responses=[
-            ResponseSpec(
-                response_id=f"{detect_id}-alert",
-                description="Raise an incident alert (observability only).",
-                action="notify",
-                payload={"target": target},
-            ),
-            ResponseSpec(
-                response_id=f"{patch_id}-block",
-                description=patch_desc,
-                action="patch_route",
-                payload={"target": target},
-            ),
-        ],
-    )
-
-
-# Per-family default live-adversarial scenarios, keyed by FAMILY_NAME. Only
-# families with a live HTTP attack surface ship one today; the target is a
-# stable path/host substring every solver of that family must touch.
-_FAMILY_SCENARIOS: dict[str, ScenarioSpec] = {
-    "crypto_token_forgery": _http_defense_scenario(
-        "ir-detect-forged-token",
-        "SOC flags anomalous alg:none tokens hitting the admin console",
-        "ir-lock-admin-route",
-        "Blue team requires re-authentication on the admin route",
-        target="/api/admin/",
-    ),
-    "cloud_metadata_ssrf": _http_defense_scenario(
-        "ir-detect-ssrf-egress",
-        "SOC detects SSRF egress toward the instance metadata endpoint",
-        "ir-quarantine-internal-storage",
-        "Blue team quarantines the internal object store after the SSRF",
-        target="/internal/objects",
-    ),
-}
-
 
 for _module in (scada_ics, network, crypto, cloud, forensics, binary, mobile):
     _objectives, _checkpoints = _FAMILY_SPEC_DEFAULTS.get(
