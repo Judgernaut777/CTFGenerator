@@ -20,12 +20,14 @@ from ctf_generator.agent_eval import HTTPResponse, _ScenarioDefendedHTTPClient
 from ctf_generator.cli import _scenario_spec_from_mapping
 from ctf_generator.generator import create_challenge
 
-# Family -> a substring identifying the instance's real attack-surface route in
-# variant.json (the one the scenario target should block).
-_REAL_ROUTE_MARKER = {
-    "crypto_token_forgery": "/api/admin/",
-    "cloud_metadata_ssrf": "/internal/objects/",
-}
+
+def _scenario_target(name: str) -> str:
+    """The stable attack-surface substring the family's scenario blocks."""
+    scenario = families.get(name).default_scenario
+    for response in scenario.responses:
+        if response.action == "patch_route":
+            return response.payload["target"]
+    raise AssertionError(f"{name}: scenario has no patch_route target")
 
 
 class _FakeInner:
@@ -77,24 +79,22 @@ class FamilyScenarioTests(unittest.TestCase):
                     ]
                     self.assertTrue(patched, f"{name}: no patch_route response fired")
 
-                    # (3) the defense blocks the instance's REAL route mid-solve
-                    variant = json.loads(
-                        (out / "private" / "variant.json").read_text(encoding="utf-8")
-                    )
-                    marker = _REAL_ROUTE_MARKER[name]
-                    real_route = next(
-                        v
-                        for v in variant.get("routes", {}).values()
-                        if marker in str(v)
-                    )
+                    # (3) the defense blocks a request to the family's real
+                    # attack-surface substring mid-solve (a stable path segment
+                    # every solver of this family hits, not a test literal).
+                    target = _scenario_target(name)
+                    self.assertIn(target, "".join(
+                        r.target for r in report.responses_applied if r.action == "patch_route"
+                    ))
                     defended = _ScenarioDefendedHTTPClient(_FakeInner(), report)
-                    # A few benign early calls, then repeated hits on the real route.
+                    # A few benign early calls, then repeated hits on the target.
+                    real_url = "http://svc/api/x" + target + "abc"
                     statuses = [
-                        defended.request("GET", "http://svc" + u).status
-                        for u in ["/api/a", "/api/b", real_route, real_route, real_route]
+                        defended.request("GET", u).status
+                        for u in ["http://svc/api/a", "http://svc/api/b", real_url, real_url, real_url]
                     ]
                     self.assertEqual(statuses[0], 200)
-                    self.assertIn(403, statuses, f"{name}: real route never blocked")
+                    self.assertIn(403, statuses, f"{name}: target route never blocked")
 
 
 if __name__ == "__main__":
