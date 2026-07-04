@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import random
 import unittest
 
@@ -238,10 +239,103 @@ class ModeDifferentiationTests(unittest.TestCase):
         self.assertNotIn("Blue-team", files["public/description.md"])
         self.assertNotIn("Blue-team", files["private/solution.md"])
         self.assertNotIn("detection-writeup-submitted", files["private/checkpoints.yaml"])
+        # Red mode ends on the class-independent teaching paragraph (no purple
+        # deliverable appended). This tail is stable across all vuln classes.
         self.assertTrue(
             files["private/solution.md"].rstrip("\n").endswith(
-                "guessing passwords from scratch."
+                "pivot through the edge host is the constant."
             )
+        )
+
+
+class PerInstanceVulnClassTests(unittest.TestCase):
+    """Front C: each instance draws one of three genuinely distinct internal-auth
+    vulnerability classes, and the adaptive solver handles any of them."""
+
+    def _render_for_seed(self, seed: str, mode: str = "red") -> dict[str, str]:
+        return network.render(_spec(mode=mode, seed=seed), random.Random(seed))
+
+    def _seed_for_class(self, vuln_class: str) -> str:
+        for i in range(500):
+            seed = f"vc-seed-{i}"
+            files = self._render_for_seed(seed)
+            if json.loads(files["private/variant.json"])["vuln_class"] == vuln_class:
+                return seed
+        raise AssertionError(f"no seed produced vuln_class={vuln_class} in 500 tries")
+
+    def test_variant_json_carries_a_known_vuln_class(self) -> None:
+        files = self._render_for_seed("class-seed-1")
+        vc = json.loads(files["private/variant.json"])["vuln_class"]
+        self.assertIn(vc, network.VULN_CLASSES)
+
+    def test_all_three_classes_appear_across_seeds(self) -> None:
+        seen = set()
+        for i in range(400):
+            files = self._render_for_seed(f"spread-{i}")
+            seen.add(json.loads(files["private/variant.json"])["vuln_class"])
+            if seen == set(network.VULN_CLASSES):
+                break
+        self.assertEqual(seen, set(network.VULN_CLASSES))
+
+    def test_same_seed_is_stable_class(self) -> None:
+        a = json.loads(self._render_for_seed("stable-1")["private/variant.json"])["vuln_class"]
+        b = json.loads(self._render_for_seed("stable-1")["private/variant.json"])["vuln_class"]
+        self.assertEqual(a, b)
+
+    def test_disclosed_token_internal_discloses_the_real_token(self) -> None:
+        seed = self._seed_for_class("disclosed_token")
+        files = self._render_for_seed(seed)
+        variant = json.loads(files["private/variant.json"])
+        internal = files["services/internal/app.py"]
+        # The advice endpoint returns the real token; the flag check is
+        # token-only (no relay-context bypass).
+        self.assertIn('"auth_token": INTERNAL_TOKEN', internal)
+        self.assertNotIn("X-Relay-Context", internal)
+        # A full random secret, not a wordlist default.
+        self.assertNotIn(variant["creds"]["internal_token"], network._WEAK_TOKENS)
+
+    def test_weak_token_uses_a_wordlist_default_and_redacts_it(self) -> None:
+        seed = self._seed_for_class("weak_token")
+        files = self._render_for_seed(seed)
+        variant = json.loads(files["private/variant.json"])
+        internal = files["services/internal/app.py"]
+        self.assertIn(variant["creds"]["internal_token"], network._WEAK_TOKENS)
+        # Advice redacts the token (auth_token is None) and the flag check does
+        # not honor the relay-context header.
+        self.assertIn('"auth_token": None', internal)
+        self.assertNotIn("X-Relay-Context", internal)
+
+    def test_relay_trust_bypasses_token_via_asset_context_header(self) -> None:
+        seed = self._seed_for_class("relay_trust")
+        files = self._render_for_seed(seed)
+        variant = json.loads(files["private/variant.json"])
+        internal = files["services/internal/app.py"]
+        # The internal flag check honors X-Relay-Context == ASSET_TAG as an
+        # auth bypass; the token itself is a full random secret and redacted.
+        self.assertIn("X-Relay-Context", internal)
+        self.assertIn("context != ASSET_TAG", internal)
+        self.assertIn('"auth_token": None', internal)
+        self.assertNotIn(variant["creds"]["internal_token"], network._WEAK_TOKENS)
+
+    def test_solver_is_adaptive_over_all_three_techniques(self) -> None:
+        # One shipped solver must carry all three techniques regardless of the
+        # instance's own class, so it solves any sibling.
+        for vuln_class in network.VULN_CLASSES:
+            seed = self._seed_for_class(vuln_class)
+            solver = self._render_for_seed(seed)["private/solver.py"]
+            with self.subTest(vuln_class=vuln_class):
+                self.assertIn("auth_token", solver)          # disclosed token
+                self.assertIn("context=asset_tag", solver)   # forged relay-trust
+                self.assertIn("WEAK_TOKENS", solver)         # dictionary attack
+
+    def test_hints_and_solution_are_class_aware(self) -> None:
+        disclosed = self._render_for_seed(self._seed_for_class("disclosed_token"))
+        trust = self._render_for_seed(self._seed_for_class("relay_trust"))
+        self.assertIn("disclosed_token", disclosed["private/solution.md"])
+        self.assertIn("relay_trust", trust["private/solution.md"])
+        # The non-generalization argument is documented in every instance.
+        self.assertIn(
+            "does not generalize", disclosed["private/solution.md"]
         )
 
 
