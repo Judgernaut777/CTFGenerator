@@ -461,7 +461,17 @@ class LlmSolverAgent:
             messages=[{"role": "system", "content": system}] + messages,
             tools=_OPENAI_TOOLS,
         )
-        message = response.choices[0].message
+        # Some OpenAI-compatible gateways (e.g. OpenRouter) return a 200 with a
+        # null/empty `choices` and an `error` field when the upstream provider
+        # is rate-limited or errors mid-stream. Surface that clearly instead of
+        # crashing with an opaque "NoneType is not subscriptable".
+        choices = getattr(response, "choices", None)
+        if not choices:
+            detail = getattr(response, "error", None) or getattr(response, "model_extra", None) or ""
+            raise RuntimeError(
+                f"LLM provider returned no choices for model {self.model}: {detail}"
+            )
+        message = choices[0].message
         text = getattr(message, "content", None) or ""
         raw_tool_calls = list(getattr(message, "tool_calls", None) or [])
         tool_calls: list[_ToolCall] = []

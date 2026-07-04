@@ -571,5 +571,30 @@ class RunAdversarialDeltaWithLlmAgentTests(unittest.TestCase):
         self.assertEqual(report.adversarial.steps, EVAL_PROFILES["llm_agent"].max_steps)
 
 
+class OpenAiEmptyChoicesTests(unittest.TestCase):
+    """Regression: OpenAI-compatible gateways (e.g. OpenRouter on a rate-limited
+    free model) can return a 200 with choices=None; the agent must raise a
+    clear error, not an opaque 'NoneType is not subscriptable' TypeError."""
+
+    def test_none_choices_raises_clear_runtime_error(self) -> None:
+        class _NoChoicesClient:
+            def __init__(self) -> None:
+                self.chat = SimpleNamespace(
+                    completions=SimpleNamespace(create=self._create)
+                )
+
+            def _create(self, **kwargs):
+                return SimpleNamespace(
+                    choices=None,
+                    error={"code": 429, "message": "rate-limited upstream"},
+                )
+
+        agent = LlmSolverAgent(provider="openai", client=_NoChoicesClient())
+        with self.assertRaises(RuntimeError) as ctx:
+            agent._step_openai(_NoChoicesClient(), "sys", [{"role": "user", "content": "go"}])
+        self.assertIn("no choices", str(ctx.exception))
+        self.assertIn("429", str(ctx.exception))
+
+
 if __name__ == "__main__":
     unittest.main()
