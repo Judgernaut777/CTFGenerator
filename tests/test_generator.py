@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import tempfile
 import unittest
+from dataclasses import replace
 from pathlib import Path
 
 from ctf_generator import __version__
@@ -11,6 +12,7 @@ from ctf_generator.generator import (
     create_challenge_from_cve,
     seed_to_int,
 )
+from ctf_generator.spec_generator import default_spec
 from ctf_generator.models import (
     SPEC_VERSION,
     ChallengeSpec,
@@ -47,9 +49,12 @@ class GeneratorTests(unittest.TestCase):
                 app.index('redis_client.rpush("export_jobs"'),
             )
 
+            # The solver is a single adaptive script that ships BOTH per-instance
+            # techniques (it is byte-identical across classes), so it solves any
+            # generated instance and any sibling.
             solver = (output / "private/solver.py").read_text(encoding="utf-8")
-            self.assertIn("Delayed invoice", solver)
-            self.assertIn("may still send", solver)
+            self.assertIn("_try_field_trust", solver)
+            self.assertIn("_try_predictable_job_id", solver)
 
     def test_create_challenge_refuses_existing_directory(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -276,12 +281,21 @@ class ScenarioTimelineOutputTests(unittest.TestCase):
     def test_scenario_disabled_does_not_write_timeline_file(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             output = Path(temp_dir) / "no-scenario-challenge"
+            # tenant_export ships an enabled default scenario, so disable it
+            # explicitly to exercise the scenario-off generation path.
+            base = default_spec(
+                seed="no-scenario-seed",
+                title="Invoice Drift",
+                difficulty="medium",
+                family="web_business_logic_tenant_export",
+            )
             create_challenge(
                 output_dir=output,
                 seed="no-scenario-seed",
                 title="Invoice Drift",
                 difficulty="medium",
                 family="web_business_logic_tenant_export",
+                spec=replace(base, scenario=ScenarioSpec()),
             )
 
             timeline_path = output / "private/scenario_timeline.json"

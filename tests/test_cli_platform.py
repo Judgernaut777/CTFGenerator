@@ -5,6 +5,7 @@ import io
 import json
 import tempfile
 import unittest
+from dataclasses import replace
 from pathlib import Path
 from unittest import mock
 
@@ -12,6 +13,7 @@ from ctf_generator import cve_source
 from ctf_generator.cli import main
 from ctf_generator.generator import create_challenge
 from ctf_generator.models import ChallengeSpec, ResponseSpec, ScenarioSpec, TriggerSpec
+from ctf_generator.spec_generator import default_spec
 
 
 def _run(argv: list[str]) -> tuple[int, str, str]:
@@ -219,12 +221,21 @@ class RunScenarioCliTests(unittest.TestCase):
     def test_run_scenario_without_timeline_runs_inert(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             challenge = Path(temp_dir) / "plain-chal"
+            # tenant_export ships an enabled default scenario; disable it so this
+            # challenge has no timeline and run-scenario is genuinely inert.
+            base = default_spec(
+                seed="plain-seed",
+                title="Plain",
+                difficulty="easy",
+                family="web_business_logic_tenant_export",
+            )
             create_challenge(
                 output_dir=challenge,
                 seed="plain-seed",
                 title="Plain",
                 difficulty="easy",
                 family="web_business_logic_tenant_export",
+                spec=replace(base, scenario=ScenarioSpec()),
             )
             self.assertFalse((challenge / "private/scenario_timeline.json").exists())
             code, out, _ = _run(["run-scenario", str(challenge), "--json"])

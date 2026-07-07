@@ -213,5 +213,30 @@ class FamilyOfParsingTests(unittest.TestCase):
         self.assertEqual(family_of(yaml_text), spec.family)
 
 
+class WebFamilyDefaultScenarioTests(unittest.TestCase):
+    """Front B: tenant_export ships an enabled default live-adversarial scenario
+    whose blue-team block targets '/download/' -- a stable segment of the
+    randomized export route that BOTH vulnerability classes must hit."""
+
+    def test_default_scenario_is_enabled_and_targets_download(self) -> None:
+        fam = get("web_business_logic_tenant_export")
+        scenario = fam.default_scenario
+        self.assertIsNotNone(scenario)
+        self.assertTrue(scenario.enabled)
+        targets = {r.payload.get("target") for r in scenario.responses}
+        self.assertEqual(targets, {"/download/"})
+
+    def test_default_spec_attaches_the_enabled_scenario(self) -> None:
+        from ctf_generator.spec_generator import default_spec
+
+        spec = default_spec(
+            seed="s",
+            title="T",
+            difficulty="medium",
+            family="web_business_logic_tenant_export",
+        )
+        self.assertTrue(spec.scenario.enabled)
+
+
 if __name__ == "__main__":
     unittest.main()

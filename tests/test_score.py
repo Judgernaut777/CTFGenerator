@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import tempfile
 import unittest
+from dataclasses import replace
 from pathlib import Path
 
 from ctf_generator.generator import create_challenge
@@ -99,13 +100,27 @@ class IntegrityGateTests(unittest.TestCase):
 
 class ScoreTests(unittest.TestCase):
     def _generate(self, temp_dir: str) -> Path:
+        # These are the *base* (scenario-free) scoring anchors. tenant_export now
+        # ships an enabled default live-adversarial scenario (Front B), which
+        # adds a scenario_resistance dimension; to keep these tests pinned to the
+        # 5-dimension base scoring, generate with the scenario explicitly
+        # disabled. The scenario-on path is covered by
+        # test_scenario_resistance_dimension_only_when_enabled (below) and, at
+        # the family level, test_families.WebFamilyDefaultScenarioTests.
         output = Path(temp_dir) / "challenge"
+        base = default_spec(
+            seed="score-seed",
+            title="Invoice Drift",
+            difficulty="medium",
+            family="web_business_logic_tenant_export",
+        )
         create_challenge(
             output_dir=output,
             seed="score-seed",
             title="Invoice Drift",
             difficulty="medium",
             family="web_business_logic_tenant_export",
+            spec=replace(base, scenario=ScenarioSpec()),
         )
         return output
 
@@ -198,7 +213,7 @@ class ScoreTests(unittest.TestCase):
                     "score": 100.0,
                     "notes": [
                         "5 declared checkpoints (target 5)",
-                        "9 distinct HTTP interactions in solver",
+                        "11 distinct HTTP interactions in solver",
                     ],
                 },
                 {

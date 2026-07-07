@@ -205,11 +205,17 @@ _FAMILY_SCENARIOS: dict[str, ScenarioSpec] = {
         "Blue team blocks the relay's path to the internal flag endpoint",
         target="/internal/flag",
     ),
-    # NOTE: web_business_logic_tenant_export ALSO has a verified genuine target
-    # ("/download/", a stable suffix on its randomized export route). It is
-    # intentionally deferred: that family is the canonical "plain, no-scenario"
-    # fixture across ~9 tests (byte-identical score baseline, dim counts, "no
-    # scenario" assertions), so enabling it needs a dedicated fixture-test pass.
+    "web_business_logic_tenant_export": _http_defense_scenario(
+        "ir-detect-cross-tenant-export",
+        "SOC detects an export job crossing the tenant boundary",
+        "ir-lock-export-download",
+        "Blue team requires re-authorization on the export download route",
+        # "/download/" is a stable segment of the randomized export route that
+        # BOTH vulnerability classes must hit to retrieve the flag (field_trust
+        # downloads its own forged job; predictable_job_id enumerates the
+        # victim's), so the mid-solve block applies regardless of drawn class.
+        target="/download/",
+    ),
 }
 
 
