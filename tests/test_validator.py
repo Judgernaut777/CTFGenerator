@@ -4,12 +4,14 @@ import json
 import random
 import tempfile
 import unittest
+from dataclasses import replace
 from pathlib import Path
 
 from ctf_generator import families
 from ctf_generator.families import Family
 from ctf_generator.generator import create_challenge
 from ctf_generator.models import ChallengeSpec, ResponseSpec, ScenarioSpec, TriggerSpec
+from ctf_generator.spec_generator import default_spec
 from ctf_generator.validator import (
     REQUIRED_FILES,
     ValidationReport,
@@ -352,12 +354,21 @@ class ScenarioSoftCheckTests(unittest.TestCase):
     def test_non_scenario_challenge_has_no_scenario_warning(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             output = Path(temp_dir) / "invoice-drift"
+            # tenant_export ships an enabled default scenario; disable it to
+            # exercise the no-scenario validation path.
+            base = default_spec(
+                seed="plain-seed",
+                title="Invoice Drift",
+                difficulty="medium",
+                family="web_business_logic_tenant_export",
+            )
             create_challenge(
                 output_dir=output,
                 seed="plain-seed",
                 title="Invoice Drift",
                 difficulty="medium",
                 family="web_business_logic_tenant_export",
+                spec=replace(base, scenario=ScenarioSpec()),
             )
             self.assertFalse((output / "private/scenario_timeline.json").exists())
 

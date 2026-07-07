@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import tempfile
 import unittest
+from dataclasses import replace
 from pathlib import Path
 
 from ctf_generator import families, spec_generator
@@ -208,7 +209,12 @@ class NewSpecFieldsRoundTripTests(unittest.TestCase):
     def test_round_trip_without_new_fields_unchanged(self) -> None:
         # A dict lacking the new keys must load identically to before they
         # existed (defaults: mode="red", scenario disabled, cve_refs=[]).
-        spec = default_spec(seed="s", title="T", difficulty="hard", family=FAMILY)
+        # tenant_export now ships an enabled default scenario, so disable it to
+        # get a spec with all-default new fields.
+        spec = replace(
+            default_spec(seed="s", title="T", difficulty="hard", family=FAMILY),
+            scenario=ScenarioSpec(),
+        )
         base_dict = spec_to_dict(spec)
         self.assertNotIn("cve_refs", base_dict)
         self.assertNotIn("cve_content_hash", base_dict)
