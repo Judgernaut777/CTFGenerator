@@ -9,6 +9,33 @@ Release CI enforces that every tagged version has an entry here (see
 
 ## [Unreleased]
 
+### Added — Milestone 6 (Step 2): persistence infrastructure (no entities yet)
+
+- New `ctf_generator.infrastructure.database` package: `DatabaseConfig`
+  (DSN from `CTFGEN_DATABASE_URL` env, never a committed config), a declarative
+  `Base` with an explicit constraint-naming convention (stable Alembic names),
+  `Database` with a `session_scope()` unit-of-work (commit on success, rollback
+  on any exception, always close), and a generic `SqlAlchemyRepository` base.
+- **Alembic** operational: `alembic.ini` (no URL — env-sourced), `alembic/env.py`
+  targeting `Base.metadata`, and an empty `0001_baseline` migration so
+  `upgrade head` / `downgrade base` round-trip cleanly, anchoring the chain for
+  the first aggregate.
+- **PostgreSQL integration tests** (`tests/test_database_integration.py`):
+  create an isolated throwaway database, verify engine connect, session-scope
+  commit + rollback, and Alembic upgrade→downgrade. Docker-gated — they SKIP
+  when the `db` extra or `CTFGEN_TEST_DATABASE_URL` is absent, so the stdlib-only
+  host suite stays green (763 tests, 3 skipped). Wired into CI nightly with a
+  `postgres:16` service.
+- New `db` extra (`sqlalchemy>=2`, `alembic`, `psycopg`). Importing the database
+  package pulls in SQLAlchemy, so it is confined to DB-backed paths — the domain
+  layer and generator core never import it (enforced by the boundary test).
+- **Verified against real postgres:16 in Docker**: all three integration tests
+  pass. Adversarially reviewed; a lead Docker run caught a test-harness bug where
+  `str(URL)` masked the DB password (fixed) and applied two robustness fixes
+  (atomic `DROP … WITH (FORCE)`, admin engine pinned to the maintenance DB).
+- No entities, no business logic, no change to the generator core or any
+  existing behavior.
+
 ### Changed — Milestone 5 (increment 1): layered package skeleton + domain layer
 
 - Introduced the target package layering
