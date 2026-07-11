@@ -28,7 +28,13 @@ from .competitions.events import EventStore
 
 
 class CompetitionRepository(Protocol):
-    """Stores and retrieves competition configurations by id."""
+    """Stores and retrieves competition configurations by id.
+
+    Deliberately minimal (add / get / list / update): competitions are created,
+    fetched, and have their mutable fields updated. No delete or archive method
+    is exposed -- archival, when needed, is a status transition, not a row
+    removal (see docs/architecture/persistence-design.md).
+    """
 
     def add(self, competition: CompetitionConfig) -> None:
         ...
@@ -37,6 +43,11 @@ class CompetitionRepository(Protocol):
         ...
 
     def list(self) -> list[CompetitionConfig]:
+        ...
+
+    def update(self, competition: CompetitionConfig) -> None:
+        """Update the mutable fields of an existing competition, keyed by its
+        (immutable) competition_id. Raises if the competition does not exist."""
         ...
 
 
