@@ -36,6 +36,11 @@ openai = ["openai>=1.40"]
 # competitions; a fake connection is injected in tests, so this extra is
 # only needed when connecting from a DSN with a real driver.
 postgres = ["psycopg[binary]>=3.1"]
+# M6 persistence foundation: SQLAlchemy 2.x ORM + Alembic migrations. The
+# control plane's durable source of truth. Requires a real database driver
+# (see `postgres`). Integration tests are Docker-gated and skip when this extra
+# is not installed, so the stdlib-only unit suite stays green without it.
+db = ["sqlalchemy>=2.0", "alembic>=1.13", "psycopg[binary]>=3.1"]
 # The live dashboard (dashboard_server.py) is stdlib-only (http.server/hmac/
 # hashlib/secrets/pbkdf2); this extra is the opt-in gate / future home for
 # production niceties (e.g. a real WSGI server), not a package dependency.
