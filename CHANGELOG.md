@@ -9,6 +9,41 @@ Release CI enforces that every tagged version has an entry here (see
 
 ## [Unreleased]
 
+### Added — Milestone 6 (Step 3): Competition aggregate (the canonical pattern)
+
+- First persisted aggregate, establishing the reference pattern for every
+  aggregate that follows (Users → Teams → Challenge* → Submission/Solve/…).
+  Strict layering: domain `CompetitionConfig` → `CompetitionRepository` protocol
+  → infrastructure repository → SQLAlchemy → PostgreSQL. **ORM objects never
+  leave infrastructure**; repositories return frozen domain dataclasses.
+- `infrastructure/database/models.py`: `Competition` ORM (surrogate uuid PK,
+  `slug` ← domain `competition_id` UNIQUE, timestamptz times, `status`,
+  `created_at`) with CHECK constraints encoding the domain invariants
+  (`end_time > start_time`, freeze within `[start,end]`, non-empty name, status
+  enum) and a `status` index.
+- `infrastructure/database/mappers.py`: ORM↔domain conversion. `default_scoring`
+  is normalized out to a future `competition_challenges` table, so the mapper
+  **raises rather than silently dropping it**. Naive datetimes are coerced to
+  UTC; round-trips preserve the instant.
+- `infrastructure/database/competition_repository.py`:
+  `SqlAlchemyCompetitionRepository` (add / get / list / update — no delete or
+  archive). Operates within the caller's session (flush, never commit);
+  duplicate slug surfaces `IntegrityError`; `update` of a missing row raises
+  `LookupError` and never mutates id/slug/created_at/status.
+- `CompetitionRepository` protocol gained `update`.
+- Alembic migration `0002_competitions` (revises `0001_baseline`), reversible.
+- `tests/test_competition_repository_integration.py`: 12 Docker-gated tests
+  (round-trip, list, mutable-update + immutable-preservation, missing-update,
+  duplicate slug, CHECK violation, rollback, UTC/timezone instant,
+  default_scoring guard, migration up/down, detached-session safety).
+- **Verified against real postgres:16 in Docker — all 15 DB integration tests
+  pass** (12 new + 3 existing). Built by a 6-agent ultracode workflow (ORM,
+  repo, migration, design review, tests, adversarial review) and lead-verified;
+  the review + lead run resolved a constraint-name divergence between model and
+  migration and an over-strict timezone assertion. Host stdlib suite unchanged
+  (775 tests, 15 skip). Follow-up noted: force session `TimeZone=UTC` on the
+  engine for fully deterministic timestamptz rendering.
+
 ### Added — Milestone 6 (Step 2): persistence infrastructure (no entities yet)
 
 - New `ctf_generator.infrastructure.database` package: `DatabaseConfig`
