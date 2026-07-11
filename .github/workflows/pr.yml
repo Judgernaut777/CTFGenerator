@@ -1,0 +1,119 @@
+name: pr
+
+# Pull-request / branch CI tier (plan Milestone 2).
+# REQUIRED gates (block merge): unit tests, compileall, package build,
+# deterministic-generation check, secret scan.
+# INFORMATIONAL gates (continue-on-error until the M5 domain refactor cleans
+# the pre-existing ~10k-line flat package): lint, type check, SAST, dep audit.
+# Promote these to required as each is driven to green.
+
+on:
+  pull_request:
+  push:
+    branches-ignore: [main]
+
+concurrency:
+  group: pr-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    name: unit tests (py${{ matrix.python }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python: ["3.11", "3.12"]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python }}
+      - name: Install package (core is stdlib-only; dev adds pytest)
+        run: pip install -e ".[dev]"
+      - name: Unit tests
+        run: |
+          mods=$(ls tests/test_*.py | sed 's#tests/##;s#\.py##')
+          PYTHONPATH=src:tests python -m unittest $mods
+      - name: compileall
+        run: python -m compileall -q src tests
+
+  determinism:
+    name: deterministic generation (golden)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install -e ".[dev]"
+      - name: Golden baseline + public/private leakage
+        run: PYTHONPATH=src:tests python -m unittest test_baseline_fixtures -v
+
+  build:
+    name: package build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install build twine
+      - run: python -m build
+      - name: Metadata check
+        run: twine check dist/*
+
+  secret-scan:
+    name: secret scan
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: gitleaks
+        uses: gitleaks/gitleaks-action@v2
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  lint:
+    name: lint (informational)
+    runs-on: ubuntu-latest
+    continue-on-error: true # promote to required after M5
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install ruff
+      - run: ruff check src tests
+      - run: ruff format --check src tests
+
+  types:
+    name: type check (informational)
+    runs-on: ubuntu-latest
+    continue-on-error: true # promote to required as modules are annotated
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install mypy
+      - run: mypy src || true
+
+  sast:
+    name: static security scan (informational)
+    runs-on: ubuntu-latest
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install bandit pip-audit
+      - name: bandit (SAST)
+        run: bandit -r src -ll
+      - name: pip-audit (dependency vulnerabilities)
+        run: pip-audit || true

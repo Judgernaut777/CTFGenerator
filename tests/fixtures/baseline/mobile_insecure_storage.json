@@ -1,0 +1,192 @@
+{
+  "baseline-seed-1": {
+    "file_count": 15,
+    "files": {
+      "challenge.yaml": {
+        "private": false,
+        "public": false,
+        "sha256": "8d9d5dbd6ae009b7d1cd79663627b88c3d8c007f0f9a93a47a6b32c2d1bd750a",
+        "size": 1279
+      },
+      "private/checkpoints.yaml": {
+        "private": true,
+        "public": false,
+        "sha256": "e175a4944a23c51e4fbb2b651f160cf64207660b8b602328f0f82a1feac451d9",
+        "size": 417
+      },
+      "private/solution.md": {
+        "private": true,
+        "public": false,
+        "sha256": "fe47e50bede9c2c66a311f2ad3c326271ae0f0ab2a659e17989e31417559951d",
+        "size": 2920
+      },
+      "private/solver.py": {
+        "private": true,
+        "public": false,
+        "sha256": "93070f749a1642a259b46551729593e94027bf0ff2a3cfc1dc70a06dff8fd7b2",
+        "size": 1821
+      },
+      "private/variant.json": {
+        "private": true,
+        "public": false,
+        "sha256": "1e4f34d1b4fc6f09253e30941c93588ea2df66788765ebce131e668190c73206",
+        "size": 1550
+      },
+      "public/app/AndroidManifest.xml": {
+        "private": false,
+        "public": true,
+        "sha256": "8b3168a5a4377845a59cccdeff50a659723baac7bc3b287f0bcfbdae892de038",
+        "size": 794
+      },
+      "public/app/backup/vault_backup.xml": {
+        "private": false,
+        "public": true,
+        "sha256": "51e098753534ad2f4a605c9b7ca0d1a8117461f42afc449f507e0211fa0ad828",
+        "size": 748
+      },
+      "public/app/res/xml/backup_rules.xml": {
+        "private": false,
+        "public": true,
+        "sha256": "9847d56dae6b1cbdc8d2963ab041978345d81c567782539170e069232af97960",
+        "size": 450
+      },
+      "public/app/shared_prefs/vault_prefs.xml": {
+        "private": false,
+        "public": true,
+        "sha256": "a854df56f3967ba13b9dfd33082db3533b6aa873b6a347c35bf14b0de64ec48d",
+        "size": 331
+      },
+      "public/app/src/main/java/com/acmemobile/vault/CryptoVault.java": {
+        "private": false,
+        "public": true,
+        "sha256": "c064d5eca47f52e80ca8eb30f4175083471a782a3d3f4e210346453d25711dec",
+        "size": 2069
+      },
+      "public/app/src/main/java/com/acmemobile/vault/LoginActivity.java": {
+        "private": false,
+        "public": true,
+        "sha256": "292e64cdb94f41413a57beec3e01f4158f1e4a97a9a0198d11e355bb21227024",
+        "size": 1362
+      },
+      "public/app/src/main/java/com/acmemobile/vault/MainActivity.java": {
+        "private": false,
+        "public": true,
+        "sha256": "5bf5a729b857844425381cf08942de730c48a80ec0e18eeb033549ff66b0f657",
+        "size": 1385
+      },
+      "public/description.md": {
+        "private": false,
+        "public": true,
+        "sha256": "d9e655681fad6692c5cd0166f3281d8e9063b1330721993541a9e744c6bab107",
+        "size": 1192
+      },
+      "public/hints.yaml": {
+        "private": false,
+        "public": true,
+        "sha256": "189fc9250a0945b1c95420961650df8b28f8328d910882a4cdbfed8f98656bb0",
+        "size": 637
+      },
+      "tests/healthcheck.py": {
+        "private": false,
+        "public": false,
+        "sha256": "b8f5cef83da1d46a1e47b5911373e0ba651786171a38d829700d64a0d97c3602",
+        "size": 1205
+      }
+    }
+  },
+  "baseline-seed-2": {
+    "file_count": 15,
+    "files": {
+      "challenge.yaml": {
+        "private": false,
+        "public": false,
+        "sha256": "c8dff16eff9e09bc0efe913885868aa0883b4f9f426af5126a1dd38cb46ce6a1",
+        "size": 1279
+      },
+      "private/checkpoints.yaml": {
+        "private": true,
+        "public": false,
+        "sha256": "e175a4944a23c51e4fbb2b651f160cf64207660b8b602328f0f82a1feac451d9",
+        "size": 417
+      },
+      "private/solution.md": {
+        "private": true,
+        "public": false,
+        "sha256": "65b6b1a66b5007feacfc3e5f02555abebacbcb14527f1e090ffb27b6ade10833",
+        "size": 2920
+      },
+      "private/solver.py": {
+        "private": true,
+        "public": false,
+        "sha256": "93070f749a1642a259b46551729593e94027bf0ff2a3cfc1dc70a06dff8fd7b2",
+        "size": 1821
+      },
+      "private/variant.json": {
+        "private": true,
+        "public": false,
+        "sha256": "3e8c6ce7c7c5606abb8ebf3baf51f2d9dc3405714f4a9b67d2127cded9683941",
+        "size": 1544
+      },
+      "public/app/AndroidManifest.xml": {
+        "private": false,
+        "public": true,
+        "sha256": "8b3168a5a4377845a59cccdeff50a659723baac7bc3b287f0bcfbdae892de038",
+        "size": 794
+      },
+      "public/app/backup/vault_backup.xml": {
+        "private": false,
+        "public": true,
+        "sha256": "c80f812eb81fc37b20a68ea8c105b68e2cde3c8c58e8daf7391a536d0ae0d806",
+        "size": 748
+      },
+      "public/app/res/xml/backup_rules.xml": {
+        "private": false,
+        "public": true,
+        "sha256": "9847d56dae6b1cbdc8d2963ab041978345d81c567782539170e069232af97960",
+        "size": 450
+      },
+      "public/app/shared_prefs/vault_prefs.xml": {
+        "private": false,
+        "public": true,
+        "sha256": "c99e46a8123dbee9563d58b0943d488bcdac45ac2822e9d5f7b0db9cea5b98e6",
+        "size": 331
+      },
+      "public/app/src/main/java/com/acmemobile/vault/CryptoVault.java": {
+        "private": false,
+        "public": true,
+        "sha256": "1a41e26cdf4d075329729868bd4aef008b342ce865c5c9a94448bdec79c002cb",
+        "size": 2069
+      },
+      "public/app/src/main/java/com/acmemobile/vault/LoginActivity.java": {
+        "private": false,
+        "public": true,
+        "sha256": "1e2e4715028ac76db5df06bfb8cb8471bc476cf4515651cfd8c9beb71738746c",
+        "size": 1360
+      },
+      "public/app/src/main/java/com/acmemobile/vault/MainActivity.java": {
+        "private": false,
+        "public": true,
+        "sha256": "5bf5a729b857844425381cf08942de730c48a80ec0e18eeb033549ff66b0f657",
+        "size": 1385
+      },
+      "public/description.md": {
+        "private": false,
+        "public": true,
+        "sha256": "168cf065a5d22a1f6b87d09f355d31eb903db7539c798f42e9b113d29f58dea7",
+        "size": 1188
+      },
+      "public/hints.yaml": {
+        "private": false,
+        "public": true,
+        "sha256": "189fc9250a0945b1c95420961650df8b28f8328d910882a4cdbfed8f98656bb0",
+        "size": 637
+      },
+      "tests/healthcheck.py": {
+        "private": false,
+        "public": false,
+        "sha256": "b8f5cef83da1d46a1e47b5911373e0ba651786171a38d829700d64a0d97c3602",
+        "size": 1205
+      }
+    }
+  }
+}

@@ -1,0 +1,216 @@
+{
+  "baseline-seed-1": {
+    "file_count": 17,
+    "files": {
+      "challenge.yaml": {
+        "private": false,
+        "public": false,
+        "sha256": "cde7efaa78bb853876fd4484ca1def5da786fffc473689991534ac538c1a26c4",
+        "size": 1329
+      },
+      "docker-compose.yml": {
+        "private": false,
+        "public": false,
+        "sha256": "6359f91e5c2344405e7b4f2792a7e01494fdd32d777ea814a4a8c3ae127eea32",
+        "size": 573
+      },
+      "private/checkpoints.yaml": {
+        "private": true,
+        "public": false,
+        "sha256": "e10c2f10f1785750b9e357e281744c85ffb1a883851f8718097a64fb6ab9f21c",
+        "size": 431
+      },
+      "private/runtime.json": {
+        "private": true,
+        "public": false,
+        "sha256": "edbf68994bb2c8cc134896e287cba5c23c22a1cf58f8ed96bb0c3b84a844c028",
+        "size": 70
+      },
+      "private/solution.md": {
+        "private": true,
+        "public": false,
+        "sha256": "6b712ad359ceec8b805b0cddd94b0d43defc97656a844e9bbe199aa762da9bdd",
+        "size": 1713
+      },
+      "private/solver.py": {
+        "private": true,
+        "public": false,
+        "sha256": "c67921418bc9ebeb04a3fda7c241526c01ad3a672307e78c0bbdfb6f27d18bc7",
+        "size": 3400
+      },
+      "private/variant.json": {
+        "private": true,
+        "public": false,
+        "sha256": "6e36e9f51a6279845ef07c08bda54f112edee21e5407b2c27b05780d74eca59a",
+        "size": 920
+      },
+      "public/description.md": {
+        "private": false,
+        "public": true,
+        "sha256": "269d4ac9232dcbd403ae62f7bdda3b67f3240cc5dc21a8fd159b4c08ab6e0be1",
+        "size": 1281
+      },
+      "public/evidence/register_write_log.jsonl": {
+        "private": false,
+        "public": true,
+        "sha256": "1507d4c0c60119a390aaeab980e3bde3480fffeb5b2b8c409d69c15e8dc51a94",
+        "size": 2368
+      },
+      "public/hints.yaml": {
+        "private": false,
+        "public": true,
+        "sha256": "e145edf3ea0570ae2d7f399e262e5ad778e57de07a4caa7cc5fa68427622079e",
+        "size": 444
+      },
+      "services/hmi/Dockerfile": {
+        "private": false,
+        "public": false,
+        "sha256": "b59df7ad5cff2ef407d71777b721a585f2d3e93fb4bc580ada53e8557bda668e",
+        "size": 210
+      },
+      "services/hmi/hmi_app.py": {
+        "private": false,
+        "public": false,
+        "sha256": "02bc76e9d5751f1845d39f97d8f8bd214b2ff6a6d8cb10a5f8f3d43de9c501f2",
+        "size": 2457
+      },
+      "services/hmi/requirements.txt": {
+        "private": false,
+        "public": false,
+        "sha256": "535a426e6d7d9fcd01fe85aa3ebed456f633c61f4fc295da6f76e2ea3a5a7340",
+        "size": 55
+      },
+      "services/plc/Dockerfile": {
+        "private": false,
+        "public": false,
+        "sha256": "175fe0210d935622b23de040a3480f9106d68e5218f9ffd3b1ec1687eda7e093",
+        "size": 216
+      },
+      "services/plc/plc_server.py": {
+        "private": false,
+        "public": false,
+        "sha256": "0bd9cb97a6464cb99ce8b2cfa0d93c021ed35529c5e9f9318d9afaa952bfc0e8",
+        "size": 4679
+      },
+      "services/plc/requirements.txt": {
+        "private": false,
+        "public": false,
+        "sha256": "6253165a94743f329f17ac3a50926892feae546d1b8e78598940e55cb3d1abac",
+        "size": 63
+      },
+      "tests/healthcheck.py": {
+        "private": false,
+        "public": false,
+        "sha256": "32abe1d1e0750239b2bea6011bcc0c1766b82eb40d03f791337fc12727d27efc",
+        "size": 506
+      }
+    }
+  },
+  "baseline-seed-2": {
+    "file_count": 17,
+    "files": {
+      "challenge.yaml": {
+        "private": false,
+        "public": false,
+        "sha256": "b84e9eb899c4402bb305765be2f836fd3437c1c4989a5d00c58cc557a982c8f3",
+        "size": 1329
+      },
+      "docker-compose.yml": {
+        "private": false,
+        "public": false,
+        "sha256": "1125a8e3fe9a6095c245828c074cfa62221edc43a3291c8c8f52d46123f6b5da",
+        "size": 573
+      },
+      "private/checkpoints.yaml": {
+        "private": true,
+        "public": false,
+        "sha256": "e10c2f10f1785750b9e357e281744c85ffb1a883851f8718097a64fb6ab9f21c",
+        "size": 431
+      },
+      "private/runtime.json": {
+        "private": true,
+        "public": false,
+        "sha256": "edbf68994bb2c8cc134896e287cba5c23c22a1cf58f8ed96bb0c3b84a844c028",
+        "size": 70
+      },
+      "private/solution.md": {
+        "private": true,
+        "public": false,
+        "sha256": "0cdb82ec4aec148d52ea20565b7333e24dd081948a311cb747116857f937a2a4",
+        "size": 1717
+      },
+      "private/solver.py": {
+        "private": true,
+        "public": false,
+        "sha256": "eccd7e8ff56ec97d3ba2ddb1bf7f243b76fbf05b035e20414ff46fc5d7d968fa",
+        "size": 3402
+      },
+      "private/variant.json": {
+        "private": true,
+        "public": false,
+        "sha256": "af1138566670d96421cc4b331734790deca1e90d07716dcb59e74669c341d2e1",
+        "size": 923
+      },
+      "public/description.md": {
+        "private": false,
+        "public": true,
+        "sha256": "01d5a666eb1ccd1a6cdcf73aa80e49f958563d5e54b975fe522f5a7c48ba11ef",
+        "size": 1281
+      },
+      "public/evidence/register_write_log.jsonl": {
+        "private": false,
+        "public": true,
+        "sha256": "1f689b97d191f963cdd92fd7b34920bf9c313f73c1d5ede44f4148dbc13054e3",
+        "size": 2378
+      },
+      "public/hints.yaml": {
+        "private": false,
+        "public": true,
+        "sha256": "e145edf3ea0570ae2d7f399e262e5ad778e57de07a4caa7cc5fa68427622079e",
+        "size": 444
+      },
+      "services/hmi/Dockerfile": {
+        "private": false,
+        "public": false,
+        "sha256": "b59df7ad5cff2ef407d71777b721a585f2d3e93fb4bc580ada53e8557bda668e",
+        "size": 210
+      },
+      "services/hmi/hmi_app.py": {
+        "private": false,
+        "public": false,
+        "sha256": "0c218d2249bbdada42f3e9c98db60495873fff4ea2d1324dd19fea69a873779a",
+        "size": 2457
+      },
+      "services/hmi/requirements.txt": {
+        "private": false,
+        "public": false,
+        "sha256": "535a426e6d7d9fcd01fe85aa3ebed456f633c61f4fc295da6f76e2ea3a5a7340",
+        "size": 55
+      },
+      "services/plc/Dockerfile": {
+        "private": false,
+        "public": false,
+        "sha256": "175fe0210d935622b23de040a3480f9106d68e5218f9ffd3b1ec1687eda7e093",
+        "size": 216
+      },
+      "services/plc/plc_server.py": {
+        "private": false,
+        "public": false,
+        "sha256": "429fc0e5934e99305609e9e612e01e6835dd28174f844cc19e09a21f7b2575c4",
+        "size": 4679
+      },
+      "services/plc/requirements.txt": {
+        "private": false,
+        "public": false,
+        "sha256": "6253165a94743f329f17ac3a50926892feae546d1b8e78598940e55cb3d1abac",
+        "size": 63
+      },
+      "tests/healthcheck.py": {
+        "private": false,
+        "public": false,
+        "sha256": "bfa47c369fcb77dae3af3aa08af5d57f722e999710f3e093b26543cf1a750a96",
+        "size": 506
+      }
+    }
+  }
+}
