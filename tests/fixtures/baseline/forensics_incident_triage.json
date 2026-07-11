@@ -23,8 +23,8 @@
       "private/manifest.json": {
         "private": true,
         "public": false,
-        "sha256": "af135e6e8a49941c7915518ef9e2c4417b47d10ae983fc51088307d3a37f3cf7",
-        "size": 1947
+        "sha256": "d23e64fb0e73b99987b0168ea197f95a502c08979929903bebaae5b6a219d46f",
+        "size": 1950
       },
       "private/solution.md": {
         "private": true,
@@ -77,8 +77,8 @@
       "public/manifest.json": {
         "private": false,
         "public": true,
-        "sha256": "7f048fbfb53f538357d5e3335258084d083f19f75ea7d09ba0e238b800503619",
-        "size": 950
+        "sha256": "d99d400ff876538203e07931cb01c81ecaeee4d687f79843528bb63573d51190",
+        "size": 953
       },
       "tests/healthcheck.py": {
         "private": false,
@@ -112,8 +112,8 @@
       "private/manifest.json": {
         "private": true,
         "public": false,
-        "sha256": "b5bb10a1568a06407d81f8b052daacc2d7a1cf80e796d553de4675885aa66a0c",
-        "size": 1946
+        "sha256": "505b2d7dca1b40b09c094f870dc4899fd59700cdb663776404e3858ca0938e10",
+        "size": 1949
       },
       "private/solution.md": {
         "private": true,
@@ -166,8 +166,8 @@
       "public/manifest.json": {
         "private": false,
         "public": true,
-        "sha256": "40503b8362cd558db14db3a640db2c7bb09f6d66ced0cfb38daf46990ab64791",
-        "size": 950
+        "sha256": "7dab022389c8804fcdf6166cf5d1387c25d350bc5ef7ae67a89d468de2824bee",
+        "size": 953
       },
       "tests/healthcheck.py": {
         "private": false,

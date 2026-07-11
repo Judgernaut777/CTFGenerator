@@ -5,6 +5,7 @@ import re
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Callable, Protocol
 
+from . import schema as _schema
 from .models import ChallengeSpec, ResponseSpec, ScenarioSpec, TriggerSpec
 from .spec_generator import _DEFAULT_CHECKPOINTS, _DEFAULT_OBJECTIVES, _FAMILY_BRIEF
 from .templates import binary, cloud, crypto, forensics, mobile, network, scada_ics
@@ -77,6 +78,55 @@ class Family:
     # prefix), so the defender genuinely disrupts the standard solve path on
     # any instance -- not a hand-matched test literal.
     default_scenario: ScenarioSpec | None = None
+
+    # --- M4 family contract: version + capability declaration -----------------
+    # Per-family semantic version, independent of the generator version. Bump on
+    # any change to this family's rendered output so the manifest records exactly
+    # which family revision produced a build (closes the R-12 residual).
+    version: str = "1.0.0"
+    # Stability tier (see docs/MATURITY.md): "stable" | "beta" | "experimental".
+    maintenance_status: str = "experimental"
+    supported_architectures: tuple[str, ...] = ("x86_64",)
+    # How the challenge runs: an HTTP/service container, a raw-TCP service, or a
+    # static artifact bundle (no running service). Drives Execution-Plane
+    # scheduling (M7/M8).
+    isolation_level: str = "container"  # "container" | "raw_tcp" | "artifact"
+    # Host ports the rendered bundle publishes. Empty when seed-varied/ephemeral
+    # or artifact-only.
+    required_ports: tuple[int, ...] = ()
+    # Whether the running challenge needs outbound internet (distinct from the
+    # build, which may `pip install`). All current families are self-contained.
+    requires_internet: bool = False
+    expected_memory_mb: int = 256
+    expected_cpu: float = 1.0
+    expected_build_seconds: int = 120
+    # CVE fidelity levels this family can honestly claim (see docs on the CVE
+    # fidelity model, M18): contextualized < inspired < simulated < reproduced.
+    cve_fidelity_support: tuple[str, ...] = ("contextualized", "inspired")
+
+    def metadata(self) -> dict[str, object]:
+        """A serializable, schema-stamped capability declaration for this
+        family (consumed by the support matrix, API, and scheduler)."""
+        return _schema.stamp(
+            _schema.FAMILY_METADATA_SCHEMA,
+            {
+                "family": self.name,
+                "family_version": self.version,
+                "category": self.category,
+                "maintenance_status": self.maintenance_status,
+                "modes": list(self.modes),
+                "difficulties": list(self.difficulties),
+                "supported_architectures": list(self.supported_architectures),
+                "isolation_level": self.isolation_level,
+                "required_ports": list(self.required_ports),
+                "requires_internet": self.requires_internet,
+                "expected_memory_mb": self.expected_memory_mb,
+                "expected_cpu": self.expected_cpu,
+                "expected_build_seconds": self.expected_build_seconds,
+                "cve_driven": self.cve_driven,
+                "cve_fidelity_support": list(self.cve_fidelity_support),
+            },
+        )
 
 
 # --- Registry --------------------------------------------------------------------
@@ -256,6 +306,12 @@ register(
             decoy_density="medium",
         ),
         default_scenario=_FAMILY_SCENARIOS.get("web_business_logic_tenant_export"),
+        # M4 capability declaration (production-track web family).
+        maintenance_status="beta",
+        isolation_level="container",
+        required_ports=(8080,),
+        expected_memory_mb=512,
+        cve_fidelity_support=("contextualized", "inspired", "simulated"),
     )
 )
 
@@ -373,6 +429,49 @@ _FAMILY_SPEC_DEFAULTS: dict[str, tuple[tuple[str, ...], tuple[str, ...]]] = {
     ),
 }
 
+# Per-family capability declarations (M4). Ports/services/isolation derived from
+# each family's rendered docker-compose; maintenance tier per docs/MATURITY.md
+# (web/network/cloud/forensics are the production-track categories -> "beta";
+# the rest stay "experimental"). Fields omitted here fall back to the Family
+# dataclass defaults.
+_FAMILY_META: dict[str, dict] = {
+    # web_business_logic_tenant_export is registered explicitly above with its
+    # metadata inline (it is not in the module loop below).
+    "network_lateral_pivot": dict(
+        maintenance_status="beta", isolation_level="container", required_ports=(8080,),
+        expected_memory_mb=384, cve_fidelity_support=("contextualized", "inspired", "simulated"),
+    ),
+    "cloud_metadata_ssrf": dict(
+        maintenance_status="beta", isolation_level="container", required_ports=(8080, 9000),
+        expected_memory_mb=384, cve_fidelity_support=("contextualized", "inspired", "simulated"),
+    ),
+    "forensics_incident_triage": dict(
+        maintenance_status="beta", isolation_level="artifact", expected_memory_mb=128,
+    ),
+    "crypto_token_forgery": dict(
+        maintenance_status="experimental", isolation_level="container", required_ports=(8080,),
+        cve_fidelity_support=("contextualized", "inspired", "simulated"),
+    ),
+    "binary_heap_exploit": dict(
+        # Raw-TCP service on a seed-randomized ephemeral port (rng.randrange),
+        # so required_ports stays empty per the "seed-varied" convention.
+        maintenance_status="experimental", isolation_level="raw_tcp", expected_memory_mb=128,
+    ),
+    "scada_ics_modbus_takeover": dict(
+        # PLC/HMI ports are seed-randomized (rng.randrange 5020-5030 / 8090-8099),
+        # so they are ephemeral -- required_ports stays empty.
+        maintenance_status="experimental", isolation_level="container",
+    ),
+    "mobile_insecure_storage": dict(
+        maintenance_status="experimental", isolation_level="artifact", expected_memory_mb=128,
+    ),
+}
+
+
+def _family_meta(name: str) -> dict:
+    return dict(_FAMILY_META.get(name, {}))
+
+
 for _module in (scada_ics, network, crypto, cloud, forensics, binary, mobile):
     _objectives, _checkpoints = _FAMILY_SPEC_DEFAULTS.get(
         _module.FAMILY_NAME, (tuple(_DEFAULT_OBJECTIVES), tuple(_DEFAULT_CHECKPOINTS))
@@ -392,6 +491,7 @@ for _module in (scada_ics, network, crypto, cloud, forensics, binary, mobile):
             learning_objectives=_objectives,
             checkpoints=_checkpoints,
             default_scenario=_FAMILY_SCENARIOS.get(_module.FAMILY_NAME),
+            **_family_meta(_module.FAMILY_NAME),
         )
     )
 

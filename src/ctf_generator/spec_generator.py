@@ -5,6 +5,7 @@ import re
 from pathlib import Path
 from typing import Protocol
 
+from . import schema
 from .models import (
     AIResistance,
     ChallengeSpec,
@@ -412,10 +413,16 @@ def spec_to_dict(spec: ChallengeSpec) -> dict:
         data["mode"] = spec.mode
     if not spec.scenario.is_default():
         data["scenario"] = spec.scenario.to_mapping()
-    return data
+    # Stamp with the schema identifier + current version so a persisted spec is
+    # a versioned contract, not an unlabelled blob (M4). Consumers migrate/
+    # reject on load via `spec_from_dict`.
+    return schema.stamp(schema.SPEC_SCHEMA, data)
 
 
 def spec_from_dict(data: dict) -> ChallengeSpec:
+    # Validate the schema stamp, reject an incompatible major version, and
+    # migrate an older (or unstamped, pre-M4) document forward before parsing.
+    data = schema.migrate(schema.SPEC_SCHEMA, data)
     ai = data.get("ai_resistance") or {}
     variation = data.get("dynamic_variation") or {}
     scenario_data = data.get("scenario")
@@ -473,3 +480,12 @@ def write_spec(path: Path, spec: ChallengeSpec) -> Path:
 
 def load_spec(path: Path) -> ChallengeSpec:
     return spec_from_dict(json.loads(path.read_text(encoding="utf-8")))
+
+
+def load_spec_document(path: Path) -> tuple[ChallengeSpec, dict]:
+    """Load a spec, returning both the parsed :class:`ChallengeSpec` and the
+    ORIGINAL submitted document verbatim (M4: preserve original submitted
+    specifications), so a caller can retain exactly what a user provided --
+    including any keys this generator version does not yet model."""
+    original = json.loads(path.read_text(encoding="utf-8"))
+    return spec_from_dict(original), original

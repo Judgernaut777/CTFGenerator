@@ -29,8 +29,8 @@
       "private/manifest.json": {
         "private": true,
         "public": false,
-        "sha256": "dc504fd1b7cc0e9820a0e43ddbecc30ae7d7edac5cd9797d4f653b7c515df0de",
-        "size": 2802
+        "sha256": "914cf17835287cf64ebebaef595c0b54f90168b4d54407037ef5a8049f96a5dd",
+        "size": 2805
       },
       "private/runtime.json": {
         "private": true,
@@ -77,8 +77,8 @@
       "public/manifest.json": {
         "private": false,
         "public": true,
-        "sha256": "e8424639c491d827f3b5461e028e1b80546b74ba45ba8f05e244286d3a143343",
-        "size": 664
+        "sha256": "3765a0213acd1d523d0f27f50f008d3d9add59477ed5c51d8112bd5ec32d499b",
+        "size": 667
       },
       "services/hmi/Dockerfile": {
         "private": false,
@@ -154,8 +154,8 @@
       "private/manifest.json": {
         "private": true,
         "public": false,
-        "sha256": "41499ee20c817fdbbdd12f7c21f22700163551488829cae4ead1c699013b8ba9",
-        "size": 2802
+        "sha256": "c5d4b987a9090b4be828e7ff508c9319643e354aebdaf53d308ecda976ce93e0",
+        "size": 2805
       },
       "private/runtime.json": {
         "private": true,
@@ -202,8 +202,8 @@
       "public/manifest.json": {
         "private": false,
         "public": true,
-        "sha256": "d2ebb18f9d416a469635e96f66d6b12898718001d3f641087a6ea6809fe9d26a",
-        "size": 664
+        "sha256": "4b6dea7405a70a95cacc4d25477ec17fd3ce103f4fcf790bf6ac4d487279c2f2",
+        "size": 667
       },
       "services/hmi/Dockerfile": {
         "private": false,
