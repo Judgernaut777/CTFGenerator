@@ -8,6 +8,8 @@ venv/
 dist/
 build/
 *.egg-info/
-challenges/
+# Generated challenge output at the repo root only -- anchored so it does NOT
+# match the source package src/ctf_generator/domain/challenges/.
+/challenges/
 .env
 
