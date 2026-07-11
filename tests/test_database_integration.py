@@ -22,6 +22,7 @@ try:  # heavy deps are optional; guard so import never fails the host suite
     from sqlalchemy.engine import make_url
     from alembic import command
     from alembic.config import Config as AlembicConfig
+    from alembic.script import ScriptDirectory
 
     from ctf_generator.infrastructure.database.config import DatabaseConfig
     from ctf_generator.infrastructure.database.session import Database
@@ -113,11 +114,15 @@ class DatabaseIntegrationTests(unittest.TestCase):
             engine = sa.create_engine(url, future=True)
             try:
                 command.upgrade(cfg, "head")
+                # Assert we reached the CURRENT head (from the script directory),
+                # not a hardcoded revision -- so this stays correct as migrations
+                # are added.
+                head = ScriptDirectory.from_config(cfg).get_current_head()
                 with engine.connect() as conn:
                     version = conn.execute(
                         sa.text("SELECT version_num FROM alembic_version")
                     ).scalar()
-                self.assertEqual(version, "0001_baseline")
+                self.assertEqual(version, head)
 
                 command.downgrade(cfg, "base")
                 with engine.connect() as conn:
