@@ -49,6 +49,13 @@ _FORBIDDEN_INTERNAL = {
     "ctf_generator.generator",
     "ctf_generator.validator",
     "ctf_generator.build",
+    # Compatibility shims that re-export from infrastructure: a domain module
+    # importing one of these would transitively re-couple to I/O (e.g.
+    # ctf_generator.events re-exports the file-backed JsonlEventStore). Domain
+    # must import the canonical domain contract (domain.competitions.events),
+    # never the shim.
+    "ctf_generator.events",
+    "ctf_generator.scoring_engine",
 }
 
 
