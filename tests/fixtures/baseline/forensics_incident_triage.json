@@ -1,7 +1,13 @@
 {
   "baseline-seed-1": {
-    "file_count": 11,
+    "file_count": 14,
     "files": {
+      ".ctfgen-build": {
+        "private": false,
+        "public": false,
+        "sha256": "45f19442db7d04025dc6e1adc6e97df3ed79188e34714414ca9fd4888a8c28f8",
+        "size": 167
+      },
       "challenge.yaml": {
         "private": false,
         "public": false,
@@ -13,6 +19,12 @@
         "public": false,
         "sha256": "01c3bf116482bc2ae2aee62ee9e5337050a4881a71d1e4326eac1f3f51a3da51",
         "size": 431
+      },
+      "private/manifest.json": {
+        "private": true,
+        "public": false,
+        "sha256": "af135e6e8a49941c7915518ef9e2c4417b47d10ae983fc51088307d3a37f3cf7",
+        "size": 1947
       },
       "private/solution.md": {
         "private": true,
@@ -62,6 +74,12 @@
         "sha256": "5b8c5fdb10f57db1c069da9e8e036e77adee325defc5e19e58822b1a23453e98",
         "size": 558
       },
+      "public/manifest.json": {
+        "private": false,
+        "public": true,
+        "sha256": "7f048fbfb53f538357d5e3335258084d083f19f75ea7d09ba0e238b800503619",
+        "size": 950
+      },
       "tests/healthcheck.py": {
         "private": false,
         "public": false,
@@ -71,8 +89,14 @@
     }
   },
   "baseline-seed-2": {
-    "file_count": 11,
+    "file_count": 14,
     "files": {
+      ".ctfgen-build": {
+        "private": false,
+        "public": false,
+        "sha256": "325055f3fb26c01ccbcd7c64064e2837e65a0fc9233430fe139399cc48f42d98",
+        "size": 167
+      },
       "challenge.yaml": {
         "private": false,
         "public": false,
@@ -84,6 +108,12 @@
         "public": false,
         "sha256": "01c3bf116482bc2ae2aee62ee9e5337050a4881a71d1e4326eac1f3f51a3da51",
         "size": 431
+      },
+      "private/manifest.json": {
+        "private": true,
+        "public": false,
+        "sha256": "b5bb10a1568a06407d81f8b052daacc2d7a1cf80e796d553de4675885aa66a0c",
+        "size": 1946
       },
       "private/solution.md": {
         "private": true,
@@ -132,6 +162,12 @@
         "public": true,
         "sha256": "5b8c5fdb10f57db1c069da9e8e036e77adee325defc5e19e58822b1a23453e98",
         "size": 558
+      },
+      "public/manifest.json": {
+        "private": false,
+        "public": true,
+        "sha256": "40503b8362cd558db14db3a640db2c7bb09f6d66ced0cfb38daf46990ab64791",
+        "size": 950
       },
       "tests/healthcheck.py": {
         "private": false,

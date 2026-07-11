@@ -3,11 +3,10 @@ from __future__ import annotations
 import hashlib
 import json
 import random
-import shutil
 from pathlib import Path
 from typing import TYPE_CHECKING
 
-from . import families
+from . import build, families
 from .models import ChallengeSpec
 from .spec_generator import default_spec
 from .yaml_writer import dump_yaml
@@ -26,11 +25,6 @@ def create_challenge(
     spec: ChallengeSpec | None = None,
     cve_record: "CveRecord | None" = None,
 ) -> Path:
-    if output_dir.exists():
-        if not force:
-            raise FileExistsError(f"{output_dir} already exists; pass --force to overwrite")
-        shutil.rmtree(output_dir)
-
     # Spec-first: when a caller supplies a structured spec (e.g. from `ctfgen
     # spec`), it is the source of truth, including its seed. Otherwise fall back
     # to the built-in deterministic spec for this family.
@@ -38,23 +32,27 @@ def create_challenge(
         spec = default_spec(seed=seed, title=title, difficulty=difficulty, family=family)
 
     rng = random.Random(_seed_int(spec.seed))
-    files = families.get(spec.family).render(spec, rng, cve_record)
-    files["challenge.yaml"] = dump_yaml(spec.to_mapping())
-
-    for relative_path, content in files.items():
-        path = output_dir / relative_path
-        path.parent.mkdir(parents=True, exist_ok=True)
-        path.write_text(content, encoding="utf-8")
+    files = dict(families.get(spec.family).render(spec, rng, cve_record))
+    spec_mapping = spec.to_mapping()
+    files["challenge.yaml"] = dump_yaml(spec_mapping)
 
     if spec.scenario.enabled:
-        timeline_path = output_dir / "private/scenario_timeline.json"
-        timeline_path.parent.mkdir(parents=True, exist_ok=True)
-        timeline_path.write_text(
-            json.dumps(spec.scenario.to_mapping(), indent=2, sort_keys=True) + "\n",
-            encoding="utf-8",
+        files["private/scenario_timeline.json"] = (
+            json.dumps(spec.scenario.to_mapping(), indent=2, sort_keys=True) + "\n"
         )
 
-    return output_dir
+    # Hardened, atomic publish: path validation, size/count limits, managed-dir
+    # deletion guard, and a cryptographic public/private manifest all live in
+    # `build.write_build`, so every entry point (CLI, MCP) is protected here.
+    spec_sha256 = hashlib.sha256(
+        json.dumps(spec_mapping, sort_keys=True, ensure_ascii=False).encode("utf-8")
+    ).hexdigest()
+    return build.write_build(
+        output_dir,
+        files,
+        meta=build.BuildMeta(family=spec.family, seed=spec.seed, spec_sha256=spec_sha256),
+        force=force,
+    )
 
 
 def create_challenge_from_cve(

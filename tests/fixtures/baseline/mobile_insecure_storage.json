@@ -1,7 +1,13 @@
 {
   "baseline-seed-1": {
-    "file_count": 15,
+    "file_count": 18,
     "files": {
+      ".ctfgen-build": {
+        "private": false,
+        "public": false,
+        "sha256": "b946750e7101472869581c8ce3ff72b1e3c5a8f26a1adbe0961dbe5c7d2b21b3",
+        "size": 165
+      },
       "challenge.yaml": {
         "private": false,
         "public": false,
@@ -13,6 +19,12 @@
         "public": false,
         "sha256": "e175a4944a23c51e4fbb2b651f160cf64207660b8b602328f0f82a1feac451d9",
         "size": 417
+      },
+      "private/manifest.json": {
+        "private": true,
+        "public": false,
+        "sha256": "60d6e34d73f7d73f760c5e9d85b353ec6c0e2eedc9af8207be009701dc77af19",
+        "size": 2663
       },
       "private/solution.md": {
         "private": true,
@@ -86,6 +98,12 @@
         "sha256": "189fc9250a0945b1c95420961650df8b28f8328d910882a4cdbfed8f98656bb0",
         "size": 637
       },
+      "public/manifest.json": {
+        "private": false,
+        "public": true,
+        "sha256": "15b62a86f489c51445c51f88e80553e7f690831ec57839d2f87011e11d4f540d",
+        "size": 1665
+      },
       "tests/healthcheck.py": {
         "private": false,
         "public": false,
@@ -95,8 +113,14 @@
     }
   },
   "baseline-seed-2": {
-    "file_count": 15,
+    "file_count": 18,
     "files": {
+      ".ctfgen-build": {
+        "private": false,
+        "public": false,
+        "sha256": "d05c2aeec68050fbb75c2e469323f036ab44f5413712320ea8af016d0991811b",
+        "size": 165
+      },
       "challenge.yaml": {
         "private": false,
         "public": false,
@@ -108,6 +132,12 @@
         "public": false,
         "sha256": "e175a4944a23c51e4fbb2b651f160cf64207660b8b602328f0f82a1feac451d9",
         "size": 417
+      },
+      "private/manifest.json": {
+        "private": true,
+        "public": false,
+        "sha256": "05ac9c5ac0c03250a1b904d911cd48d64686c08c07eb27b7a1f878d7bc460e9a",
+        "size": 2663
       },
       "private/solution.md": {
         "private": true,
@@ -180,6 +210,12 @@
         "public": true,
         "sha256": "189fc9250a0945b1c95420961650df8b28f8328d910882a4cdbfed8f98656bb0",
         "size": 637
+      },
+      "public/manifest.json": {
+        "private": false,
+        "public": true,
+        "sha256": "c968489211d66045a8e503e1ee28623339b0c6a21bea09c2a5bb6782052459f6",
+        "size": 1665
       },
       "tests/healthcheck.py": {
         "private": false,

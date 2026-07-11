@@ -1,7 +1,13 @@
 {
   "baseline-seed-1": {
-    "file_count": 17,
+    "file_count": 20,
     "files": {
+      ".ctfgen-build": {
+        "private": false,
+        "public": false,
+        "sha256": "fa8592f30c0406b8266dc1d0ee2d52730f503d676e73745f5c35911ea21b30d2",
+        "size": 167
+      },
       "challenge.yaml": {
         "private": false,
         "public": false,
@@ -19,6 +25,12 @@
         "public": false,
         "sha256": "e10c2f10f1785750b9e357e281744c85ffb1a883851f8718097a64fb6ab9f21c",
         "size": 431
+      },
+      "private/manifest.json": {
+        "private": true,
+        "public": false,
+        "sha256": "dc504fd1b7cc0e9820a0e43ddbecc30ae7d7edac5cd9797d4f653b7c515df0de",
+        "size": 2802
       },
       "private/runtime.json": {
         "private": true,
@@ -61,6 +73,12 @@
         "public": true,
         "sha256": "e145edf3ea0570ae2d7f399e262e5ad778e57de07a4caa7cc5fa68427622079e",
         "size": 444
+      },
+      "public/manifest.json": {
+        "private": false,
+        "public": true,
+        "sha256": "e8424639c491d827f3b5461e028e1b80546b74ba45ba8f05e244286d3a143343",
+        "size": 664
       },
       "services/hmi/Dockerfile": {
         "private": false,
@@ -107,8 +125,14 @@
     }
   },
   "baseline-seed-2": {
-    "file_count": 17,
+    "file_count": 20,
     "files": {
+      ".ctfgen-build": {
+        "private": false,
+        "public": false,
+        "sha256": "4fcd3b922315a98ff122c64dc91b973700db29dbb075505eddf4f0e831a9638a",
+        "size": 167
+      },
       "challenge.yaml": {
         "private": false,
         "public": false,
@@ -126,6 +150,12 @@
         "public": false,
         "sha256": "e10c2f10f1785750b9e357e281744c85ffb1a883851f8718097a64fb6ab9f21c",
         "size": 431
+      },
+      "private/manifest.json": {
+        "private": true,
+        "public": false,
+        "sha256": "41499ee20c817fdbbdd12f7c21f22700163551488829cae4ead1c699013b8ba9",
+        "size": 2802
       },
       "private/runtime.json": {
         "private": true,
@@ -168,6 +198,12 @@
         "public": true,
         "sha256": "e145edf3ea0570ae2d7f399e262e5ad778e57de07a4caa7cc5fa68427622079e",
         "size": 444
+      },
+      "public/manifest.json": {
+        "private": false,
+        "public": true,
+        "sha256": "d2ebb18f9d416a469635e96f66d6b12898718001d3f641087a6ea6809fe9d26a",
+        "size": 664
       },
       "services/hmi/Dockerfile": {
         "private": false,
