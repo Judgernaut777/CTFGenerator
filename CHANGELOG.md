@@ -9,6 +9,39 @@ Release CI enforces that every tagged version has an entry here (see
 
 ## [Unreleased]
 
+### Added — Milestone 3: filesystem & generation hardening
+
+- New `ctf_generator.build` module is the single choke point that turns a
+  family's rendered `{path: content}` mapping into an on-disk bundle safely.
+  `generator.create_challenge` now routes through it, so **every** entry point
+  (CLI `create`/`create-from-cve`, MCP tools) is hardened uniformly — not just
+  the MCP workspace seam.
+- **Path safety**: renderer paths are validated (no absolute, no `..`, no
+  control/bidi-confusable chars, no reserved names, bounded length) and rejected
+  case-insensitively if they would forge the build marker or a manifest;
+  duplicate normalized paths (case-insensitive) are rejected.
+- **Atomic publish**: builds are written to a temporary sibling directory and
+  published with a move-aside + `os.replace`, so a failed or interrupted build
+  can never replace or destroy a valid one; failed builds are retained under a
+  unique `*.ctfgen-failed-*` directory for diagnosis.
+- **Managed-deletion guard**: a `.ctfgen-build` ownership marker is written into
+  every build; `--force` regeneration refuses to delete any non-empty directory
+  that is not a CTFGenerator-managed build, a symlink, or a dangerous root
+  (`/`, `$HOME`, cwd, shallow system paths).
+- **Limits**: aggregate size (64 MiB) and file count (2000) are enforced.
+- **Cryptographic manifests**: every build emits a `private/manifest.json`
+  (SHA-256 of every file, seed, spec hash, generator/spec versions) and, when a
+  public surface exists, a `public/manifest.json` containing **only** public
+  file hashes — the seed (which deterministically derives the flag) and spec
+  hash are never placed in a player-facing artifact.
+- Adversarial test suite `tests/test_build_hardening.py` covering traversal,
+  absolute paths, symlink escape, dangerous force targets, unmarked-directory
+  deletion, duplicate/case-collision paths, oversized/over-count output,
+  interrupted builds, partial-publish restore, and Unicode-confusable paths.
+  Golden baseline fixtures regenerated to include the manifests; all 8 families
+  remain deterministic. An adversarial security review of the module was run and
+  its findings (incl. a seed-in-public-manifest leak) fixed before landing.
+
 ### Added — productization foundation (Milestones 0–2, security & ADRs)
 
 - **Baseline golden fixtures** for all 8 challenge families across 2 seeds

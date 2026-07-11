@@ -1,7 +1,13 @@
 {
   "baseline-seed-1": {
-    "file_count": 22,
+    "file_count": 25,
     "files": {
+      ".ctfgen-build": {
+        "private": false,
+        "public": false,
+        "sha256": "0990a97fde4e0fa1f0869d2df3785f72bcc869ad6c131d18b495c6fcd1ea783b",
+        "size": 161
+      },
       "challenge.yaml": {
         "private": false,
         "public": false,
@@ -25,6 +31,12 @@
         "public": false,
         "sha256": "209b1f85b6da91b0294b5170fb34f35b0fe63d4c9479faf81ef13c4c3d2813b4",
         "size": 480
+      },
+      "private/manifest.json": {
+        "private": true,
+        "public": false,
+        "sha256": "2f7ed2d525cc68ffd7e98e47c357ca18596370fc05b61612423f3d869679c64d",
+        "size": 3528
       },
       "private/scenario_timeline.json": {
         "private": true,
@@ -61,6 +73,12 @@
         "public": true,
         "sha256": "28d243c9d38c410f1d54d57bd8b803ab504d2bc676c67d12edb35ac117087ea8",
         "size": 440
+      },
+      "public/manifest.json": {
+        "private": false,
+        "public": true,
+        "sha256": "3c53c6f0f66aa1e51ebda835ca44cc80b86c395b56045eebce9083bef1909eca",
+        "size": 497
       },
       "services/api/Dockerfile": {
         "private": false,
@@ -137,8 +155,14 @@
     }
   },
   "baseline-seed-2": {
-    "file_count": 22,
+    "file_count": 25,
     "files": {
+      ".ctfgen-build": {
+        "private": false,
+        "public": false,
+        "sha256": "1b90f5bf6131e652c2452f834ecd9fcdc65e638c283553d3ea5e646e1dc615dd",
+        "size": 161
+      },
       "challenge.yaml": {
         "private": false,
         "public": false,
@@ -162,6 +186,12 @@
         "public": false,
         "sha256": "209b1f85b6da91b0294b5170fb34f35b0fe63d4c9479faf81ef13c4c3d2813b4",
         "size": 480
+      },
+      "private/manifest.json": {
+        "private": true,
+        "public": false,
+        "sha256": "b5e7d94ce0e78196f80842ecc1c4eebb093956ab3f76d93560ec2084ee3fc402",
+        "size": 3528
       },
       "private/scenario_timeline.json": {
         "private": true,
@@ -198,6 +228,12 @@
         "public": true,
         "sha256": "72c6f0e36715df6af763095ac31fba8eac853dae6bd7cf0c66c71d79934765c5",
         "size": 444
+      },
+      "public/manifest.json": {
+        "private": false,
+        "public": true,
+        "sha256": "d572ce81fcc6284ba9b1eb7d12a8b62438b1572b4dafbfb1fb9e3b3b48bab07a",
+        "size": 497
       },
       "services/api/Dockerfile": {
         "private": false,

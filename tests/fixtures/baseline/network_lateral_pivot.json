@@ -1,7 +1,13 @@
 {
   "baseline-seed-1": {
-    "file_count": 18,
+    "file_count": 21,
     "files": {
+      ".ctfgen-build": {
+        "private": false,
+        "public": false,
+        "sha256": "12d48f17380bbd03a05686c40bdf7083c002e52863bb97490b6b4cc4fab69ee3",
+        "size": 163
+      },
       "challenge.yaml": {
         "private": false,
         "public": false,
@@ -25,6 +31,12 @@
         "public": false,
         "sha256": "1ee1a6ae434dec9009dcbd5982795946425ddaac6d96a5b53241c6c3597a03f0",
         "size": 290
+      },
+      "private/manifest.json": {
+        "private": true,
+        "public": false,
+        "sha256": "bcdd1f1fddb767bee10e41403f22d42703f17a95a63323cc3df3c7185f893237",
+        "size": 2944
       },
       "private/scenario_timeline.json": {
         "private": true,
@@ -61,6 +73,12 @@
         "public": true,
         "sha256": "5ab1373daef928ee49d9dfd0fbd90a44168e108e05a63d1f1d07e19369cac7cc",
         "size": 555
+      },
+      "public/manifest.json": {
+        "private": false,
+        "public": true,
+        "sha256": "c05da4c3e5d36fd32b48f41ebd18fcbc54db21769e64a8ad3354dd7bc3419715",
+        "size": 499
       },
       "services/edge/Dockerfile": {
         "private": false,
@@ -113,8 +131,14 @@
     }
   },
   "baseline-seed-2": {
-    "file_count": 18,
+    "file_count": 21,
     "files": {
+      ".ctfgen-build": {
+        "private": false,
+        "public": false,
+        "sha256": "6ffe6655cf26395dbc3ae82c3b367bbd494489b58b1a7ffa3f05d30daf5440d0",
+        "size": 163
+      },
       "challenge.yaml": {
         "private": false,
         "public": false,
@@ -138,6 +162,12 @@
         "public": false,
         "sha256": "c4783214c3223151e3fecb87e92792d0236605ffcdc0dd5f9801a0a76b8c0833",
         "size": 285
+      },
+      "private/manifest.json": {
+        "private": true,
+        "public": false,
+        "sha256": "1f6b0e445ed3f8d3f1569b8a3973a33cb58909176d6aca8c3bea1166abd70630",
+        "size": 2944
       },
       "private/scenario_timeline.json": {
         "private": true,
@@ -174,6 +204,12 @@
         "public": true,
         "sha256": "ccfcdebc360e27d9725d3841a3b7f2eac1940887aad58b735bcaac2f034737c5",
         "size": 553
+      },
+      "public/manifest.json": {
+        "private": false,
+        "public": true,
+        "sha256": "7ea222eb0bd32c326a746bf9550de7cdd9301620fcc3119a449e2b7738be912b",
+        "size": 499
       },
       "services/edge/Dockerfile": {
         "private": false,
