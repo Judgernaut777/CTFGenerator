@@ -50,7 +50,12 @@ def create_challenge(
     return build.write_build(
         output_dir,
         files,
-        meta=build.BuildMeta(family=spec.family, seed=spec.seed, spec_sha256=spec_sha256),
+        meta=build.BuildMeta(
+            family=spec.family,
+            seed=spec.seed,
+            spec_sha256=spec_sha256,
+            family_version=families.get(spec.family).version,
+        ),
         force=force,
     )
 

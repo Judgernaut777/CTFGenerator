@@ -9,6 +9,36 @@ Release CI enforces that every tagged version has an entry here (see
 
 ## [Unreleased]
 
+### Added — Milestone 4: schema & family contracts
+
+- New `ctf_generator.schema` module centralizes schema **identity, semantic
+  versioning, compatibility, and migration**. Replaces three independent
+  hard-coded `"1.0"` stamps that no consumer read (risk R-03) with real
+  contracts: `check_compatible` rejects an incompatible major (or a
+  newer-than-supported minor), and `migrate` upgrades older documents through a
+  registered chain.
+- Challenge specs are now **stamped and versioned** (`ctfgen.challenge-spec`
+  1.1): `spec_to_dict` stamps, `spec_from_dict` migrates + rejects an unknown
+  major (also at the MCP `build_spec`/`validate_spec` boundary). A pre-M4,
+  unstamped `spec.json` still loads (assumed 1.0). New `load_spec_document`
+  returns the parsed spec **and the verbatim original** so a caller can retain
+  exactly what a user submitted (preserve-original-spec requirement).
+- **Family capability contract**: `Family` gained a per-family `version`
+  (independent of the generator version — closes the R-12 residual) plus a
+  capability declaration (maintenance tier, supported modes/difficulties/
+  architectures, isolation level, required ports, memory/cpu/build estimates,
+  internet requirement, CVE-fidelity support) and a schema-stamped
+  `metadata()`. Values grounded in each family's rendered compose. The build
+  manifest now records `family_version`.
+- Tests: `tests/test_schema_versioning.py` (semver, compatibility, migration,
+  spec stamping/round-trip/reject-future-major, preserve-original, per-family
+  metadata, manifest family_version). Golden fixtures regenerated; all families
+  remain deterministic.
+- Scope note: the execution-plane interface contracts the plan also lists under
+  M4 (runtime-backend, artifact-store, job, and worker-result protocols) are
+  deferred to land **with their consumers** in M7/M8, per the "no isolated
+  framework code without a complete workflow" rule.
+
 ### Added — Milestone 3: filesystem & generation hardening
 
 - New `ctf_generator.build` module is the single choke point that turns a

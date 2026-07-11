@@ -23,7 +23,7 @@ import json
 import os
 from pathlib import Path
 
-from . import families, report_index, spec_generator
+from . import families, report_index, schema, spec_generator
 from .generator import create_challenge as _create_challenge
 from .score import score_challenge as _score_challenge
 from .validator import validate_challenge as _validate_challenge
@@ -165,7 +165,13 @@ def build_spec(
 
 def validate_spec(spec: dict) -> dict:
     """Structurally validate a spec dict before it is rendered."""
-    errors = spec_generator.validate_spec(spec_generator.spec_from_dict(spec))
+    try:
+        parsed = spec_generator.spec_from_dict(spec)
+    except schema.SchemaError as exc:
+        # An incompatible/malformed schema stamp is a validation failure, not a
+        # crash: fold it into the structured error list like any other.
+        return {"ok": False, "errors": [str(exc)]}
+    errors = spec_generator.validate_spec(parsed)
     return {"ok": not errors, "errors": errors}
 
 
@@ -185,7 +191,10 @@ def create_from_spec(
     unaffected. Either way the result is validated by
     ``spec_generator.validate_spec`` before anything is rendered.
     """
-    parsed = spec_generator.spec_from_dict(spec)
+    try:
+        parsed = spec_generator.spec_from_dict(spec)
+    except schema.SchemaError as exc:
+        return {"ok": False, "errors": [str(exc)]}
     if mode is not None or cve_refs is not None:
         parsed = dataclasses.replace(
             parsed,
