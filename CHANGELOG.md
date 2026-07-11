@@ -9,6 +9,26 @@ Release CI enforces that every tagged version has an entry here (see
 
 ## [Unreleased]
 
+### Changed — Milestone 5 (increment 1): layered package skeleton + domain layer
+
+- Introduced the target package layering
+  (`domain` / `application` / `infrastructure` / `interfaces` / `workers`) with
+  documented intent in each package `__init__`.
+- Moved the pure challenge/competition/scoring/submission value types into
+  `ctf_generator.domain.challenges.models` (the domain layer's first real
+  tenant). `ctf_generator.models` is now a **compatibility shim** re-exporting
+  them, so all ~40 existing import sites keep working unchanged and class
+  identity is preserved.
+- New CI guardrail `tests/test_architecture_boundaries.py` parses the AST of
+  every `domain` module and fails if it imports framework/IO (`http`, `socket`,
+  `subprocess`, `urllib`, `fastapi`, `sqlalchemy`, `psycopg`, `anthropic`,
+  `openai`, `mcp`, …) or any infrastructure/effectful package — enforcing
+  `docs/architecture/dependency-rules.md`.
+- Remaining M5 work (later increments): move competition/scoring/families into
+  their domain modules, split the 1389-line `cli.py` by command group under
+  `interfaces/cli`, and extract shared application services once the API
+  (M8/M10) gives them a second consumer (avoiding pass-through-only seams now).
+
 ### Added — Milestone 4: schema & family contracts
 
 - New `ctf_generator.schema` module centralizes schema **identity, semantic
