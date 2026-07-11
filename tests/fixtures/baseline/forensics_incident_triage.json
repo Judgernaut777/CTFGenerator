@@ -1,0 +1,144 @@
+{
+  "baseline-seed-1": {
+    "file_count": 11,
+    "files": {
+      "challenge.yaml": {
+        "private": false,
+        "public": false,
+        "sha256": "6030b2c9ed032db3e23321576477008df38016e2e8e2708ce19890d1bb24154f",
+        "size": 1304
+      },
+      "private/checkpoints.yaml": {
+        "private": true,
+        "public": false,
+        "sha256": "01c3bf116482bc2ae2aee62ee9e5337050a4881a71d1e4326eac1f3f51a3da51",
+        "size": 431
+      },
+      "private/solution.md": {
+        "private": true,
+        "public": false,
+        "sha256": "1186977223e556718447f113770828df1cc8f2cf4514b7406df1d3bb1c912e25",
+        "size": 1758
+      },
+      "private/solver.py": {
+        "private": true,
+        "public": false,
+        "sha256": "c193ae76203068f066afee7780e853974654437cbf847dd6c8ef4376fc56f16a",
+        "size": 1970
+      },
+      "private/variant.json": {
+        "private": true,
+        "public": false,
+        "sha256": "417aef0d63ad047ad7f35284ec6dad7f3611030196a9b2e3928526530d5eb4d3",
+        "size": 1009
+      },
+      "public/artifacts/access.log": {
+        "private": false,
+        "public": true,
+        "sha256": "3659f5d8e14fb86c9dcb822f42bf4f8c8cf88fce3911742980318bf20935380a",
+        "size": 1229
+      },
+      "public/artifacts/auth.log": {
+        "private": false,
+        "public": true,
+        "sha256": "3bfa103a95206b83f8884aa30651c47f095f7882683d4381cf89620a4a2e6314",
+        "size": 772
+      },
+      "public/artifacts/dropped_strings.txt": {
+        "private": false,
+        "public": true,
+        "sha256": "31bb24a400f8ebf7b23038ae6efeb4e74b448144050a0647883bb45fbe1da579",
+        "size": 372
+      },
+      "public/description.md": {
+        "private": false,
+        "public": true,
+        "sha256": "6595368b0a7d812527206cdb2c664399b11511793c8c41297e12a37ca38ca768",
+        "size": 1171
+      },
+      "public/hints.yaml": {
+        "private": false,
+        "public": true,
+        "sha256": "5b8c5fdb10f57db1c069da9e8e036e77adee325defc5e19e58822b1a23453e98",
+        "size": 558
+      },
+      "tests/healthcheck.py": {
+        "private": false,
+        "public": false,
+        "sha256": "cbfa189ddfcdd8de0f9535da5ad8b21a2f9b80b848c582514cdcdfc3574728e8",
+        "size": 849
+      }
+    }
+  },
+  "baseline-seed-2": {
+    "file_count": 11,
+    "files": {
+      "challenge.yaml": {
+        "private": false,
+        "public": false,
+        "sha256": "fd04a76534ad4a2e86c2d8d9c8224a5af220f57c5fbe04daac82935709bdfd3f",
+        "size": 1304
+      },
+      "private/checkpoints.yaml": {
+        "private": true,
+        "public": false,
+        "sha256": "01c3bf116482bc2ae2aee62ee9e5337050a4881a71d1e4326eac1f3f51a3da51",
+        "size": 431
+      },
+      "private/solution.md": {
+        "private": true,
+        "public": false,
+        "sha256": "4ba66373aeb1f3fd278f046c0ae9ff0d7e54c90745b8067ca0cf7862c2213a1b",
+        "size": 1710
+      },
+      "private/solver.py": {
+        "private": true,
+        "public": false,
+        "sha256": "c193ae76203068f066afee7780e853974654437cbf847dd6c8ef4376fc56f16a",
+        "size": 1970
+      },
+      "private/variant.json": {
+        "private": true,
+        "public": false,
+        "sha256": "38a97a78e96769beba6381261d964c93df2e7bd2281414786d48850e2b2be043",
+        "size": 999
+      },
+      "public/artifacts/access.log": {
+        "private": false,
+        "public": true,
+        "sha256": "0867dccac0250af08b29f21ec6c12063371623f1ad828f34ea6ab5a057aba236",
+        "size": 1198
+      },
+      "public/artifacts/auth.log": {
+        "private": false,
+        "public": true,
+        "sha256": "c9cfc93a4eda474824d9996e8f1ad4898e46f03fbbd70a3e064beade3745633f",
+        "size": 745
+      },
+      "public/artifacts/dropped_strings.txt": {
+        "private": false,
+        "public": true,
+        "sha256": "a1ac699ae0982cf44205d3219dced74090df36c4e8939e6d72f8cedc3e0cf234",
+        "size": 367
+      },
+      "public/description.md": {
+        "private": false,
+        "public": true,
+        "sha256": "ba975af60cfd4d5dd5197e16fb663f5d4dde86d889bdc9a8b29586db20feec5a",
+        "size": 1170
+      },
+      "public/hints.yaml": {
+        "private": false,
+        "public": true,
+        "sha256": "5b8c5fdb10f57db1c069da9e8e036e77adee325defc5e19e58822b1a23453e98",
+        "size": 558
+      },
+      "tests/healthcheck.py": {
+        "private": false,
+        "public": false,
+        "sha256": "cbfa189ddfcdd8de0f9535da5ad8b21a2f9b80b848c582514cdcdfc3574728e8",
+        "size": 849
+      }
+    }
+  }
+}

@@ -40,6 +40,9 @@ postgres = ["psycopg[binary]>=3.1"]
 # hashlib/secrets/pbkdf2); this extra is the opt-in gate / future home for
 # production niceties (e.g. a real WSGI server), not a package dependency.
 web = []
+# Lint / type / security tooling used by CI (.github/workflows/pr.yml). Kept out
+# of `dev` so `pip install .[dev]` for running tests stays minimal.
+ci = ["ruff>=0.6", "mypy>=1.11", "bandit>=1.7", "pip-audit>=2.7", "build>=1.2", "twine>=5"]
 
 [project.scripts]
 ctfgen = "ctf_generator.cli:main"
@@ -54,3 +57,45 @@ where = ["src"]
 
 [tool.setuptools.dynamic]
 version = { attr = "ctf_generator.__version__" }
+
+# --- Tooling (introduced in the Milestone 2 CI foundation) ---------------------
+# Lint and type gates run in CI as INFORMATIONAL until the Milestone 5 domain
+# refactor cleans the pre-existing flat package; they are then promoted to
+# required. Config lives here so local and CI runs agree.
+
+[tool.ruff]
+src = ["src"]
+line-length = 100
+target-version = "py311"
+extend-exclude = ["**/templates/**/__pycache__"]
+
+[tool.ruff.lint]
+# Start with a conservative, high-signal rule set; widen during the refactor.
+select = ["E", "F", "I", "UP", "B", "S"]
+# S = flake8-bandit: keep the security lints, but the generator legitimately
+# builds challenge code, so per-file ignores are expected to grow under
+# [tool.ruff.lint.per-file-ignores] rather than disabling the rule globally.
+ignore = ["E501"] # line length is enforced by the formatter, not the linter
+
+[tool.ruff.lint.per-file-ignores]
+"tests/**" = ["S101"] # asserts are expected in tests
+"src/ctf_generator/templates/**" = ["S"] # renderers emit deliberately vulnerable code
+
+[tool.mypy]
+python_version = "3.11"
+files = ["src/ctf_generator"]
+# Lenient baseline: the goal now is to catch outright breakage, not to annotate
+# 10k lines at once. Tighten module-by-module during the M5 refactor by adding
+# stricter per-module overrides below.
+ignore_missing_imports = true
+warn_unused_ignores = false
+warn_redundant_casts = true
+check_untyped_defs = false
+
+[tool.pytest.ini_options]
+# The test suite is import-path sensitive (tests dir must be importable and the
+# package resolved from src). CI runs unittest directly; this block lets
+# `pytest` work locally too.
+pythonpath = ["src", "tests"]
+testpaths = ["tests"]
+

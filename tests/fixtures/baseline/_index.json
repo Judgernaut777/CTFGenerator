@@ -1,0 +1,27 @@
+{
+  "determinism": {
+    "binary_heap_exploit": "DETERMINISTIC",
+    "cloud_metadata_ssrf": "DETERMINISTIC",
+    "crypto_token_forgery": "DETERMINISTIC",
+    "forensics_incident_triage": "DETERMINISTIC",
+    "mobile_insecure_storage": "DETERMINISTIC",
+    "network_lateral_pivot": "DETERMINISTIC",
+    "scada_ics_modbus_takeover": "DETERMINISTIC",
+    "web_business_logic_tenant_export": "DETERMINISTIC"
+  },
+  "families": [
+    "binary_heap_exploit",
+    "cloud_metadata_ssrf",
+    "crypto_token_forgery",
+    "forensics_incident_triage",
+    "mobile_insecure_storage",
+    "network_lateral_pivot",
+    "scada_ics_modbus_takeover",
+    "web_business_logic_tenant_export"
+  ],
+  "note": "Golden baseline manifests: per-file sha256/size + public/private classification. Regenerate with scratchpad/gen_fixtures.py after any generator change and diff.",
+  "seeds": [
+    "baseline-seed-1",
+    "baseline-seed-2"
+  ]
+}

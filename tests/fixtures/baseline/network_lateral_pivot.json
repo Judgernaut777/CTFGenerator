@@ -1,0 +1,228 @@
+{
+  "baseline-seed-1": {
+    "file_count": 18,
+    "files": {
+      "challenge.yaml": {
+        "private": false,
+        "public": false,
+        "sha256": "83165bc9504f90417076a5cd4f024b6ab7ff1de5cf4c84c7cd8d4899269b1a2d",
+        "size": 2093
+      },
+      "docker-compose.yml": {
+        "private": false,
+        "public": false,
+        "sha256": "742d0f4305744709e7d98409d86520f6e0b802255a1bf46b4af906e083462aa9",
+        "size": 981
+      },
+      "private/checkpoints.yaml": {
+        "private": true,
+        "public": false,
+        "sha256": "e5061c49070cb8d81689e29028bd5a31570cf5e0f0df0140d1f9b06bccc3a378",
+        "size": 431
+      },
+      "private/detection_notes.md": {
+        "private": true,
+        "public": false,
+        "sha256": "1ee1a6ae434dec9009dcbd5982795946425ddaac6d96a5b53241c6c3597a03f0",
+        "size": 290
+      },
+      "private/scenario_timeline.json": {
+        "private": true,
+        "public": false,
+        "sha256": "084008070c2b32084a3b43bc18951b1fd6f0f0c4b377f7c43c458ac19954fb6c",
+        "size": 893
+      },
+      "private/solution.md": {
+        "private": true,
+        "public": false,
+        "sha256": "6efc17aac1f8fb7d2bce3ae4a8f091feeac67292a7af8a156fd4b3467e3ebff3",
+        "size": 3107
+      },
+      "private/solver.py": {
+        "private": true,
+        "public": false,
+        "sha256": "29890391f7ddea1fbb82202a1b204c9cb461ea45b320daa41b06faeb6b296ee9",
+        "size": 3450
+      },
+      "private/variant.json": {
+        "private": true,
+        "public": false,
+        "sha256": "82c461832b3c0d64ad93ea5259bb3a539814db1f81fcde28bdacab09811dcf4d",
+        "size": 660
+      },
+      "public/description.md": {
+        "private": false,
+        "public": true,
+        "sha256": "7b2695783d0481cfdbf770a72034372e893a45b3b1cc3e789fbcc3d248198b80",
+        "size": 831
+      },
+      "public/hints.yaml": {
+        "private": false,
+        "public": true,
+        "sha256": "5ab1373daef928ee49d9dfd0fbd90a44168e108e05a63d1f1d07e19369cac7cc",
+        "size": 555
+      },
+      "services/edge/Dockerfile": {
+        "private": false,
+        "public": false,
+        "sha256": "e85c38dbc2caf3a2eeabcf15586be49fe4f6cd0274d66b6974b937495fd46df1",
+        "size": 202
+      },
+      "services/edge/app.py": {
+        "private": false,
+        "public": false,
+        "sha256": "f76a727668cc39734b33e5431b8705a6e09c07eb88e9695a1675111575b29ac5",
+        "size": 5058
+      },
+      "services/edge/requirements.txt": {
+        "private": false,
+        "public": false,
+        "sha256": "9c07c4225d35a82b6fb42f873d02ac383b4ac4e0aac95b536a56deac8610dfad",
+        "size": 13
+      },
+      "services/internal/Dockerfile": {
+        "private": false,
+        "public": false,
+        "sha256": "e85c38dbc2caf3a2eeabcf15586be49fe4f6cd0274d66b6974b937495fd46df1",
+        "size": 202
+      },
+      "services/internal/app.py": {
+        "private": false,
+        "public": false,
+        "sha256": "13238a167821370428eabd03c97a4c0c5cd70436626f276be3b9666ac4df43c5",
+        "size": 1379
+      },
+      "services/internal/requirements.txt": {
+        "private": false,
+        "public": false,
+        "sha256": "9c07c4225d35a82b6fb42f873d02ac383b4ac4e0aac95b536a56deac8610dfad",
+        "size": 13
+      },
+      "tests/healthcheck.py": {
+        "private": false,
+        "public": false,
+        "sha256": "3fb74d63632e619ee4fbf3af1890e50dc1a9735154049fc29bccb44550f324e4",
+        "size": 498
+      },
+      "tests/validate_variant.py": {
+        "private": false,
+        "public": false,
+        "sha256": "0378beb24ababd135bf2b1ff7af750c0faa3a1295559d796c99da1c71d413b8f",
+        "size": 402
+      }
+    }
+  },
+  "baseline-seed-2": {
+    "file_count": 18,
+    "files": {
+      "challenge.yaml": {
+        "private": false,
+        "public": false,
+        "sha256": "ca91860513e7a1174ba202f019c8821e8ff2a84444ad3f9ac450e8678a6ba8c2",
+        "size": 2093
+      },
+      "docker-compose.yml": {
+        "private": false,
+        "public": false,
+        "sha256": "8826b0d49fa81156239088338083cfaad0b70db1f221f4a8168aa96284684348",
+        "size": 972
+      },
+      "private/checkpoints.yaml": {
+        "private": true,
+        "public": false,
+        "sha256": "e5061c49070cb8d81689e29028bd5a31570cf5e0f0df0140d1f9b06bccc3a378",
+        "size": 431
+      },
+      "private/detection_notes.md": {
+        "private": true,
+        "public": false,
+        "sha256": "c4783214c3223151e3fecb87e92792d0236605ffcdc0dd5f9801a0a76b8c0833",
+        "size": 285
+      },
+      "private/scenario_timeline.json": {
+        "private": true,
+        "public": false,
+        "sha256": "084008070c2b32084a3b43bc18951b1fd6f0f0c4b377f7c43c458ac19954fb6c",
+        "size": 893
+      },
+      "private/solution.md": {
+        "private": true,
+        "public": false,
+        "sha256": "5103d21ce4622bd059b6b160a2422eac9bae212dca36d55e543abc58707c4d8e",
+        "size": 3097
+      },
+      "private/solver.py": {
+        "private": true,
+        "public": false,
+        "sha256": "6507f212c82f6126c9f1f9e235368a248d13684cbc0a2a3b53fb619bac4b772a",
+        "size": 3446
+      },
+      "private/variant.json": {
+        "private": true,
+        "public": false,
+        "sha256": "38d91ef77b865a05b990284f275ba9d5bca23c7053f0bc13b9570a7c825b8e48",
+        "size": 651
+      },
+      "public/description.md": {
+        "private": false,
+        "public": true,
+        "sha256": "094db671ff79127a259d358437ee88a639838ae6b4b68d07112f311610e38020",
+        "size": 832
+      },
+      "public/hints.yaml": {
+        "private": false,
+        "public": true,
+        "sha256": "ccfcdebc360e27d9725d3841a3b7f2eac1940887aad58b735bcaac2f034737c5",
+        "size": 553
+      },
+      "services/edge/Dockerfile": {
+        "private": false,
+        "public": false,
+        "sha256": "e85c38dbc2caf3a2eeabcf15586be49fe4f6cd0274d66b6974b937495fd46df1",
+        "size": 202
+      },
+      "services/edge/app.py": {
+        "private": false,
+        "public": false,
+        "sha256": "086e2a3e9f46821cae92eae33eba2598478f6bddcf47aa460b836a94e1c35e6e",
+        "size": 5040
+      },
+      "services/edge/requirements.txt": {
+        "private": false,
+        "public": false,
+        "sha256": "9c07c4225d35a82b6fb42f873d02ac383b4ac4e0aac95b536a56deac8610dfad",
+        "size": 13
+      },
+      "services/internal/Dockerfile": {
+        "private": false,
+        "public": false,
+        "sha256": "e85c38dbc2caf3a2eeabcf15586be49fe4f6cd0274d66b6974b937495fd46df1",
+        "size": 202
+      },
+      "services/internal/app.py": {
+        "private": false,
+        "public": false,
+        "sha256": "1207685d3dc832830887b871fdd57694ad0dfadf2b828aaa65197b95aacba684",
+        "size": 1375
+      },
+      "services/internal/requirements.txt": {
+        "private": false,
+        "public": false,
+        "sha256": "9c07c4225d35a82b6fb42f873d02ac383b4ac4e0aac95b536a56deac8610dfad",
+        "size": 13
+      },
+      "tests/healthcheck.py": {
+        "private": false,
+        "public": false,
+        "sha256": "3fb74d63632e619ee4fbf3af1890e50dc1a9735154049fc29bccb44550f324e4",
+        "size": 498
+      },
+      "tests/validate_variant.py": {
+        "private": false,
+        "public": false,
+        "sha256": "42dbf1b7b76ccbcd39067ef7ee96b2e13e96963d09074dc30cf602ad0a71cb71",
+        "size": 400
+      }
+    }
+  }
+}
