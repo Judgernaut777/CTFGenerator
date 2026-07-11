@@ -1,0 +1,1035 @@
+# CTFGenerator control-plane API — OpenAPI 3.1 skeleton
+# STATUS: DRAFT / NOT YET IMPLEMENTED. No server implements these paths.
+# Field names align with src/ctf_generator/domain/challenges/models.py.
+# Error/version envelope reuses identifiers from src/ctf_generator/schema.py
+# (ERROR_SCHEMA = "ctfgen.error"; CURRENT_VERSIONS drives schema_version).
+# Companion prose contract: docs/api/endpoints.md
+openapi: 3.1.0
+info:
+  title: CTFGenerator Control-Plane API
+  version: 0.0.0-draft
+  x-status: DRAFT — not yet implemented
+  description: >
+    M6/M10 control-plane REST contract for the persistence foundation.
+    Design-only. Versioning and error envelope follow ctf_generator.schema;
+    do not introduce a parallel scheme.
+servers:
+  - url: /api/v1
+    description: Version-1 base path (unimplemented draft).
+
+tags:
+  - name: competitions
+  - name: teams
+  - name: users
+  - name: challenge-definitions
+  - name: challenge-versions
+  - name: submissions
+  - name: scoreboard
+  - name: audit-events
+
+# ---------------------------------------------------------------------------
+# Reusable parameters / headers
+# ---------------------------------------------------------------------------
+components:
+  parameters:
+    Limit:
+      name: limit
+      in: query
+      required: false
+      schema: { type: integer, minimum: 1, maximum: 200, default: 50 }
+      description: Page size (clamped to max).
+    Cursor:
+      name: cursor
+      in: query
+      required: false
+      schema: { type: string }
+      description: Opaque forward-only pagination token from a prior next_cursor.
+    Sort:
+      name: sort
+      in: query
+      required: false
+      schema: { type: string }
+      description: Comma-separated sortable fields; '-' prefix = descending.
+
+  headers:
+    XRequestId:
+      description: Correlation id; echoed from request or server-generated.
+      schema: { type: string }
+    ETag:
+      description: Weak validator = quoted integer resource version.
+      schema: { type: string }
+
+  # Shared request headers referenced per-operation
+  # (OpenAPI has no reusable request-header group, so declared inline below).
+
+  schemas:
+
+    # -- Envelope / version stamp (from ctf_generator.schema.stamp) ----------
+    SchemaStamp:
+      type: object
+      required: [schema, schema_version]
+      properties:
+        schema: { type: string, description: Schema identifier, e.g. ctfgen.error }
+        schema_version: { type: string, description: SemVer from CURRENT_VERSIONS }
+
+    # -- Error envelope (ctfgen.error / ERROR_SCHEMA) -----------------------
+    Error:
+      allOf:
+        - $ref: '#/components/schemas/SchemaStamp'
+        - type: object
+          required: [error]
+          properties:
+            error:
+              type: object
+              required: [code, message]
+              properties:
+                code:
+                  type: string
+                  enum: [invalid_request, validation_failed, unauthorized, forbidden,
+                         not_found, conflict, precondition_failed, idempotency_key_reused,
+                         rate_limited, unsupported_media_type, schema_incompatible, internal]
+                message: { type: string }
+                request_id: { type: string }
+                details:
+                  type: array
+                  items:
+                    type: object
+                    properties:
+                      field: { type: string }
+                      issue: { type: string }
+      example:
+        schema: ctfgen.error
+        schema_version: "1.0"
+        error:
+          code: not_found
+          message: "competition 'cmp_01H...' does not exist"
+          request_id: "req_01H8XK..."
+
+    Page:
+      type: object
+      required: [limit, has_more]
+      properties:
+        limit: { type: integer }
+        next_cursor: { type: [string, "null"] }
+        has_more: { type: boolean }
+
+    # -- Domain-aligned resource schemas ------------------------------------
+    Competition:
+      type: object
+      required: [competition_id, name, start_time, end_time, version]
+      properties:
+        competition_id: { type: string }
+        name: { type: string }
+        start_time: { type: string, format: date-time }
+        end_time: { type: string, format: date-time }
+        scoring_start_time: { type: [string, "null"], format: date-time }
+        freeze_time: { type: [string, "null"], format: date-time }
+        default_scoring: { $ref: '#/components/schemas/ChallengeScoringConfig' }
+        version: { type: integer, description: Optimistic-concurrency token (API-only). }
+
+    ChallengeScoringConfig:
+      type: [object, "null"]
+      properties:
+        challenge_id: { type: string }
+        initial_value: { type: integer, default: 500 }
+        minimum_value: { type: integer, default: 100 }
+        decay_function: { type: string, enum: [static, linear, logarithmic], default: static }
+        decay: { type: integer, default: 0 }
+        first_blood_bonus:
+          type: object
+          properties:
+            enabled: { type: boolean, default: true }
+            bonus_points: { type: integer, default: 0 }
+            bonus_percent: { type: number, default: 0.0 }
+
+    CompetitionCreate:
+      type: object
+      required: [name, start_time, end_time]
+      properties:
+        name: { type: string }
+        start_time: { type: string, format: date-time }
+        end_time: { type: string, format: date-time }
+        scoring_start_time: { type: [string, "null"], format: date-time }
+        freeze_time: { type: [string, "null"], format: date-time }
+        default_scoring: { $ref: '#/components/schemas/ChallengeScoringConfig' }
+
+    Team:
+      type: object
+      required: [team_id, competition_id, name, version]
+      properties:
+        team_id: { type: string }
+        competition_id: { type: string }
+        name: { type: string }
+        created_at: { type: string, format: date-time }
+        version: { type: integer }
+
+    TeamCreate:
+      type: object
+      required: [competition_id, name]
+      properties:
+        competition_id: { type: string }
+        name: { type: string }
+
+    User:
+      type: object
+      required: [user_id, email, display_name, role, version]
+      properties:
+        user_id: { type: string }
+        email: { type: string, format: email }
+        display_name: { type: string }
+        role: { type: string, enum: [admin, author, player] }
+        team_id: { type: [string, "null"] }
+        created_at: { type: string, format: date-time }
+        version: { type: integer }
+
+    UserCreate:
+      type: object
+      required: [email, display_name, role]
+      properties:
+        email: { type: string, format: email }
+        display_name: { type: string }
+        role: { type: string, enum: [admin, author, player] }
+        team_id: { type: [string, "null"] }
+
+    ChallengeDefinition:
+      type: object
+      required: [challenge_id, title, category, difficulty, family, version]
+      properties:
+        challenge_id: { type: string }
+        competition_id: { type: [string, "null"] }
+        title: { type: string }
+        category: { type: string }
+        difficulty: { type: string }
+        family: { type: string, description: One of the eight generator families. }
+        learning_objectives: { type: array, items: { type: string } }
+        checkpoints: { type: array, items: { type: string } }
+        mode: { type: string, default: red }
+        current_version_id: { type: [string, "null"] }
+        version: { type: integer }
+
+    ChallengeDefinitionCreate:
+      type: object
+      required: [title, category, difficulty, family]
+      properties:
+        title: { type: string }
+        category: { type: string }
+        difficulty: { type: string }
+        family: { type: string }
+        learning_objectives: { type: array, items: { type: string } }
+        checkpoints: { type: array, items: { type: string } }
+        mode: { type: string, default: red }
+        competition_id: { type: [string, "null"] }
+
+    ChallengeVersion:
+      type: object
+      required: [version_id, challenge_id, seed, spec, immutable]
+      properties:
+        version_id: { type: string }
+        challenge_id: { type: string }
+        seed: { type: string }
+        spec:
+          type: object
+          description: >
+            Full ChallengeSpec.to_mapping() stamped ctfgen.challenge-spec
+            (SPEC_SCHEMA). Embedded as-is; the API does not re-version it.
+        cve_refs: { type: array, items: { type: string } }
+        cve_content_hash: { type: [string, "null"] }
+        created_at: { type: string, format: date-time }
+        immutable: { type: boolean, const: true }
+
+    ChallengeVersionCreate:
+      type: object
+      required: [challenge_id, seed]
+      properties:
+        challenge_id: { type: string }
+        seed: { type: string }
+
+    Submission:
+      type: object
+      required: [submission_id, team_id, challenge_id, submitted_at, correct]
+      properties:
+        submission_id: { type: string }
+        team_id: { type: string }
+        challenge_id: { type: string }
+        submitted_at: { type: string, format: date-time }
+        correct: { type: boolean }
+        instance_seed: { type: [string, "null"] }
+
+    SubmissionCreate:
+      type: object
+      required: [team_id, challenge_id, answer]
+      properties:
+        team_id: { type: string }
+        challenge_id: { type: string }
+        answer: { type: string, description: Candidate flag; graded server-side, not stored raw. }
+        instance_seed: { type: [string, "null"] }
+
+    ScoreboardEntry:
+      type: object
+      required: [team_id, score, solve_count, rank]
+      properties:
+        team_id: { type: string }
+        score: { type: integer }
+        solve_count: { type: integer }
+        last_solve_at: { type: [string, "null"], format: date-time }
+        rank: { type: integer }
+
+    ScoreboardSnapshot:
+      allOf:
+        - $ref: '#/components/schemas/SchemaStamp'
+        - type: object
+          required: [competition_id, generated_at, frozen, entries]
+          properties:
+            competition_id: { type: string }
+            generated_at: { type: string, format: date-time }
+            frozen: { type: boolean }
+            entries:
+              type: array
+              items: { $ref: '#/components/schemas/ScoreboardEntry' }
+
+    ChallengeValueSnapshot:
+      type: object
+      required: [challenge_id, value, solve_count, computed_at]
+      properties:
+        challenge_id: { type: string }
+        value: { type: integer }
+        solve_count: { type: integer }
+        computed_at: { type: string, format: date-time }
+
+    AuditEvent:
+      type: object
+      required: [seq, ts, type, team_id, challenge_id]
+      properties:
+        seq: { type: integer, description: Monotonic from 1 (events.Event.seq). }
+        ts: { type: string, format: date-time }
+        type: { type: string }
+        team_id: { type: string }
+        challenge_id: { type: string }
+        payload: { type: object, additionalProperties: true }
+
+    AuditEventCreate:
+      type: object
+      required: [type, team_id, challenge_id]
+      properties:
+        type: { type: string }
+        team_id: { type: string }
+        challenge_id: { type: string }
+        payload: { type: object, additionalProperties: true }
+
+  responses:
+    ErrorResponse:
+      description: Error envelope (ctfgen.error).
+      headers:
+        X-Request-Id: { $ref: '#/components/headers/XRequestId' }
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/Error' }
+
+# ---------------------------------------------------------------------------
+# Paths — every operation is DRAFT; operationId prefixed and x-status set.
+# ---------------------------------------------------------------------------
+paths:
+
+  /competitions:
+    get:
+      tags: [competitions]
+      operationId: listCompetitions
+      x-status: draft
+      parameters:
+        - $ref: '#/components/parameters/Limit'
+        - $ref: '#/components/parameters/Cursor'
+        - $ref: '#/components/parameters/Sort'
+      responses:
+        '200':
+          description: Paged competitions.
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/SchemaStamp'
+                  - type: object
+                    properties:
+                      data: { type: array, items: { $ref: '#/components/schemas/Competition' } }
+                      page: { $ref: '#/components/schemas/Page' }
+        '400': { $ref: '#/components/responses/ErrorResponse' }
+    post:
+      tags: [competitions]
+      operationId: createCompetition
+      x-status: draft
+      parameters:
+        - name: Idempotency-Key
+          in: header
+          required: false
+          schema: { type: string }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/CompetitionCreate' }
+      responses:
+        '201':
+          description: Created.
+          headers:
+            ETag: { $ref: '#/components/headers/ETag' }
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Competition' }
+        '409': { $ref: '#/components/responses/ErrorResponse' }
+        '422': { $ref: '#/components/responses/ErrorResponse' }
+
+  /competitions/{competition_id}:
+    parameters:
+      - name: competition_id
+        in: path
+        required: true
+        schema: { type: string }
+    get:
+      tags: [competitions]
+      operationId: getCompetition
+      x-status: draft
+      responses:
+        '200':
+          description: One competition.
+          headers:
+            ETag: { $ref: '#/components/headers/ETag' }
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Competition' }
+        '404': { $ref: '#/components/responses/ErrorResponse' }
+    patch:
+      tags: [competitions]
+      operationId: updateCompetition
+      x-status: draft
+      parameters:
+        - name: If-Match
+          in: header
+          required: true
+          schema: { type: string }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { type: object }
+      responses:
+        '200':
+          description: Updated.
+          headers:
+            ETag: { $ref: '#/components/headers/ETag' }
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Competition' }
+        '404': { $ref: '#/components/responses/ErrorResponse' }
+        '412': { $ref: '#/components/responses/ErrorResponse' }
+        '428': { $ref: '#/components/responses/ErrorResponse' }
+    delete:
+      tags: [competitions]
+      operationId: deleteCompetition
+      x-status: draft
+      parameters:
+        - name: If-Match
+          in: header
+          required: true
+          schema: { type: string }
+      responses:
+        '204': { description: Deleted. }
+        '404': { $ref: '#/components/responses/ErrorResponse' }
+        '412': { $ref: '#/components/responses/ErrorResponse' }
+
+  /teams:
+    get:
+      tags: [teams]
+      operationId: listTeams
+      x-status: draft
+      parameters:
+        - name: competition_id
+          in: query
+          schema: { type: string }
+        - $ref: '#/components/parameters/Limit'
+        - $ref: '#/components/parameters/Cursor'
+        - $ref: '#/components/parameters/Sort'
+      responses:
+        '200':
+          description: Paged teams.
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/SchemaStamp'
+                  - type: object
+                    properties:
+                      data: { type: array, items: { $ref: '#/components/schemas/Team' } }
+                      page: { $ref: '#/components/schemas/Page' }
+        '400': { $ref: '#/components/responses/ErrorResponse' }
+    post:
+      tags: [teams]
+      operationId: createTeam
+      x-status: draft
+      parameters:
+        - name: Idempotency-Key
+          in: header
+          schema: { type: string }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/TeamCreate' }
+      responses:
+        '201':
+          description: Created.
+          headers:
+            ETag: { $ref: '#/components/headers/ETag' }
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Team' }
+        '409': { $ref: '#/components/responses/ErrorResponse' }
+        '422': { $ref: '#/components/responses/ErrorResponse' }
+
+  /teams/{team_id}:
+    parameters:
+      - name: team_id
+        in: path
+        required: true
+        schema: { type: string }
+    get:
+      tags: [teams]
+      operationId: getTeam
+      x-status: draft
+      responses:
+        '200':
+          description: One team.
+          headers:
+            ETag: { $ref: '#/components/headers/ETag' }
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Team' }
+        '404': { $ref: '#/components/responses/ErrorResponse' }
+    patch:
+      tags: [teams]
+      operationId: updateTeam
+      x-status: draft
+      parameters:
+        - name: If-Match
+          in: header
+          required: true
+          schema: { type: string }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { type: object, properties: { name: { type: string } } }
+      responses:
+        '200': { description: Updated. }
+        '404': { $ref: '#/components/responses/ErrorResponse' }
+        '412': { $ref: '#/components/responses/ErrorResponse' }
+    delete:
+      tags: [teams]
+      operationId: deleteTeam
+      x-status: draft
+      parameters:
+        - name: If-Match
+          in: header
+          required: true
+          schema: { type: string }
+      responses:
+        '204': { description: Deleted. }
+        '404': { $ref: '#/components/responses/ErrorResponse' }
+        '412': { $ref: '#/components/responses/ErrorResponse' }
+
+  /users:
+    get:
+      tags: [users]
+      operationId: listUsers
+      x-status: draft
+      parameters:
+        - name: role
+          in: query
+          schema: { type: string, enum: [admin, author, player] }
+        - name: team_id
+          in: query
+          schema: { type: string }
+        - $ref: '#/components/parameters/Limit'
+        - $ref: '#/components/parameters/Cursor'
+        - $ref: '#/components/parameters/Sort'
+      responses:
+        '200':
+          description: Paged users.
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/SchemaStamp'
+                  - type: object
+                    properties:
+                      data: { type: array, items: { $ref: '#/components/schemas/User' } }
+                      page: { $ref: '#/components/schemas/Page' }
+        '400': { $ref: '#/components/responses/ErrorResponse' }
+    post:
+      tags: [users]
+      operationId: createUser
+      x-status: draft
+      parameters:
+        - name: Idempotency-Key
+          in: header
+          schema: { type: string }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/UserCreate' }
+      responses:
+        '201':
+          description: Created.
+          headers:
+            ETag: { $ref: '#/components/headers/ETag' }
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/User' }
+        '409': { $ref: '#/components/responses/ErrorResponse' }
+        '422': { $ref: '#/components/responses/ErrorResponse' }
+
+  /users/{user_id}:
+    parameters:
+      - name: user_id
+        in: path
+        required: true
+        schema: { type: string }
+    get:
+      tags: [users]
+      operationId: getUser
+      x-status: draft
+      responses:
+        '200':
+          description: One user.
+          headers:
+            ETag: { $ref: '#/components/headers/ETag' }
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/User' }
+        '404': { $ref: '#/components/responses/ErrorResponse' }
+    patch:
+      tags: [users]
+      operationId: updateUser
+      x-status: draft
+      parameters:
+        - name: If-Match
+          in: header
+          required: true
+          schema: { type: string }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { type: object }
+      responses:
+        '200': { description: Updated. }
+        '404': { $ref: '#/components/responses/ErrorResponse' }
+        '412': { $ref: '#/components/responses/ErrorResponse' }
+    delete:
+      tags: [users]
+      operationId: deleteUser
+      x-status: draft
+      parameters:
+        - name: If-Match
+          in: header
+          required: true
+          schema: { type: string }
+      responses:
+        '204': { description: Deleted. }
+        '404': { $ref: '#/components/responses/ErrorResponse' }
+        '412': { $ref: '#/components/responses/ErrorResponse' }
+
+  /challenge-definitions:
+    get:
+      tags: [challenge-definitions]
+      operationId: listChallengeDefinitions
+      x-status: draft
+      parameters:
+        - name: competition_id
+          in: query
+          schema: { type: string }
+        - name: family
+          in: query
+          schema: { type: string }
+        - name: category
+          in: query
+          schema: { type: string }
+        - name: difficulty
+          in: query
+          schema: { type: string }
+        - $ref: '#/components/parameters/Limit'
+        - $ref: '#/components/parameters/Cursor'
+        - $ref: '#/components/parameters/Sort'
+      responses:
+        '200':
+          description: Paged challenge definitions.
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/SchemaStamp'
+                  - type: object
+                    properties:
+                      data: { type: array, items: { $ref: '#/components/schemas/ChallengeDefinition' } }
+                      page: { $ref: '#/components/schemas/Page' }
+        '400': { $ref: '#/components/responses/ErrorResponse' }
+    post:
+      tags: [challenge-definitions]
+      operationId: createChallengeDefinition
+      x-status: draft
+      parameters:
+        - name: Idempotency-Key
+          in: header
+          schema: { type: string }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/ChallengeDefinitionCreate' }
+      responses:
+        '201':
+          description: Created.
+          headers:
+            ETag: { $ref: '#/components/headers/ETag' }
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ChallengeDefinition' }
+        '409': { $ref: '#/components/responses/ErrorResponse' }
+        '422': { $ref: '#/components/responses/ErrorResponse' }
+
+  /challenge-definitions/{challenge_id}:
+    parameters:
+      - name: challenge_id
+        in: path
+        required: true
+        schema: { type: string }
+    get:
+      tags: [challenge-definitions]
+      operationId: getChallengeDefinition
+      x-status: draft
+      responses:
+        '200':
+          description: One challenge definition.
+          headers:
+            ETag: { $ref: '#/components/headers/ETag' }
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ChallengeDefinition' }
+        '404': { $ref: '#/components/responses/ErrorResponse' }
+    patch:
+      tags: [challenge-definitions]
+      operationId: updateChallengeDefinition
+      x-status: draft
+      parameters:
+        - name: If-Match
+          in: header
+          required: true
+          schema: { type: string }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { type: object }
+      responses:
+        '200': { description: Updated. }
+        '404': { $ref: '#/components/responses/ErrorResponse' }
+        '412': { $ref: '#/components/responses/ErrorResponse' }
+        '422': { $ref: '#/components/responses/ErrorResponse' }
+    delete:
+      tags: [challenge-definitions]
+      operationId: deleteChallengeDefinition
+      x-status: draft
+      parameters:
+        - name: If-Match
+          in: header
+          required: true
+          schema: { type: string }
+      responses:
+        '204': { description: Deleted. }
+        '404': { $ref: '#/components/responses/ErrorResponse' }
+        '409': { $ref: '#/components/responses/ErrorResponse' }
+        '412': { $ref: '#/components/responses/ErrorResponse' }
+
+  /challenge-versions:
+    get:
+      tags: [challenge-versions]
+      operationId: listChallengeVersions
+      x-status: draft
+      parameters:
+        - name: challenge_id
+          in: query
+          schema: { type: string }
+        - name: seed
+          in: query
+          schema: { type: string }
+        - $ref: '#/components/parameters/Limit'
+        - $ref: '#/components/parameters/Cursor'
+        - $ref: '#/components/parameters/Sort'
+      responses:
+        '200':
+          description: Paged challenge versions.
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/SchemaStamp'
+                  - type: object
+                    properties:
+                      data: { type: array, items: { $ref: '#/components/schemas/ChallengeVersion' } }
+                      page: { $ref: '#/components/schemas/Page' }
+        '400': { $ref: '#/components/responses/ErrorResponse' }
+    post:
+      tags: [challenge-versions]
+      operationId: createChallengeVersion
+      x-status: draft
+      description: Deterministic; re-POST of same (challenge_id, seed) returns the existing version.
+      parameters:
+        - name: Idempotency-Key
+          in: header
+          schema: { type: string }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/ChallengeVersionCreate' }
+      responses:
+        '201':
+          description: Created.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ChallengeVersion' }
+        '200':
+          description: Existing version returned (idempotent regeneration).
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ChallengeVersion' }
+        '404': { $ref: '#/components/responses/ErrorResponse' }
+        '422': { $ref: '#/components/responses/ErrorResponse' }
+
+  /challenge-versions/{version_id}:
+    parameters:
+      - name: version_id
+        in: path
+        required: true
+        schema: { type: string }
+    get:
+      tags: [challenge-versions]
+      operationId: getChallengeVersion
+      x-status: draft
+      responses:
+        '200':
+          description: One challenge version (immutable).
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ChallengeVersion' }
+        '404': { $ref: '#/components/responses/ErrorResponse' }
+    delete:
+      tags: [challenge-versions]
+      operationId: deleteChallengeVersion
+      x-status: draft
+      responses:
+        '204': { description: Deleted. }
+        '404': { $ref: '#/components/responses/ErrorResponse' }
+        '409': { $ref: '#/components/responses/ErrorResponse' }
+
+  /submissions:
+    get:
+      tags: [submissions]
+      operationId: listSubmissions
+      x-status: draft
+      parameters:
+        - name: team_id
+          in: query
+          schema: { type: string }
+        - name: challenge_id
+          in: query
+          schema: { type: string }
+        - name: correct
+          in: query
+          schema: { type: boolean }
+        - $ref: '#/components/parameters/Limit'
+        - $ref: '#/components/parameters/Cursor'
+        - $ref: '#/components/parameters/Sort'
+      responses:
+        '200':
+          description: Paged submissions.
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/SchemaStamp'
+                  - type: object
+                    properties:
+                      data: { type: array, items: { $ref: '#/components/schemas/Submission' } }
+                      page: { $ref: '#/components/schemas/Page' }
+        '400': { $ref: '#/components/responses/ErrorResponse' }
+    post:
+      tags: [submissions]
+      operationId: createSubmission
+      x-status: draft
+      description: Grades server-side; Idempotency-Key required to prevent double scoring.
+      parameters:
+        - name: Idempotency-Key
+          in: header
+          required: true
+          schema: { type: string }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/SubmissionCreate' }
+      responses:
+        '201':
+          description: Recorded (with computed correct).
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Submission' }
+        '404': { $ref: '#/components/responses/ErrorResponse' }
+        '409': { $ref: '#/components/responses/ErrorResponse' }
+        '422': { $ref: '#/components/responses/ErrorResponse' }
+
+  /submissions/{submission_id}:
+    parameters:
+      - name: submission_id
+        in: path
+        required: true
+        schema: { type: string }
+    get:
+      tags: [submissions]
+      operationId: getSubmission
+      x-status: draft
+      responses:
+        '200':
+          description: One submission.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Submission' }
+        '404': { $ref: '#/components/responses/ErrorResponse' }
+
+  /scoreboard:
+    get:
+      tags: [scoreboard]
+      operationId: getScoreboard
+      x-status: draft
+      description: Derived snapshot; not paged. competition_id required.
+      parameters:
+        - name: competition_id
+          in: query
+          required: true
+          schema: { type: string }
+        - name: at
+          in: query
+          required: false
+          schema: { type: string, format: date-time }
+          description: Optional point-in-time snapshot.
+      responses:
+        '200':
+          description: Scoreboard snapshot.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ScoreboardSnapshot' }
+        '400': { $ref: '#/components/responses/ErrorResponse' }
+        '404': { $ref: '#/components/responses/ErrorResponse' }
+
+  /scoreboard/challenge-values:
+    get:
+      tags: [scoreboard]
+      operationId: getChallengeValues
+      x-status: draft
+      parameters:
+        - name: competition_id
+          in: query
+          required: true
+          schema: { type: string }
+        - name: at
+          in: query
+          required: false
+          schema: { type: string, format: date-time }
+      responses:
+        '200':
+          description: Per-challenge computed values.
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/SchemaStamp'
+                  - type: object
+                    properties:
+                      data: { type: array, items: { $ref: '#/components/schemas/ChallengeValueSnapshot' } }
+        '400': { $ref: '#/components/responses/ErrorResponse' }
+        '404': { $ref: '#/components/responses/ErrorResponse' }
+
+  /audit-events:
+    get:
+      tags: [audit-events]
+      operationId: listAuditEvents
+      x-status: draft
+      description: Native seq cursor via 'since' (maps to EventStore.since).
+      parameters:
+        - name: since
+          in: query
+          schema: { type: integer, minimum: 0 }
+          description: Return events with seq greater than this value.
+        - name: type
+          in: query
+          schema: { type: string }
+        - name: team_id
+          in: query
+          schema: { type: string }
+        - name: challenge_id
+          in: query
+          schema: { type: string }
+        - $ref: '#/components/parameters/Limit'
+      responses:
+        '200':
+          description: Paged audit events.
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/SchemaStamp'
+                  - type: object
+                    properties:
+                      data: { type: array, items: { $ref: '#/components/schemas/AuditEvent' } }
+                      page: { $ref: '#/components/schemas/Page' }
+        '400': { $ref: '#/components/responses/ErrorResponse' }
+    post:
+      tags: [audit-events]
+      operationId: appendAuditEvent
+      x-status: draft
+      description: Operator annotation; server assigns seq and ts. Idempotency-Key required.
+      parameters:
+        - name: Idempotency-Key
+          in: header
+          required: true
+          schema: { type: string }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/AuditEventCreate' }
+      responses:
+        '201':
+          description: Appended.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/AuditEvent' }
+        '400': { $ref: '#/components/responses/ErrorResponse' }
+        '422': { $ref: '#/components/responses/ErrorResponse' }
+
+  /audit-events/{seq}:
+    parameters:
+      - name: seq
+        in: path
+        required: true
+        schema: { type: integer }
+    get:
+      tags: [audit-events]
+      operationId: getAuditEvent
+      x-status: draft
+      responses:
+        '200':
+          description: One audit event.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/AuditEvent' }
+        '404': { $ref: '#/components/responses/ErrorResponse' }
