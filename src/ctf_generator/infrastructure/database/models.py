@@ -1618,6 +1618,7 @@ class OidcLoginTransaction(Base):
     state_hash: Mapped[str] = mapped_column(sa.Text, nullable=False)
     nonce: Mapped[str] = mapped_column(sa.Text, nullable=False)
     code_verifier: Mapped[str] = mapped_column(sa.Text, nullable=False)
+    binding_hash: Mapped[str] = mapped_column(sa.Text, nullable=False)
     redirect_uri: Mapped[str] = mapped_column(sa.Text, nullable=False)
     created_at: Mapped[datetime] = mapped_column(
         sa.DateTime(timezone=True), nullable=False, server_default=sa.func.now()
@@ -1630,6 +1631,9 @@ class OidcLoginTransaction(Base):
         UniqueConstraint("state_hash", name="uq_oidc_login_transactions_state_hash"),
         CheckConstraint(
             "state_hash ~ '^[0-9a-f]{64}$'", name="state_hash_format"
+        ),
+        CheckConstraint(
+            "binding_hash ~ '^[0-9a-f]{64}$'", name="binding_hash_format"
         ),
         CheckConstraint("expires_at > created_at", name="expiry_after_created"),
     )

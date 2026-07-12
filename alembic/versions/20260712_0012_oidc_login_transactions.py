@@ -7,8 +7,10 @@ Creates:
   of the anti-forgery state, ``UNIQUE`` + 64-hex CHECK -- so a plaintext state
   can never satisfy the CHECK and be stored by mistake, the exact
   ``sessions.token_hash`` discipline). It binds ``state`` to the ``nonce``
-  (ID-token replay defense) and the PKCE ``code_verifier`` (code-interception
-  defense) plus the exact ``redirect_uri`` used at authorization.
+  (ID-token replay defense), the PKCE ``code_verifier`` (code-interception
+  defense), and a ``binding_hash`` (sha256 hex of a browser-cookie secret, tying
+  the flow to the initiating user-agent -- login-CSRF / fixation defense; same
+  64-hex CHECK) plus the exact ``redirect_uri`` used at authorization.
 
 Unlike the append-only auth aggregates (``sessions`` / audit tables), this table
 is transient: rows are DELETED on consume (one-time-use by construction) and
@@ -40,6 +42,7 @@ def upgrade() -> None:
         sa.Column("state_hash", sa.Text(), nullable=False),
         sa.Column("nonce", sa.Text(), nullable=False),
         sa.Column("code_verifier", sa.Text(), nullable=False),
+        sa.Column("binding_hash", sa.Text(), nullable=False),
         sa.Column("redirect_uri", sa.Text(), nullable=False),
         sa.Column(
             "created_at",
@@ -55,6 +58,10 @@ def upgrade() -> None:
         sa.CheckConstraint(
             "state_hash ~ '^[0-9a-f]{64}$'",
             name="ck_oidc_login_transactions_state_hash_format",
+        ),
+        sa.CheckConstraint(
+            "binding_hash ~ '^[0-9a-f]{64}$'",
+            name="ck_oidc_login_transactions_binding_hash_format",
         ),
         sa.CheckConstraint(
             "expires_at > created_at",

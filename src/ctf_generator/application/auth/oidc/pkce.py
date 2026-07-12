@@ -31,6 +31,20 @@ def generate_code_verifier() -> str:
     return secrets.token_urlsafe(64)
 
 
+def generate_binding_secret() -> str:
+    """A >=256-bit URL-safe browser-binding secret. Set as an httpOnly cookie at
+    ``/auth/oidc/login`` and required (its hash) at the callback so the login
+    transaction is bound to the initiating user-agent (login-CSRF / fixation
+    defense). Only the sha256 hex is stored at rest (see :func:`hash_binding`)."""
+    return secrets.token_urlsafe(_ENTROPY_BYTES)
+
+
+def hash_binding(secret: str) -> str:
+    """The sha256 hex of the browser-binding secret -- the only form stored in
+    the login transaction (the raw secret lives only in the browser cookie)."""
+    return hashlib.sha256(secret.encode("utf-8")).hexdigest()
+
+
 def code_challenge_s256(code_verifier: str) -> str:
     """The S256 PKCE ``code_challenge``: base64url(SHA-256(verifier)), unpadded."""
     digest = hashlib.sha256(code_verifier.encode("ascii")).digest()

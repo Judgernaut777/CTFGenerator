@@ -26,7 +26,8 @@ failed. This module logs nothing.
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+import secrets
+from dataclasses import dataclass, field
 from datetime import datetime
 from urllib.parse import urlencode
 
@@ -49,11 +50,16 @@ from .errors import OidcAuthError
 @dataclass(frozen=True)
 class AuthorizationRedirect:
     """The result of :meth:`OidcService.build_authorization_url`: the IdP URL to
-    redirect the browser to, plus the ``state`` (already embedded in the URL --
-    surfaced only for logging/correlation; it is not a bearer secret)."""
+    redirect the browser to, the ``state`` (already embedded in the URL --
+    surfaced only for logging/correlation; it is not a bearer secret), and the
+    ``binding_secret`` the interface MUST set as an httpOnly cookie so the
+    callback can prove the same user-agent started the flow (login-CSRF /
+    fixation defense). ``binding_secret`` is ``repr``-suppressed -- it is a
+    transient secret and must never be logged."""
 
     url: str
     state: str
+    binding_secret: str = field(repr=False, default="")
 
 
 def _is_true(value: object) -> bool:
@@ -113,11 +119,15 @@ class OidcService:
         nonce = pkce.generate_nonce()
         code_verifier = pkce.generate_code_verifier()
         code_challenge = pkce.code_challenge_s256(code_verifier)
+        # Browser-binding secret: returned to the interface to set as a cookie;
+        # only its hash is persisted (the raw secret lives only in the browser).
+        binding_secret = pkce.generate_binding_secret()
 
         transaction = OidcLoginTransaction(
             state_hash=pkce.hash_state(state),
             nonce=nonce,
             code_verifier=code_verifier,
+            binding_hash=pkce.hash_binding(binding_secret),
             redirect_uri=self._config.redirect_uri,
             created_at=now,
             expires_at=now + self._config.transaction_ttl,
@@ -138,19 +148,30 @@ class OidcService:
             "code_challenge_method": "S256",
         }
         url = f"{doc.authorization_endpoint}?{urlencode(params)}"
-        return AuthorizationRedirect(url=url, state=state)
+        return AuthorizationRedirect(
+            url=url, state=state, binding_secret=binding_secret
+        )
 
     # -- callback (validate + issue the local session) -----------------------
 
     def handle_callback(
-        self, code: str | None, state: str | None, now: datetime
+        self,
+        code: str | None,
+        state: str | None,
+        binding_secret: str | None,
+        now: datetime,
     ) -> IssuedSession:
         """Validate the authorization-code callback and issue a local session.
 
+        ``binding_secret`` is the value of the login cookie set at
+        :meth:`build_authorization_url`; it MUST hash to the transaction's stored
+        binding (proving the same user-agent started the flow -- login-CSRF /
+        fixation defense).
+
         A missing ``code`` / ``state`` is a malformed request (:class:`ValueError`
-        -> 400); every other failure (bad/expired/replayed state, token-exchange
-        failure, invalid ID token, disallowed email) is a generic
-        :class:`OidcAuthError` (-> 401)."""
+        -> 400); every other failure (bad/expired/replayed state, missing/wrong
+        binding cookie, token-exchange failure, invalid ID token, disallowed
+        email) is a generic :class:`OidcAuthError` (-> 401)."""
         if not code or not state:
             raise ValueError("missing code or state parameter")
 
@@ -161,6 +182,16 @@ class OidcService:
             )
         if transaction is None:
             raise OidcAuthError("unknown, expired, or replayed login state")
+
+        # FAIL CLOSED on the browser binding: the login cookie's hash must match
+        # the value stored when the flow started, so a valid (state, code) alone
+        # -- without the initiating browser's cookie -- cannot complete the login
+        # (login-CSRF / session fixation). The transaction is already consumed,
+        # so a wrong-binding attempt cannot be retried.
+        if not binding_secret or not secrets.compare_digest(
+            pkce.hash_binding(binding_secret), transaction.binding_hash
+        ):
+            raise OidcAuthError("oidc login binding mismatch")
 
         doc = self._discovery.get(self._config, self._http, now)
         id_token = self._exchange_code(doc, code, transaction.code_verifier)
