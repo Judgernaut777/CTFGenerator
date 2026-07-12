@@ -10,7 +10,9 @@ This is the seam M10 replaces with real local-auth + OIDC. Slice a ships:
   :class:`StubAuthenticator`, a dev-only bearer-token implementation for slice a
   (a static ``token -> Principal`` table). **TODO(M10): replace StubAuthenticator
   with real credential verification (local password/session + OIDC).** The stub
-  never logs or echoes a token.
+  never logs or echoes a token. The module-level app registers a dev token ONLY
+  when ``CTFGEN_API_INSECURE_STUB_AUTH=1`` is explicitly set (see
+  ``app._authenticator_from_env``), so it is never a silent production default.
 * dependencies: :func:`get_principal` (delegates to the app's authenticator),
   :func:`require_permission` (403 if the principal lacks the permission),
   :func:`get_database` (the request-scoped DB handle), and the per-resource

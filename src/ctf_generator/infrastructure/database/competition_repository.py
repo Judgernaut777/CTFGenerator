@@ -48,6 +48,19 @@ class SqlAlchemyCompetitionRepository:
         ).one_or_none()
         return competition_from_orm(row) if row is not None else None
 
+    def get_for_update(self, competition_id: str) -> CompetitionConfig | None:
+        """Fetch one competition by its business id (``slug``) taking a row lock
+        (``SELECT ... FOR UPDATE``). Under READ COMMITTED this serializes a
+        guarded read-check-write: a second concurrent updater blocks here until
+        the first commits, then observes the new state (so a stale ``If-Match``
+        reliably yields 412 rather than a lost update)."""
+        row = self._session.scalars(
+            select(Competition)
+            .where(Competition.slug == competition_id)
+            .with_for_update()
+        ).one_or_none()
+        return competition_from_orm(row) if row is not None else None
+
     def list(self) -> list[CompetitionConfig]:
         """Return every competition as a domain object."""
         return [

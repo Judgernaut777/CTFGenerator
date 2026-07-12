@@ -46,7 +46,8 @@ def create_team(
     service=Depends(get_team_service),
 ):
     body_json = body.model_dump(mode="json")
-    replayed = replay(request, _CREATE_SCOPE, body_json)
+    scope = f"{principal.subject}:{_CREATE_SCOPE}"
+    replayed = replay(request, scope, body_json)
     if replayed is not None:
         return replayed
 
@@ -60,7 +61,7 @@ def create_team(
         target=f"{team.competition_id}/{team.name}",
     )
     remember(
-        request, _CREATE_SCOPE, body_json, status_code=201, envelope=envelope, etag=etag
+        request, scope, body_json, status_code=201, envelope=envelope, etag=etag
     )
     return respond(201, envelope, etag=etag)
 

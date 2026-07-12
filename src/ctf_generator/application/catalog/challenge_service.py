@@ -34,6 +34,7 @@ from ctf_generator.infrastructure.database.challenge_version_repository import (
     SqlAlchemyChallengeVersionRepository,
 )
 from ctf_generator.infrastructure.database.session import Database
+from ctf_generator.schema import SPEC_SCHEMA, current_version
 
 DefinitionGuard = Callable[[ChallengeDefinition], None]
 VersionGuard = Callable[[ChallengeVersion], None]
@@ -79,7 +80,14 @@ class ChallengeDefinitionService:
         Raises :class:`LookupError` if the definition does not exist."""
         with self._database.session_scope() as session:
             repo = SqlAlchemyChallengeDefinitionRepository(session)
-            current = repo.get(definition.slug)
+            # A guarded update reads under a row lock so two concurrent guarded
+            # updates serialize (the second sees the new ETag -> 412), rather than
+            # both passing the same If-Match and losing an update.
+            current = (
+                repo.get_for_update(definition.slug)
+                if guard is not None
+                else repo.get(definition.slug)
+            )
             if current is None:
                 raise LookupError(
                     f"challenge definition not found: {definition.slug!r}"
@@ -105,19 +113,22 @@ class ChallengeVersionService:
         seed: str,
         family_version: str,
         spec: Mapping[str, object],
-        spec_version: str,
+        spec_version: str | None = None,
         mode: str = "red",
         cve_refs: tuple[str, ...] = (),
         cve_content_hash: str | None = None,
     ) -> ChallengeVersion:
         """Insert a new ``draft`` version under an existing definition.
 
+        ``spec_version`` defaults to the server's current spec-schema version when
+        unspecified -- that default-selection policy lives here, not in the router.
         ``version_no`` is allocated as ``max(existing) + 1`` within the same
         transaction and ``spec_sha256`` is computed from ``spec``. A missing
         definition raises :class:`LookupError`; a concurrent duplicate
         ``version_no`` / an identical ``spec_sha256`` surfaces the underlying
         :class:`~sqlalchemy.exc.IntegrityError` (the caller maps it to a 409).
         """
+        resolved_spec_version = spec_version or current_version(SPEC_SCHEMA)
         with self._database.session_scope() as session:
             repo = SqlAlchemyChallengeVersionRepository(session)
             existing = repo.list_for_definition(definition_slug)
@@ -130,7 +141,7 @@ class ChallengeVersionService:
                 seed=seed,
                 spec_sha256=spec_content_hash(spec),
                 spec=dict(spec),
-                spec_version=spec_version,
+                spec_version=resolved_spec_version,
                 mode=mode,
                 cve_refs=tuple(cve_refs),
                 cve_content_hash=cve_content_hash,

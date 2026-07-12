@@ -8,8 +8,10 @@ identically; any mutation changes the hash, so a stale ``If-Match`` reliably
 yields ``412``. This is a genuine optimistic-concurrency token that needs no
 schema migration (a later slice can swap in a row ``version`` column without
 changing the wire contract). The precondition is evaluated inside the service's
-unit of work (against the freshly-read current aggregate), so the read-check-write
-is atomic.
+unit of work against the current aggregate read *with a row lock*
+(``SELECT ... FOR UPDATE``); under READ COMMITTED that serializes the
+read-check-write, so two concurrent updates with the same base ETag cannot both
+pass (the second blocks, then observes the new ETag and gets ``412``).
 
 Format: a strong entity-tag -- the hex digest in double quotes, e.g.
 ``"3f9c...":`` matching ``docs/api/endpoints.md`` §1.8. ``If-Match`` comparison is

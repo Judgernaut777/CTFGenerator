@@ -11,6 +11,7 @@ work). This factory owns NO business logic -- only composition.
 
 from __future__ import annotations
 
+import logging
 import os
 
 from fastapi import FastAPI
@@ -96,15 +97,22 @@ def create_app(
 
 
 def _authenticator_from_env() -> Authenticator:
-    """Seed a dev bearer token from ``CTFGEN_API_DEV_TOKEN`` (admin principal) if
-    present. Absent it, no token authenticates -- every request is 401 until M10
-    wires real auth. The stub is never used in production."""
+    """Build the stub authenticator for the module-level app.
+
+    The insecure dev bearer token from ``CTFGEN_API_DEV_TOKEN`` is registered
+    ONLY when ``CTFGEN_API_INSECURE_STUB_AUTH=1`` is explicitly set -- so the stub
+    can never be a silent production default. With the flag set and a token
+    present it registers an admin principal and emits a prominent warning; without
+    the flag no token authenticates (every request is 401 until M10 wires real
+    auth). The token value is never logged or echoed."""
     stub = StubAuthenticator()
-    token = os.environ.get("CTFGEN_API_DEV_TOKEN")
-    if token:
-        stub.register(
-            token, principal_for("dev-admin", {"admin"})
-        )
+    if os.environ.get("CTFGEN_API_INSECURE_STUB_AUTH") == "1":
+        token = os.environ.get("CTFGEN_API_DEV_TOKEN")
+        if token:
+            logging.getLogger("ctfgen.api").warning(
+                "INSECURE: stub bearer auth enabled -- never use in production"
+            )
+            stub.register(token, principal_for("dev-admin", {"admin"}))
     return stub
 
 
@@ -117,10 +125,13 @@ def _database_from_env() -> Database | None:
         return None
 
 
-# Module-level ASGI app for `uvicorn ...:app`.
+# Module-level ASGI app for `uvicorn ...:app`. Rate limiting defaults ON here
+# (opt-OUT via CTFGEN_API_RATE_LIMIT=0) so the shipped production app is never
+# unthrottled; the create_app/test injection path keeps ApiSettings' False
+# default so the unit/OpenAPI suites stay unthrottled.
 app = create_app(
     ApiSettings(
-        rate_limit_enabled=os.environ.get("CTFGEN_API_RATE_LIMIT") == "1",
+        rate_limit_enabled=os.environ.get("CTFGEN_API_RATE_LIMIT", "1") != "0",
     ),
     database=_database_from_env(),
     authenticator=_authenticator_from_env(),

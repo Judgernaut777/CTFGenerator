@@ -23,10 +23,15 @@ class SqlAlchemyChallengeDefinitionRepository:
     def __init__(self, session: Session) -> None:
         self._session = session
 
-    def _row(self, slug: str) -> ChallengeDefinitionRow | None:
-        return self._session.scalars(
-            select(ChallengeDefinitionRow).where(ChallengeDefinitionRow.slug == slug)
-        ).one_or_none()
+    def _row(
+        self, slug: str, *, for_update: bool = False
+    ) -> ChallengeDefinitionRow | None:
+        stmt = select(ChallengeDefinitionRow).where(
+            ChallengeDefinitionRow.slug == slug
+        )
+        if for_update:
+            stmt = stmt.with_for_update()
+        return self._session.scalars(stmt).one_or_none()
 
     def add(self, definition: ChallengeDefinition) -> None:
         """Insert a new definition. A duplicate ``slug`` raises IntegrityError at
@@ -37,6 +42,12 @@ class SqlAlchemyChallengeDefinitionRepository:
 
     def get(self, slug: str) -> ChallengeDefinition | None:
         row = self._row(slug)
+        return challenge_definition_from_orm(row) if row is not None else None
+
+    def get_for_update(self, slug: str) -> ChallengeDefinition | None:
+        """Fetch a definition by ``slug`` taking a row lock (see the competition
+        repository's ``get_for_update`` for the serialization rationale)."""
+        row = self._row(slug, for_update=True)
         return challenge_definition_from_orm(row) if row is not None else None
 
     def list(self) -> list[ChallengeDefinition]:
