@@ -59,6 +59,22 @@ BEGIN
 END $$ LANGUAGE plpgsql;
 """
 
+# ``revoked`` is terminal on the trust axis: once a worker is revoked, no UPDATE
+# may move trust_state to any other value (the pairing CHECK alone would let a
+# raw UPDATE un-revoke by nulling revoked_at). Sibling aggregates (jobs, worker
+# credentials) already carry DB guards; this is the workers-table equivalent.
+_REVOKED_TERMINAL_FN = """
+CREATE OR REPLACE FUNCTION workers_revoked_terminal() RETURNS trigger AS $$
+BEGIN
+  IF OLD.trust_state = 'revoked'
+     AND NEW.trust_state IS DISTINCT FROM OLD.trust_state THEN
+    RAISE EXCEPTION
+      'workers: trust_state is terminal once revoked (name=%)', OLD.name;
+  END IF;
+  RETURN NEW;
+END $$ LANGUAGE plpgsql;
+"""
+
 
 def upgrade() -> None:
     op.create_table(
@@ -190,8 +206,18 @@ def upgrade() -> None:
         "FOR EACH STATEMENT EXECUTE FUNCTION reject_mutation();"
     )
 
+    # Revoked is terminal on the trust axis (owned by this revision).
+    op.execute(_REVOKED_TERMINAL_FN)
+    op.execute(
+        "CREATE TRIGGER workers_revoked_terminal "
+        "BEFORE UPDATE ON workers "
+        "FOR EACH ROW EXECUTE FUNCTION workers_revoked_terminal();"
+    )
+
 
 def downgrade() -> None:
+    op.execute("DROP TRIGGER IF EXISTS workers_revoked_terminal ON workers;")
+    op.execute("DROP FUNCTION IF EXISTS workers_revoked_terminal();")
     op.execute(
         "DROP TRIGGER IF EXISTS worker_credentials_no_truncate ON worker_credentials;"
     )

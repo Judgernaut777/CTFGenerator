@@ -23,8 +23,11 @@ try:
     from sqlalchemy.exc import IntegrityError, ProgrammingError
 
     from ctf_generator.application.worker_enrollment import (
+        AuthenticatedWorker,
+        ScopeError,
         WorkerEnrollmentService,
         parse_token,
+        require_scope,
     )
     from ctf_generator.domain.execution.models import Worker, WorkerCredential
     from ctf_generator.infrastructure.database.config import DatabaseConfig
@@ -402,10 +405,14 @@ class WorkerEnrollmentServiceTests(unittest.TestCase):
             token = issued.token()
             self.assertTrue(token.startswith("ctfw1."))
             self.assertNotIn(issued.secret, repr(issued))
-            worker = service.authenticate(token, _NOW + timedelta(hours=1))
-        self.assertIsNotNone(worker)
-        self.assertEqual(worker.name, "worker-1")
-        self.assertEqual(worker.trust_state, "trusted")
+            auth = service.authenticate(token, _NOW + timedelta(hours=1))
+        self.assertIsNotNone(auth)
+        self.assertIsInstance(auth, AuthenticatedWorker)
+        self.assertEqual(auth.worker.name, "worker-1")
+        self.assertEqual(auth.worker.trust_state, "trusted")
+        self.assertEqual(auth.credential_id, issued.credential_id)
+        self.assertEqual(auth.expires_at, issued.expires_at)
+        self.assertEqual(set(auth.scopes), set(issued.scopes))
 
     def test_rotation_invalidates_old_and_validates_new(self) -> None:
         with _migrated_database() as (db, _url):
@@ -479,6 +486,81 @@ class WorkerEnrollmentServiceTests(unittest.TestCase):
         self.assertEqual(parsed, ("cred-id", "secret.with.dots"))
         self.assertIsNone(parse_token("ctfw1.only-two"))
         self.assertIsNone(parse_token(None))
+
+    def test_rotate_on_pending_worker_raises_and_issues_no_credential(
+        self,
+    ) -> None:
+        with _migrated_database() as (db, _url):
+            service = WorkerEnrollmentService(db)
+            service.register_worker(_worker())  # pending, never approved
+            with self.assertRaises(LookupError):
+                service.rotate_credential("worker-1", _NOW)
+            with db.session_scope() as s:
+                creds = SqlAlchemyWorkerCredentialRepository(s).list_for_worker(
+                    "worker-1"
+                )
+        self.assertEqual(creds, [])
+
+    def test_rotate_on_revoked_worker_raises_and_issues_no_credential(
+        self,
+    ) -> None:
+        with _migrated_database() as (db, _url):
+            service = WorkerEnrollmentService(db)
+            service.register_worker(_worker())
+            service.approve_worker("worker-1", _NOW)
+            service.revoke_worker("worker-1", _NOW + timedelta(minutes=1))
+            with self.assertRaises(LookupError):
+                service.rotate_credential("worker-1", _NOW + timedelta(minutes=2))
+            with db.session_scope() as s:
+                active = SqlAlchemyWorkerCredentialRepository(
+                    s
+                ).get_active_for_worker("worker-1")
+        self.assertIsNone(active)  # the revoke killed the only credential
+
+    def test_scope_limited_credential_is_gated_by_require_scope(self) -> None:
+        with _migrated_database() as (db, _url):
+            service = WorkerEnrollmentService(db)
+            service.register_worker(_worker())
+            issued = service.approve_worker(
+                "worker-1", _NOW, scopes=("jobs:claim",)
+            )
+            auth = service.authenticate(issued.token(), _NOW + timedelta(hours=1))
+        self.assertIsNotNone(auth)
+        require_scope(auth, "jobs:claim")  # granted -> no raise
+        with self.assertRaises(ScopeError):
+            require_scope(auth, "jobs:complete")  # not granted -> raise
+
+
+@unittest.skipUnless(_ENABLED, _SKIP_REASON)
+class WorkerRevokedTerminalTriggerTests(unittest.TestCase):
+    def test_raw_un_revoke_is_rejected_by_db_trigger(self) -> None:
+        with _migrated_database() as (db, url):
+            with db.session_scope() as s:
+                SqlAlchemyWorkerRegistry(s).add(_worker())
+            with db.session_scope() as s:
+                SqlAlchemyWorkerRegistry(s).revoke("worker-1", _NOW)
+            engine = sa.create_engine(url, future=True)
+            try:
+                # A raw UPDATE that satisfies the pairing CHECK (trusted +
+                # revoked_at NULL) is still rejected: revoked is terminal.
+                with self.assertRaises(ProgrammingError):
+                    with engine.begin() as conn:
+                        conn.execute(
+                            sa.text(
+                                "UPDATE workers SET trust_state = 'trusted', "
+                                "revoked_at = NULL WHERE name = 'worker-1'"
+                            )
+                        )
+                # A non-trust update on a revoked row (heartbeat) still works.
+                with engine.begin() as conn:
+                    conn.execute(
+                        sa.text(
+                            "UPDATE workers SET last_heartbeat_at = now() "
+                            "WHERE name = 'worker-1'"
+                        )
+                    )
+            finally:
+                engine.dispose()
 
 
 @unittest.skipUnless(_ENABLED, _SKIP_REASON)
