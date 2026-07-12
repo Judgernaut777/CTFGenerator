@@ -206,6 +206,7 @@ class ProjectionLag:
     latest_seq: int
     max_as_of_seq: int
     oldest_pending_created_at: datetime | None = None
+    failed_count: int = 0
 
     def __post_init__(self) -> None:
         if not isinstance(self.pending_count, int) or self.pending_count < 0:
@@ -214,3 +215,5 @@ class ProjectionLag:
             raise ValueError("latest_seq must be an int >= 0")
         if not isinstance(self.max_as_of_seq, int) or self.max_as_of_seq < 0:
             raise ValueError("max_as_of_seq must be an int >= 0")
+        if not isinstance(self.failed_count, int) or self.failed_count < 0:
+            raise ValueError("failed_count must be an int >= 0")
