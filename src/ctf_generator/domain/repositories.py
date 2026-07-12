@@ -32,6 +32,14 @@ from .challenges.models import (
 )
 from .execution.models import Worker, WorkerCredential
 from .identity.models import Membership, Team, User
+from .instances.models import (
+    HealthObservation,
+    Instance,
+    InstanceCredential,
+    InstanceEndpoint,
+    InstanceEvent,
+    RuntimeResource,
+)
 from .ledger.models import (
     LedgerSubmission,
     ProjectionLag,
@@ -745,6 +753,149 @@ class SchedulerRepository(Protocol):
         """The worker's remaining concurrency (its ``(worker, active_instances)``
         quota ``limit - reserved``), or its declared capacity if no quota row
         exists yet. LookupError if the worker is unknown."""
+        ...
+
+
+class InstanceRepository(Protocol):
+    """The instance-lifecycle aggregate store (M8 slice 1b).
+
+    One repository covers the ``Instance`` root plus its runtime facts
+    (endpoints / runtime resources / credentials) and the two append-only
+    streams (health observations / audit events), the way the job queue folds
+    ``job_transitions`` into ``SqlAlchemyJobQueue``. The ``Instance`` references
+    its competition / team / challenge version and its assigned worker by
+    BUSINESS identity; ``add`` resolves each to a surrogate uuid and fails loud
+    (:class:`LookupError`) on a dangling reference, and a duplicate
+    ``instance_id`` raises the underlying ``IntegrityError``.
+
+    ``transition`` is the ONLY way ``state`` moves: it performs a guarded UPDATE
+    (the store's plpgsql trigger rejects an illegal move as
+    ``sqlalchemy.exc.ProgrammingError``) and appends an :class:`InstanceEvent`
+    in the SAME transaction. Every ``now`` is caller-passed; the repository
+    never reads a clock; ORM rows never escape.
+    """
+
+    def add(self, instance: Instance, now: datetime) -> Instance:
+        """Insert a fresh instance (typically ``requested``) and its creation
+        event (``from_state is None``). Duplicate ``instance_id`` ->
+        IntegrityError; a missing competition/team/version/worker -> LookupError.
+        """
+        ...
+
+    def get(self, instance_id: str) -> Instance | None:
+        ...
+
+    def list_reconcilable(self, limit: int = 500) -> list[Instance]:
+        """Every non-archived instance -- the reconciler's desired-vs-observed
+        scan input."""
+        ...
+
+    def transition(
+        self,
+        instance_id: str,
+        to_state: str,
+        *,
+        reason: str,
+        actor: str,
+        now: datetime,
+    ) -> Instance:
+        """Guarded ``state`` change + append-only event in one transaction. An
+        illegal move raises ``ProgrammingError`` (the trigger) and changes
+        nothing; a missing instance raises LookupError."""
+        ...
+
+    def set_desired_state(
+        self, instance_id: str, desired_state: str, now: datetime
+    ) -> Instance:
+        ...
+
+    def set_assignment(
+        self, instance_id: str, assigned_worker: str | None, now: datetime
+    ) -> Instance:
+        """Set (or clear, with ``None``) the assigned worker. A given-but-unknown
+        worker name fails loud."""
+        ...
+
+    def bump_generation(self, instance_id: str, now: datetime) -> Instance:
+        """Increment the fencing generation (reset/relaunch). Returns the
+        updated instance carrying the new generation."""
+        ...
+
+    def set_runtime_facts(
+        self,
+        instance_id: str,
+        now: datetime,
+        *,
+        image_ref: str | None = None,
+        instance_seed: str | None = None,
+        expires_at: datetime | None = None,
+    ) -> Instance:
+        """Partial update of placement/runtime references (only the keyword
+        arguments that are passed are written)."""
+        ...
+
+    # -- runtime facts (worker-reported) -------------------------------------
+
+    def record_endpoint(self, endpoint: InstanceEndpoint) -> None:
+        """Upsert a team-facing endpoint keyed ``(instance_id, name)``."""
+        ...
+
+    def delete_endpoint(self, instance_id: str, name: str) -> bool:
+        """Remove an endpoint (idempotent; returns whether a row was removed)."""
+        ...
+
+    def list_endpoints(self, instance_id: str) -> list[InstanceEndpoint]:
+        ...
+
+    def record_runtime_resource(self, resource: RuntimeResource) -> None:
+        """Upsert a runtime resource keyed ``(instance_id, kind, external_ref)``."""
+        ...
+
+    def set_resource_state(
+        self, instance_id: str, kind: str, external_ref: str, state: str, now: datetime
+    ) -> bool:
+        """Advance a runtime resource's lifecycle state (active -> releasing ->
+        released). Returns whether a row matched."""
+        ...
+
+    def list_runtime_resources(self, instance_id: str) -> list[RuntimeResource]:
+        ...
+
+    def list_active_resources(self, limit: int = 500) -> list[RuntimeResource]:
+        """Every ``active`` runtime resource (the leak-scan input)."""
+        ...
+
+    def list_leaked_resources(self, limit: int = 500) -> list[RuntimeResource]:
+        """Every ``active`` runtime resource whose owning instance is
+        ``archived`` (terminal) -- a leak the reconciler must clean up."""
+        ...
+
+    def list_orphan_endpoints(self, limit: int = 500) -> list[InstanceEndpoint]:
+        """Every endpoint whose owning instance is ``archived`` (terminal) -- an
+        orphan the reconciler must delete."""
+        ...
+
+    def record_credential(self, credential: InstanceCredential) -> None:
+        """Upsert an instance credential HANDLE keyed ``(instance_id, name)``
+        (``secret_ref`` only -- never a secret value)."""
+        ...
+
+    def list_credentials(self, instance_id: str) -> list[InstanceCredential]:
+        ...
+
+    # -- append-only streams -------------------------------------------------
+
+    def append_observation(self, observation: HealthObservation) -> HealthObservation:
+        """Append a worker health observation; returns it carrying its assigned
+        surrogate id."""
+        ...
+
+    def latest_observation(self, instance_id: str) -> HealthObservation | None:
+        """The newest observation for an instance (by ``observed_at``)."""
+        ...
+
+    def list_events(self, instance_id: str) -> list[InstanceEvent]:
+        """The append-only audit history for one instance, oldest first."""
         ...
 
 
