@@ -36,8 +36,12 @@ The request id is sourced from ``request.state.request_id`` (stamped by
 path where the middleware's contextvar has already been reset) with the contextvar
 as a fallback.
 
-Worker-credential / unsupported-runtime mappings (401/409/501) land with the
-slice-c worker HTTP transport; those exceptions cannot arise on slice-a routes.
+Worker-credential mappings land with the M9 worker HTTP gateway (slice d):
+``WorkerAuthenticationError`` (both service modules) -> 401 ``unauthorized``;
+``WorkerDrainingError`` -> 409 ``worker_draining``; ``WorkerStaleError`` -> 409
+``worker_stale``; ``InstanceOwnershipError`` -> 403 ``forbidden_ownership``;
+``ScopeError`` -> 403 (generic PermissionError). These cannot arise on the human
+resource routes (they never present a worker credential).
 """
 
 from __future__ import annotations
@@ -52,6 +56,19 @@ from starlette.exceptions import HTTPException as StarletteHTTPException
 
 from ctf_generator.application.catalog.competition_service import (
     CompetitionWindowError,
+)
+from ctf_generator.application.execution.worker_instance_service import (
+    InstanceOwnershipError,
+)
+from ctf_generator.application.execution.worker_instance_service import (
+    WorkerAuthenticationError as InstanceWorkerAuthenticationError,
+)
+from ctf_generator.application.execution.worker_job_service import (
+    WorkerAuthenticationError as JobWorkerAuthenticationError,
+)
+from ctf_generator.application.execution.worker_job_service import (
+    WorkerDrainingError,
+    WorkerStaleError,
 )
 from ctf_generator.domain.ledger.processing import (
     ChallengeNotAttachedError,
@@ -124,8 +141,49 @@ async def _handle_permission_error(
     request: Request, exc: PermissionError
 ) -> JSONResponse:
     # Generic PermissionError (incl. domain ScopeError) -> 403. Typed API authz
-    # failures are handled by _handle_api_error above.
+    # failures are handled by _handle_api_error above. The worker-credential
+    # PermissionError subclasses (auth / draining / stale / ownership) get their
+    # own more-specific handlers below so they map to 401 / 409 / 403 correctly.
     return _response(request, 403, AuthorizationError.code, "permission denied")
+
+
+async def _handle_worker_auth_error(
+    request: Request, exc: PermissionError
+) -> JSONResponse:
+    # A rejected worker credential (missing / malformed / invalid / expired /
+    # revoked / non-trusted / quarantined). Deliberately undifferentiated -- the
+    # caller learns nothing about which check failed, and the token is never echoed.
+    return _response(request, 401, "unauthorized", "worker credential rejected")
+
+
+async def _handle_worker_draining(
+    request: Request, exc: WorkerDrainingError
+) -> JSONResponse:
+    # A draining worker may finish in-flight leases but may not claim new work.
+    return _response(
+        request, 409, "worker_draining", "worker is draining; cannot claim new work"
+    )
+
+
+async def _handle_worker_stale(
+    request: Request, exc: WorkerStaleError
+) -> JSONResponse:
+    # The worker's liveness heartbeat is stale; it must re-ping before claiming.
+    # A conflict with the worker's current liveness state (409), not an auth
+    # failure (the credential is valid).
+    return _response(
+        request, 409, "worker_stale", "worker liveness heartbeat is stale"
+    )
+
+
+async def _handle_instance_ownership(
+    request: Request, exc: InstanceOwnershipError
+) -> JSONResponse:
+    # The authenticated worker is not the instance's assigned worker. Generic
+    # message (never another worker's data / a secret).
+    return _response(
+        request, 403, "forbidden_ownership", "worker does not own this instance"
+    )
 
 
 async def _handle_validation_error(
@@ -297,6 +355,16 @@ def register_exception_handlers(app: FastAPI) -> None:
         SubmissionProcessingError, _handle_submission_processing_error
     )
     app.add_exception_handler(LookupError, _handle_lookup_error)
+    # Worker-credential PermissionError subclasses map more specifically than the
+    # generic 403 (Starlette dispatches by the most-specific registered class in
+    # the MRO). ScopeError has no specific handler -> falls through to 403.
+    app.add_exception_handler(JobWorkerAuthenticationError, _handle_worker_auth_error)
+    app.add_exception_handler(
+        InstanceWorkerAuthenticationError, _handle_worker_auth_error
+    )
+    app.add_exception_handler(WorkerDrainingError, _handle_worker_draining)
+    app.add_exception_handler(WorkerStaleError, _handle_worker_stale)
+    app.add_exception_handler(InstanceOwnershipError, _handle_instance_ownership)
     app.add_exception_handler(PermissionError, _handle_permission_error)
     app.add_exception_handler(StarletteHTTPException, _handle_http_exception)
     app.add_exception_handler(ValueError, _handle_value_error)

@@ -27,21 +27,33 @@ through an authenticated, ownership-checked path, never the ungated one.
 
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import datetime, timedelta
 
 from ctf_generator.application.instances.service import InstanceLifecycleService
+from ctf_generator.application.scheduling.service import SchedulingService
 from ctf_generator.application.worker_enrollment import (
+    AuthenticatedWorker,
     WorkerEnrollmentService,
     require_scope,
 )
 from ctf_generator.domain.instances.models import (
     HealthObservation,
+    Instance,
     InstanceEndpoint,
     RuntimeResource,
+)
+from ctf_generator.domain.scheduling.models import (
+    PLATFORM_SCOPE_KEY,
+    ReservationItem,
+    WorkerRequirements,
 )
 
 REPORT_SCOPE = "instances:report"
 TRANSITION_SCOPE = "instances:transition"
+
+# The capability re-placement requires -- a launch job's capability, mirroring
+# the in-process LocalControlPlaneClient.replace_instance contract.
+_REPLACE_CAPABILITY = "launch_instance"
 
 
 class WorkerAuthenticationError(PermissionError):
@@ -62,11 +74,30 @@ class WorkerInstanceService:
         self,
         lifecycle: InstanceLifecycleService,
         enrollment: WorkerEnrollmentService,
+        *,
+        scheduling: SchedulingService | None = None,
+        reservation_ttl_hours: int = 2,
     ) -> None:
         self._lifecycle = lifecycle
         self._enrollment = enrollment
+        # ``scheduling`` is only required for :meth:`replace_instance` (the networked
+        # launch-contract re-placement). The in-process reference client performs its
+        # own re-placement, so single-host wiring may omit it.
+        self._scheduling = scheduling
+        self._reservation_ttl_hours = reservation_ttl_hours
 
     # -- gate ------------------------------------------------------------------
+
+    def _authenticate(
+        self, token: str, now: datetime, *, scope: str
+    ) -> AuthenticatedWorker:
+        """Authenticate + require ``scope``. Returns the authenticated worker; the
+        credential is the SOLE source of the worker identity."""
+        auth = self._enrollment.authenticate(token, now)
+        if auth is None:
+            raise WorkerAuthenticationError("worker authentication failed")
+        require_scope(auth, scope)
+        return auth
 
     def _authorize_owner(
         self, token: str, instance_id: str, now: datetime, *, scope: str
@@ -135,3 +166,66 @@ class WorkerInstanceService:
         self._lifecycle.apply_transition(
             instance_id, to_state, reason=reason, actor="worker", now=now
         )
+
+    # -- worker instance read + re-placement (networked launch contract) --------
+
+    def get_owned_instance(
+        self, token: str, instance_id: str, now: datetime
+    ) -> Instance:
+        """Return an instance the authenticated worker may act on.
+
+        The in-process ``get_instance`` was ungated; over the network this MUST
+        authenticate and ownership-check. A worker may read an instance assigned to
+        IT, or an UNASSIGNED instance it is about to re-place through the slice-2
+        launch contract (``assigned_worker is None``) -- but NEVER an instance owned
+        by a DIFFERENT worker. Missing -> :class:`LookupError` (404)."""
+        auth = self._authenticate(token, now, scope=REPORT_SCOPE)
+        instance = self._lifecycle.get(instance_id)
+        if instance is None:
+            raise LookupError(f"instance not found: {instance_id!r}")
+        owner = instance.assigned_worker
+        if owner is not None and owner != auth.worker.name:
+            raise InstanceOwnershipError(
+                f"worker {auth.worker.name!r} may not read instance "
+                f"{instance_id!r} assigned to another worker"
+            )
+        return instance
+
+    def replace_instance(
+        self, token: str, instance_id: str, now: datetime
+    ) -> Instance:
+        """Re-place + re-reserve an instance whose ``assigned_worker`` is ``None``
+        (the slice-2 launch contract), scope- and ownership-guarded.
+
+        The architecture is derived from the authenticated worker's own advertised
+        architectures -- NEVER request-supplied. A worker may re-place an unassigned
+        instance or one already assigned to IT, but not one owned by another worker
+        (``InstanceOwnershipError``). Reservation is keyed on ``instance_id`` so the
+        capacity hold is idempotent (a released hold is reactivated in place)."""
+        if self._scheduling is None:  # pragma: no cover - misconfiguration guard
+            raise RuntimeError("replace_instance requires a scheduling service")
+        auth = self._authenticate(token, now, scope=TRANSITION_SCOPE)
+        instance = self._lifecycle.get(instance_id)
+        if instance is None:
+            raise LookupError(f"instance not found: {instance_id!r}")
+        owner = instance.assigned_worker
+        if owner is not None and owner != auth.worker.name:
+            raise InstanceOwnershipError(
+                f"worker {auth.worker.name!r} may not re-place instance "
+                f"{instance_id!r} assigned to another worker"
+            )
+        requirements = WorkerRequirements(
+            architecture=auth.worker.architectures[0],
+            required_capabilities=frozenset({_REPLACE_CAPABILITY}),
+        )
+        expires_at = now + timedelta(hours=self._reservation_ttl_hours)
+        _reservation, worker_name = self._scheduling.select_and_reserve(
+            requirements=requirements,
+            reservation_id=instance_id,
+            pooled_items=(
+                ReservationItem("platform", PLATFORM_SCOPE_KEY, "active_instances", 1),
+            ),
+            expires_at=expires_at,
+            now=now,
+        )
+        return self._lifecycle.set_assignment(instance_id, worker_name, now)
