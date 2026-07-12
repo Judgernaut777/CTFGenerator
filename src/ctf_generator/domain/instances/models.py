@@ -65,11 +65,11 @@ TERMINAL_INSTANCE_STATES = frozenset({"archived"})
 # the application layer collapses; the store permits it for every non-terminal
 # state and freezes terminal (``archived``) rows entirely.
 LEGAL_INSTANCE_TRANSITIONS: Mapping[str, frozenset[str]] = {
-    "requested": frozenset({"queued", "failed", "quarantined"}),
+    "requested": frozenset({"queued", "failed", "quarantined", "stopping"}),
     "queued": frozenset(
         {"building", "starting", "failed", "quarantined", "stopping"}
     ),
-    "building": frozenset({"ready", "failed", "quarantined"}),
+    "building": frozenset({"ready", "failed", "quarantined", "stopping"}),
     "ready": frozenset({"starting", "failed", "quarantined", "stopping"}),
     "starting": frozenset({"healthy", "failed", "quarantined", "stopping"}),
     "healthy": frozenset(
@@ -124,11 +124,13 @@ def _require_positive(value: int, field_name: str) -> None:
 
 
 def is_legal_instance_transition(from_state: str, to_state: str) -> bool:
-    """Whether ``from_state -> to_state`` is a sanctioned move (a self-transition
-    is always legal -- it is a field update, not a state change). The store's
-    plpgsql guard encodes exactly this predicate."""
+    """Whether ``from_state -> to_state`` is a sanctioned move. A self-transition
+    (a field update, not a state change) is legal for every NON-terminal state;
+    a terminal (``archived``) row is frozen entirely, so even ``archived ->
+    archived`` is rejected -- matching the store's plpgsql guard, which RAISEs on
+    ANY update to an archived row before the self-transition no-op shortcut."""
     if from_state == to_state:
-        return True
+        return from_state not in TERMINAL_INSTANCE_STATES
     return to_state in LEGAL_INSTANCE_TRANSITIONS.get(from_state, frozenset())
 
 

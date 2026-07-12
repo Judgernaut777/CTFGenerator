@@ -821,6 +821,29 @@ class InstanceRepository(Protocol):
         updated instance carrying the new generation."""
         ...
 
+    def fence_stale_worker(
+        self,
+        instance_id: str,
+        *,
+        expected_worker: str,
+        expected_generation: int,
+        now: datetime,
+    ) -> Instance | None:
+        """Atomic, precondition-checked evacuation off a dead worker: under a row
+        lock, clear the assignment and bump the generation ONLY if the instance is
+        still assigned to ``expected_worker`` at ``expected_generation``. Returns
+        the updated instance, or ``None`` if a rival pass already converged."""
+        ...
+
+    def fence_missing_container(
+        self, instance_id: str, *, expected_generation: int, now: datetime
+    ) -> Instance | None:
+        """Atomic, precondition-checked generation bump for missing-container
+        recovery: under a row lock, increment the generation ONLY if it still
+        equals ``expected_generation``. Returns the updated instance, or ``None``
+        if a rival pass already bumped."""
+        ...
+
     def set_runtime_facts(
         self,
         instance_id: str,
@@ -859,10 +882,6 @@ class InstanceRepository(Protocol):
         ...
 
     def list_runtime_resources(self, instance_id: str) -> list[RuntimeResource]:
-        ...
-
-    def list_active_resources(self, limit: int = 500) -> list[RuntimeResource]:
-        """Every ``active`` runtime resource (the leak-scan input)."""
         ...
 
     def list_leaked_resources(self, limit: int = 500) -> list[RuntimeResource]:
