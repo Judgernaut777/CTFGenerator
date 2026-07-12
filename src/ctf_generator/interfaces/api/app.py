@@ -48,6 +48,7 @@ from .routers import (
     users,
 )
 from .settings import ApiSettings
+from .worker_gateway import router as worker_router
 
 API_V1_PREFIX = "/api/v1"
 
@@ -114,6 +115,56 @@ def create_app(
     ):
         app.include_router(module.router, prefix=API_V1_PREFIX)
 
+    # The worker-facing gateway. Included here for the single-host / dev / test
+    # path; a PRODUCTION deployment SHOULD bind it to a separate interface/port via
+    # ``create_worker_app`` (control-plane / worker listener separation, M18). Worker
+    # auth is a plane disjoint from the human Principal auth (see worker_gateway.deps)
+    # so co-mounting never weakens the boundary.
+    app.include_router(worker_router, prefix=API_V1_PREFIX)
+
+    return app
+
+
+def create_worker_app(
+    settings: ApiSettings | None = None,
+    *,
+    database: Database | None = None,
+    audit_sink: AuditSink | None = None,
+    rate_limiter=None,
+) -> FastAPI:
+    """Build a FastAPI app exposing ONLY the worker gateway.
+
+    This is the production-recommended shape: serve the worker gateway on a
+    SEPARATE listener from the human control-plane API so the two trust planes are
+    also network-isolated. It shares the ``ctfgen.error`` envelope, the request-id
+    middleware, and the rate limiter, but wires NO human authenticator and NO
+    resource routers -- a human Principal token has nothing to reach here. Worker
+    identity is resolved solely from the scoped credential inside the gated
+    services."""
+    settings = settings or ApiSettings()
+
+    app = FastAPI(
+        title=f"{settings.title} (Worker Gateway)",
+        version=settings.version,
+        root_path=settings.root_path,
+        openapi_url=f"{API_V1_PREFIX}/openapi.json",
+        docs_url=f"{API_V1_PREFIX}/docs",
+        redoc_url=f"{API_V1_PREFIX}/redoc",
+    )
+    app.state.database = database
+    app.state.audit_sink = audit_sink or LoggingAuditSink()
+
+    register_exception_handlers(app)
+
+    if rate_limiter is None and settings.rate_limit_enabled:
+        rate_limiter = TokenBucketLimiter(
+            rate=settings.rate_limit_rate, burst=settings.rate_limit_burst
+        )
+    app.add_middleware(RateLimitMiddleware, limiter=rate_limiter)
+    app.add_middleware(AccessLogMiddleware)
+    app.add_middleware(RequestIDMiddleware)
+
+    app.include_router(worker_router, prefix=API_V1_PREFIX)
     return app
 
 
