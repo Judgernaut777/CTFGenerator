@@ -86,6 +86,15 @@ ignore = ["E501"] # line length is enforced by the formatter, not the linter
 [tool.ruff.lint.per-file-ignores]
 "tests/**" = ["S101"] # asserts are expected in tests
 "src/ctf_generator/templates/**" = ["S"] # renderers emit deliberately vulnerable code
+# M8 slice-2 runtime tests DRIVE the docker CLI directly (that is the point of a
+# real-container isolation test): S603/S607 (subprocess + partial `docker` path)
+# and S110 (best-effort tearDown cleanup) are inherent to these harnesses.
+"tests/test_docker_backend_integration.py" = ["S603", "S607", "S108", "S110"]
+"tests/test_team_isolation_integration.py" = ["S603", "S607", "S110"]
+"tests/test_build_isolation_integration.py" = ["S603", "S607"]
+"tests/test_worker_loop_integration.py" = ["S603", "S607", "S110"]
+"tests/test_container_policy_flags.py" = ["S108"] # a docker --tmpfs spec literal, not a temp file
+"tests/test_worker_dispatch.py" = ["S105", "S106"] # fake bearer-token fixtures, not real secrets
 
 [tool.mypy]
 python_version = "3.11"
