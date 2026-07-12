@@ -15,7 +15,7 @@
         <td class="muted">{{ ch.category or "—" }}</td>
         <td class="muted">{{ ch.mode or "—" }}</td>
         <td class="muted">v{{ ch.version_no }}{% if not ch.available %} <span class="muted">(unavailable)</span>{% endif %}</td>
-        <td>{% if ch.available %}<a href="{{ mount_path }}/competitions/{{ competition_id }}/challenges/{{ ch.slug }}/{{ ch.version_no }}/submit">Submit</a>{% else %}<span class="muted">—</span>{% endif %}</td>
+        <td>{% if ch.available %}<a href="{{ mount_path }}/competitions/{{ competition_id }}/challenges/{{ ch.slug }}/{{ ch.version_no }}/submit">Submit</a> <a href="{{ mount_path }}/competitions/{{ competition_id }}/challenges/{{ ch.slug }}/{{ ch.version_no }}/download">Download</a>{% else %}<span class="muted">—</span>{% endif %}</td>
       </tr>
       {% endfor %}
     </tbody>

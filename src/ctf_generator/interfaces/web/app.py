@@ -20,6 +20,7 @@ from fastapi import FastAPI, Request
 from starlette.responses import RedirectResponse, Response
 
 from ctf_generator.application.auth import AuthService
+from ctf_generator.domain.repositories import ArtifactStore
 from ctf_generator.infrastructure.database.session import Database
 from ctf_generator.interfaces.api.exceptions import (
     AuthenticationError,
@@ -101,14 +102,38 @@ def _register_handlers(app: FastAPI) -> None:
     app.add_exception_handler(Exception, _unexpected)
 
 
+def _artifact_store_or_none(
+    injected: ArtifactStore | None,
+) -> ArtifactStore | None:
+    """The injected store, else one built from ``CTFGEN_ARTIFACT_ROOT`` -- or
+    ``None`` when the env is unset. A missing store is NOT an error: the contestant
+    download then resolves to a clean "not available" (404), never a 500."""
+    if injected is not None:
+        return injected
+    from ctf_generator.infrastructure.artifacts.config import (
+        ArtifactStoreConfigError,
+        artifact_store_from_env,
+    )
+
+    try:
+        return artifact_store_from_env()
+    except ArtifactStoreConfigError:
+        return None
+
+
 def create_web_app(
     *,
     database: Database,
     auth_service: AuthService,
     settings: WebSettings | None = None,
     renderer: TemplateRenderer | None = None,
+    artifact_store: ArtifactStore | None = None,
 ) -> FastAPI:
-    """Build the organizer web sub-app over the SAME database + M10 auth service."""
+    """Build the organizer web sub-app over the SAME database + M10 auth service.
+
+    ``artifact_store`` backs the contestant public-artifact download (slice 14c-2);
+    when not injected it is built from ``CTFGEN_ARTIFACT_ROOT``, or left ``None``
+    (download then cleanly 404s) when that env is unset."""
     settings = settings or WebSettings()
     app = FastAPI(
         title="CTFGenerator Organizer",
@@ -120,6 +145,7 @@ def create_web_app(
     app.state.auth_service = auth_service
     app.state.web_settings = settings
     app.state.web_renderer = renderer or TemplateRenderer()
+    app.state.artifact_store = _artifact_store_or_none(artifact_store)
 
     app.add_middleware(SecurityHeadersMiddleware)
     _register_handlers(app)
@@ -137,6 +163,7 @@ def mount_web_app(
     auth_service: AuthService,
     settings: WebSettings | None = None,
     mount_path: str = "/app",
+    artifact_store: ArtifactStore | None = None,
 ) -> FastAPI:
     """Mount the web sub-app on ``api_app`` at ``mount_path`` (default ``/app``).
 
@@ -145,7 +172,10 @@ def mount_web_app(
     Returns the created web app (for tests)."""
     settings = settings or WebSettings(mount_path=mount_path)
     web_app = create_web_app(
-        database=database, auth_service=auth_service, settings=settings
+        database=database,
+        auth_service=auth_service,
+        settings=settings,
+        artifact_store=artifact_store,
     )
     api_app.mount(mount_path, web_app)
     return web_app

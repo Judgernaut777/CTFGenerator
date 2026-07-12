@@ -18,6 +18,7 @@ from fastapi import FastAPI
 from starlette.middleware.cors import CORSMiddleware
 
 from ctf_generator.application.auth import AuthService
+from ctf_generator.domain.repositories import ArtifactStore
 from ctf_generator.infrastructure.database.config import (
     DatabaseConfig,
     DatabaseConfigError,
@@ -36,6 +37,7 @@ from .middleware import (
     TokenBucketLimiter,
 )
 from .routers import (
+    artifacts,
     auth,
     builds,
     challenge_definitions,
@@ -57,6 +59,21 @@ from .worker_gateway import router as worker_router
 API_V1_PREFIX = "/api/v1"
 
 
+def _artifact_store_from_env_or_none() -> ArtifactStore | None:
+    """Build the artifact store from ``CTFGEN_ARTIFACT_ROOT``, or ``None`` when it is
+    unset. A missing store is NOT an error -- the contestant download then resolves
+    to a clean "not available" (404) rather than a 500."""
+    from ctf_generator.infrastructure.artifacts.config import (
+        ArtifactStoreConfigError,
+        artifact_store_from_env,
+    )
+
+    try:
+        return artifact_store_from_env()
+    except ArtifactStoreConfigError:
+        return None
+
+
 def create_app(
     settings: ApiSettings | None = None,
     *,
@@ -67,6 +84,7 @@ def create_app(
     idempotency_store: IdempotencyStore | None = None,
     audit_sink: AuditSink | None = None,
     rate_limiter=None,
+    artifact_store: ArtifactStore | None = None,
 ) -> FastAPI:
     settings = settings or ApiSettings()
 
@@ -96,6 +114,10 @@ def create_app(
     app.state.oidc_service = oidc_service
     app.state.idempotency_store = idempotency_store or InMemoryIdempotencyStore()
     app.state.audit_sink = audit_sink or LoggingAuditSink()
+    # The artifact store backs the contestant public-artifact download (14c-2). Built
+    # from CTFGEN_ARTIFACT_ROOT when not injected, or left None (download then cleanly
+    # 404s -- never a 500) when that env is unset.
+    app.state.artifact_store = artifact_store or _artifact_store_from_env_or_none()
 
     register_exception_handlers(app)
 
@@ -133,6 +155,7 @@ def create_app(
         instances,
         builds,
         publications,
+        artifacts,
         jobs,
         system,
     ):
@@ -287,6 +310,9 @@ def _maybe_mount_web_app(
         database=database,
         auth_service=auth_service,
         settings=WebSettings.from_env(),
+        # Share the parent app's artifact store so the contestant download works on
+        # the mounted UI (both otherwise build the same store from the same env).
+        artifact_store=getattr(api_app.state, "artifact_store", None),
     )
 
 
