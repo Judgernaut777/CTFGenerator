@@ -5,6 +5,12 @@
 > classification. Everything under "Current" is grounded in the codebase map for v0.1.0.
 > Sections labelled **Target/Planned** describe the productization direction and are not
 > implemented today.
+>
+> **Update (M13):** the `ctfgen <area> <verb>` platform CLI that the "Target/Planned" columns
+> below anticipated is now **IMPLEMENTED** — it talks to the platform HTTP API with a session
+> token. See **[docs/supported-cli.md](supported-cli.md)** for the supported surface (auth +
+> per-area verbs) and the enforced MCP security boundary. This file remains the reference for the
+> legacy generator commands, which the `ctfgen` dispatcher still delegates to unchanged.
 
 `prog = ctfgen` — "Generate and validate AI-resistant CTF challenge environments."
 
