@@ -27,6 +27,7 @@ from ctf_generator.interfaces.api.exceptions import (
 )
 
 from .auth import WebAuthRequired
+from .contestant import contestant_router
 from .csrf import WebCsrfError
 from .rendering import TemplateRenderer
 from .router import router
@@ -123,6 +124,9 @@ def create_web_app(
     app.add_middleware(SecurityHeadersMiddleware)
     _register_handlers(app)
     app.include_router(router)
+    # The M12 contestant read surface (player/captain), mounted on the same app so
+    # it shares the identical cookie-session auth + error handlers + renderer.
+    app.include_router(contestant_router)
     return app
 
 

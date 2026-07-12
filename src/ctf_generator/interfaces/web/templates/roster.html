@@ -1,0 +1,34 @@
+{% extends "base.html" %}
+{% block title %}Roster - {{ competition_id }}{% endblock %}
+{% block content %}
+<div class="card">
+  <p class="muted"><a href="{{ mount_path }}/competitions/{{ competition_id }}/play">&larr; Back to competition</a></p>
+  <h1>Roster</h1>
+  <p class="muted mono">{{ competition_id }}</p>
+  {% if teamless %}
+  <p class="muted">You are not on a team in this competition yet, so there is no roster to show.</p>
+  {% elif members %}
+  {% if unrestricted %}
+  <p class="muted">All teams (staff access).</p>
+  {% elif team_name %}
+  <p class="muted">Your team: {{ team_name }}</p>
+  {% endif %}
+  <table>
+    <thead>
+      <tr><th>Member</th><th>Role</th>{% if unrestricted %}<th>Team</th>{% endif %}</tr>
+    </thead>
+    <tbody>
+      {% for m in members %}
+      <tr>
+        <td>{{ m.user_email }}</td>
+        <td class="muted">{{ m.role }}</td>
+        {% if unrestricted %}<td class="muted">{{ m.team_name or "—" }}</td>{% endif %}
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  {% else %}
+  <p class="muted">No members to show.</p>
+  {% endif %}
+</div>
+{% endblock %}

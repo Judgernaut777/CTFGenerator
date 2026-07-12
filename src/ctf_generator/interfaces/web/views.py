@@ -13,10 +13,12 @@ from typing import Any
 
 from ctf_generator.domain.authoring.models import (
     ChallengeBuild,
+    ChallengeDefinition,
     ChallengePublication,
+    ChallengeVersion,
 )
 from ctf_generator.domain.challenges.models import CompetitionConfig
-from ctf_generator.domain.identity.models import Team
+from ctf_generator.domain.identity.models import Membership, Team
 from ctf_generator.domain.instances.models import (
     HealthObservation,
     Instance,
@@ -156,4 +158,45 @@ def competition_detail(config: CompetitionConfig) -> dict[str, Any]:
         "scoring_start_time": _iso(config.scoring_start_time),
         "freeze_time": _iso(config.freeze_time),
         "scoring": scoring_view,
+    }
+
+
+# -- contestant (M12a) view mappers -----------------------------------------
+#
+# The contestant read surface. A catalog entry exposes ONLY the public challenge
+# metadata a player needs to pick a challenge (slug / title / version / mode /
+# category); the private spec payload -- where a flag / solution / private
+# scenario content would live -- is never read here. A roster member exposes only
+# the member's email + role (and their team, used only in the organizer/staff
+# unrestricted roster view). Both degrade gracefully: a catalog entry whose
+# version/definition could not be resolved is marked ``available=False`` and shows
+# the slug alone, never a 500.
+
+
+def catalog_entry(
+    publication: ChallengePublication,
+    version: ChallengeVersion | None,
+    definition: ChallengeDefinition | None,
+) -> dict[str, Any]:
+    """The public catalog view of one published challenge. Resolves display title
+    (definition) + mode (version) + category (the generator family) for a
+    contestant. NEVER reads the version ``spec`` (private challenge content); a
+    missing version/definition degrades to the slug with ``available=False``."""
+    return {
+        "slug": publication.definition_slug,
+        "version_no": publication.version_no,
+        "title": definition.title if definition is not None else publication.definition_slug,
+        "mode": version.mode if version is not None else None,
+        "category": definition.family if definition is not None else None,
+        "available": version is not None,
+    }
+
+
+def roster_member(membership: Membership) -> dict[str, Any]:
+    """One roster row: the member's email + role (+ team, shown only in the
+    unrestricted organizer/staff view). A membership carries no credential/secret."""
+    return {
+        "user_email": membership.user_email,
+        "role": membership.role,
+        "team_name": membership.team_name,
     }
