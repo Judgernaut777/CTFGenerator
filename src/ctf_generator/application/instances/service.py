@@ -35,6 +35,7 @@ from ctf_generator.domain.instances.models import (
     InstanceEndpoint,
     RuntimeResource,
 )
+from ctf_generator.domain.ledger.processing import IdempotencyConflictError
 from ctf_generator.domain.repositories import InstanceRepository
 from ctf_generator.domain.scheduling.models import (
     CeilingRequirement,
@@ -105,21 +106,57 @@ class InstanceLifecycleService:
         :class:`QuotaExceededError`) propagates with the instance left in
         ``requested`` (an operator/retry can act on it later); the launch job is
         enqueued only after a successful placement.
+
+        RESUME-SAFE: a retry with the SAME ``instance_id`` (e.g. a replayed
+        launch derived from an ``Idempotency-Key``) whose prior placement failed
+        left a ``requested`` row behind; this call RESUMES placement of that
+        existing row instead of re-adding it (which would trip a duplicate-PK
+        ``IntegrityError`` and poison the key forever). Resuming is safe because
+        ``select_and_reserve`` is keyed ``reservation_id == instance_id`` and a
+        prior no-worker / quota failure committed NO reservation, so placement
+        restarts clean. A retry that carries a DIFFERENT business identity, or one
+        for an instance already past ``requested``, is a genuine idempotency
+        conflict (:class:`IdempotencyConflictError` -> 409).
         """
-        instance = Instance(
-            instance_id=instance_id,
-            competition_id=competition_id,
-            team_name=team_name,
-            definition_slug=definition_slug,
-            version_no=version_no,
-            state="requested",
-            desired_state="active",
-            image_ref=image_ref,
-            instance_seed=instance_seed,
-            expires_at=expires_at,
-        )
         with self._database.session_scope() as session:
-            self._repo(session).add(instance, now)
+            repo = self._repo(session)
+            existing = repo.get(instance_id)
+            if existing is None:
+                repo.add(
+                    Instance(
+                        instance_id=instance_id,
+                        competition_id=competition_id,
+                        team_name=team_name,
+                        definition_slug=definition_slug,
+                        version_no=version_no,
+                        state="requested",
+                        desired_state="active",
+                        image_ref=image_ref,
+                        instance_seed=instance_seed,
+                        expires_at=expires_at,
+                    ),
+                    now,
+                )
+            else:
+                identity = (
+                    existing.competition_id,
+                    existing.team_name,
+                    existing.definition_slug,
+                    existing.version_no,
+                )
+                if identity != (
+                    competition_id, team_name, definition_slug, version_no
+                ):
+                    raise IdempotencyConflictError(
+                        f"instance {instance_id!r} already exists with a different "
+                        "identity"
+                    )
+                if existing.state != "requested":
+                    raise IdempotencyConflictError(
+                        f"instance {instance_id!r} already exists in state "
+                        f"{existing.state!r} (placement is not resumable)"
+                    )
+                # A matching pre-placement 'requested' row -> resume placement.
 
         # Reserve + place. Any failure leaves the instance in 'requested'.
         _reservation, worker_name = self._scheduling.select_and_reserve(
