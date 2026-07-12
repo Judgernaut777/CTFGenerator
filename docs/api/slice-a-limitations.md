@@ -69,3 +69,55 @@ wiring, not by weakening a design.
   `submitter_email` is left unset by the API this slice (the ledger supports it,
   but linking the authenticated principal to a `User`/`Membership` row is the M10
   identity join); submissions are attributed to the team, not yet the member.
+
+## M9 slice-c (organizer / ops surface) — residual gaps
+
+Slice-c adds the operator surface (instances, builds, publications, jobs, system
+probes) on the same foundation. The following are recorded so they are not silent
+gaps.
+
+- **Persistent audit-event READ API — DEFERRED-TO-M16.** There is intentionally
+  no `GET /api/v1/audit-events` (or similar) in this slice. The `AuditSink` today
+  only *logs* audit records (`LoggingAuditSink`); there is **no `AuditEvent`
+  table or repository** in the schema. Exposing a queryable audit trail requires
+  a new persistent store (table + migration + repository + projection) and is a
+  first-class deliverable of **M16 (observability + incident operations)**, not a
+  quiet addition here. Building it in slice-c would either invent an unplanned
+  schema or serve an in-memory log that vanishes on restart — both worse than the
+  explicit deferral. Mutating/ops actions in this slice ARE audited via
+  `record_audit` (never carrying a payload/secret); only the *read* surface is
+  deferred.
+
+- **Instance operator view exposes public facts only — by design (secret
+  boundary).** The instance list/detail DTOs expose the lifecycle `state` /
+  `desired_state`, competition/team/challenge refs, the assigned-worker *name*,
+  PUBLIC (non-internal) endpoint addresses, the latest health verdict, and
+  timestamps. Instance credentials (`secret_ref`), runtime-resource handles
+  (`external_ref`), worker credentials, internal endpoint tokens, and the
+  `instance_seed` are **never read on this path** and never appear in a response
+  — a positive-control test plants each and asserts its absence.
+
+- **Job ops surface redacts payloads — by design (secret boundary).** The job
+  DTOs expose only job type, lifecycle state, attempt accounting, timestamps,
+  audit linkage, and the structured `error_class` summary. The raw `payload` /
+  `result_json` / `error_detail` / refs are **never mapped**, so a flag/seed that
+  violated the queue's secret-free convention still cannot leak through the API.
+
+- **Job ops authorization is admin / support only — intentional.** `job:read` /
+  `job:operate` are granted to `admin` and the `support` (ops-staff) role only;
+  `organizer` is deliberately excluded from the queue-control surface. Instance
+  operation, build triggering, and publications are the organizer surface.
+
+- **The control plane never launches / builds — architectural (ADR-001).** Every
+  slice-c mutation records DESIRED state or ENQUEUES a durable job a worker claims
+  with scoped credentials; no API handler imports Docker/subprocess or executes
+  challenge/generator code. The instance launch endpoint maps a DTO to
+  `InstanceLifecycleService.request_instance` (reserve + place + enqueue launch);
+  the build trigger enqueues a `build_challenge` job.
+
+- **Instance launch scheduling inputs are explicit in the request — this slice.**
+  `POST /instances` accepts the architecture, required capabilities, TTL, and
+  platform-capacity units to reserve as request fields (defaulted), so the thin
+  handler performs only DTO→domain mapping and invents no scheduling policy. A
+  later milestone can derive these from challenge/competition policy without a
+  wire-contract change (the fields stay optional).
