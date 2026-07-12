@@ -55,10 +55,14 @@ api = ["fastapi>=0.110", "uvicorn[standard]>=0.29", "pydantic>=2", "httpx>=0.27"
 # [db]/[api] suites. OIDC is a LOGIN method that issues a normal M10a local
 # session; it adds no new bearer type.
 oidc = ["pyjwt[crypto]>=2.8"]
-# The live dashboard (dashboard_server.py) is stdlib-only (http.server/hmac/
-# hashlib/secrets/pbkdf2); this extra is the opt-in gate / future home for
-# production niceties (e.g. a real WSGI server), not a package dependency.
-web = []
+# M11 organizer web application (interfaces/web): a server-rendered HTML UI on
+# the control-plane app, sharing the SAME application services + M10 sessions.
+# Server-side templating with autoescape ON (Jinja2) is the whole dependency --
+# there is NO client build step and NO CDN (all CSS/JS is inlined in templates,
+# which the strict CSP forbids external origins for anyway; REQ-COMP-005). The
+# web tests SKIP cleanly when this extra is absent, exactly like [api]/[db]. The
+# legacy stdlib dashboard (dashboard_server.py) remains dependency-free.
+web = ["jinja2>=3.1"]
 # Lint / type / security tooling used by CI (.github/workflows/pr.yml). Kept out
 # of `dev` so `pip install .[dev]` for running tests stays minimal.
 ci = ["ruff>=0.6", "mypy>=1.11", "bandit>=1.7", "pip-audit>=2.7", "build>=1.2", "twine>=5"]
@@ -75,6 +79,11 @@ Repository = "https://github.com/Judgernaut777/CTFGenerator"
 
 [tool.setuptools.packages.find]
 where = ["src"]
+
+# Ship the organizer web UI's HTML templates as package data so an installed
+# wheel (not just a src checkout) can render them.
+[tool.setuptools.package-data]
+"ctf_generator.interfaces.web" = ["templates/*.html"]
 
 [tool.setuptools.dynamic]
 version = { attr = "ctf_generator.__version__" }
@@ -105,6 +114,9 @@ ignore = ["E501"] # line length is enforced by the formatter, not the linter
 # defaults -- that is how the framework declares dependencies. B008 flags exactly
 # that pattern, so it is a false positive for this package only.
 "src/ctf_generator/interfaces/api/**" = ["B008"]
+# The web interface uses the SAME FastAPI DI idiom (Depends(...) / Form(...) in
+# argument defaults); B008 is the identical false positive there.
+"src/ctf_generator/interfaces/web/**" = ["B008"]
 "src/ctf_generator/templates/**" = ["S"] # renderers emit deliberately vulnerable code
 # M8 slice-2 runtime tests DRIVE the docker CLI directly (that is the point of a
 # real-container isolation test): S603/S607 (subprocess + partial `docker` path)
