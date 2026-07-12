@@ -11,9 +11,28 @@ from __future__ import annotations
 
 from typing import Any
 
-from ctf_generator.domain.authoring.models import ChallengePublication
+from ctf_generator.domain.authoring.models import (
+    ChallengeBuild,
+    ChallengePublication,
+)
 from ctf_generator.domain.challenges.models import CompetitionConfig
 from ctf_generator.domain.identity.models import Team
+from ctf_generator.domain.instances.models import (
+    HealthObservation,
+    Instance,
+    InstanceEndpoint,
+)
+from ctf_generator.domain.work.models import Job
+from ctf_generator.interfaces.api.schemas.builds import build_to_list_item
+from ctf_generator.interfaces.api.schemas.instances import (
+    instance_to_list_item,
+    instance_to_response,
+)
+from ctf_generator.interfaces.api.schemas.jobs import job_to_response
+from ctf_generator.interfaces.api.schemas.scoreboard import (
+    entry_sort_key,
+    entry_to_response,
+)
 
 
 def _iso(value: Any) -> str | None:
@@ -64,6 +83,54 @@ def competition_row(config: CompetitionConfig) -> dict[str, Any]:
         "start_time": _iso(config.start_time),
         "end_time": _iso(config.end_time),
     }
+
+
+# -- ops view mappers -------------------------------------------------------
+#
+# These DELEGATE to the API's DTO mappers so the secret-redaction boundary has a
+# SINGLE source of truth: an instance's credential/runtime-token/``instance_seed``,
+# a job's ``payload``/``result_json``/``error_detail``, and a build's ``seed`` are
+# already stripped by the shared API mappers and can never reach a template. The
+# web layer adds no field the API would not also surface.
+
+
+def instance_row(instance: Instance) -> dict[str, Any]:
+    """A list-row view of an instance (public operational facts only -- NEVER a
+    credential, runtime token, or ``instance_seed``)."""
+    return instance_to_list_item(instance)
+
+
+def instance_detail(
+    instance: Instance,
+    endpoints: list[InstanceEndpoint],
+    health: HealthObservation | None,
+) -> dict[str, Any]:
+    """The operator detail view: public facts + PUBLIC (non-internal) endpoints +
+    latest health. ``endpoints`` is already filtered to non-internal by the service;
+    no secret is read on this path."""
+    return instance_to_response(instance, endpoints, health)
+
+
+def job_row(job: Job) -> dict[str, Any]:
+    """The ops view of a job: type / state / attempt accounting / timestamps /
+    sanitized ``error_class`` summary ONLY -- never the payload, result, or
+    error detail (where a flag/seed/credential would live)."""
+    return job_to_response(job)
+
+
+def build_row(build: ChallengeBuild) -> dict[str, Any]:
+    """A build's content identity + provenance (never the generation ``seed``)."""
+    return build_to_list_item(build)
+
+
+def scoreboard_entry(entry: dict[str, Any]) -> dict[str, Any]:
+    """One public standings row (team / score / solves / last-solve / rank)."""
+    return entry_to_response(entry)
+
+
+def scoreboard_entry_key(entry: dict[str, Any]) -> list[Any]:
+    """The API's stable standings ordering: ascending rank, then team id."""
+    return entry_sort_key(entry)
 
 
 def competition_detail(config: CompetitionConfig) -> dict[str, Any]:
