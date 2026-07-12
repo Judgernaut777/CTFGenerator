@@ -121,3 +121,12 @@ gaps.
   handler performs only DTO→domain mapping and invents no scheduling policy. A
   later milestone can derive these from challenge/competition policy without a
   wire-contract change (the fields stay optional).
+
+- **List endpoints materialize the full result set in memory — future
+  optimization.** All list endpoints (catalog, submissions, scoreboard,
+  instances) currently materialize the full ordered result set in memory and
+  paginate over it with the opaque cursor; keyset / DB-side pagination is a future
+  optimization that will **not** change the opaque-cursor wire contract. Instance
+  lists no longer truncate: an earlier 500-row ceiling made instances beyond the
+  500 oldest unreachable (`next_cursor` went null while more rows existed); that
+  cap is removed, so the cursor now walks every instance.

@@ -211,6 +211,67 @@ def _seed_instance_with_secrets(db: Database) -> str:
     return iid
 
 
+def _seed_plain_instance(db: Database) -> str:
+    """Add a bare (worker-less, secret-less) instance under the seeded parents.
+    Used to populate the list for pagination-walk assertions."""
+    iid = str(uuid.uuid4())
+    with db.session_scope() as s:
+        SqlAlchemyInstanceRepository(s).add(
+            Instance(
+                instance_id=iid,
+                competition_id=_CID,
+                team_name="Red",
+                definition_slug="sqli",
+                version_no=1,
+                state="active",
+                desired_state="active",
+                expires_at=_NOW + timedelta(hours=1),
+            ),
+            _NOW,
+        )
+    return iid
+
+
+def _enable_placeable_worker(db: Database) -> None:
+    """Register + approve + heartbeat a dispatch-eligible worker and open a
+    platform ``active_instances`` pool so a launch can reserve + place."""
+    from ctf_generator.domain.scheduling.models import (
+        PLATFORM_SCOPE_KEY,
+        ResourceQuota,
+    )
+    from ctf_generator.infrastructure.database.quota_repository import (
+        SqlAlchemyQuotaPolicyRepository,
+    )
+
+    with db.session_scope() as s:
+        reg = SqlAlchemyWorkerRegistry(s)
+        reg.add(
+            Worker("w1", "docker-rootless", ("x86_64",), ("launch_instance",), 4, "1")
+        )
+        reg.approve("w1")
+    with db.session_scope() as s:
+        SqlAlchemyWorkerRegistry(s).heartbeat("w1", datetime.now(UTC))
+    with db.session_scope() as s:
+        SqlAlchemyQuotaPolicyRepository(s).upsert_limit(
+            ResourceQuota("platform", PLATFORM_SCOPE_KEY, "active_instances", 100)
+        )
+
+
+def _count_instances(db: Database, iid: str) -> int:
+    with db.session_scope() as s:
+        return s.execute(
+            sa.text("SELECT count(*) FROM instances WHERE id = :iid"),
+            {"iid": iid},
+        ).scalar_one()
+
+
+def _count_launch_jobs(db: Database) -> int:
+    with db.session_scope() as s:
+        return s.execute(
+            sa.text("SELECT count(*) FROM jobs WHERE job_type = 'launch_instance'")
+        ).scalar_one()
+
+
 @unittest.skipUnless(_ENABLED, _SKIP_REASON)
 class InstancesApiIntegrationTests(unittest.TestCase):
     def test_list_and_detail(self) -> None:
@@ -305,6 +366,79 @@ class InstancesApiIntegrationTests(unittest.TestCase):
                 },
             )
             self.assertEqual(r.status_code, 403, r.text)
+
+    def test_list_pagination_walks_every_instance(self) -> None:
+        # FIX 1: with the 500-row cap removed, cursor pagination over a small page
+        # size must reach every seeded instance exactly once and only null out
+        # next_cursor after the last real row (no premature truncation).
+        with _client_and_db() as (client, db):
+            _seed_parents(client)
+            seeded = {_seed_plain_instance(db) for _ in range(5)}
+
+            collected: list[str] = []
+            cursor: str | None = None
+            pages = 0
+            while True:
+                pages += 1
+                self.assertLessEqual(pages, 10, "pagination did not terminate")
+                params = {"limit": 2}
+                if cursor is not None:
+                    params["cursor"] = cursor
+                r = client.get(
+                    "/api/v1/instances", headers=_auth(_ORGANIZER), params=params
+                )
+                self.assertEqual(r.status_code, 200, r.text)
+                body = r.json()
+                self.assertLessEqual(len(body["data"]), 2)
+                collected.extend(row["instance_id"] for row in body["data"])
+                cursor = body["page"]["next_cursor"]
+                if cursor is None:
+                    break
+
+            # Every seeded id retrieved exactly once; no duplicates, none dropped.
+            self.assertEqual(len(collected), len(set(collected)), collected)
+            self.assertTrue(seeded <= set(collected), seeded - set(collected))
+
+    def test_launch_resumes_after_no_worker_and_key_not_poisoned(self) -> None:
+        # FIX 2 + FIX 3: a launch with NO eligible worker is a 409 (not an opaque
+        # 500) and leaves exactly ONE 'requested' row; retrying with the SAME
+        # Idempotency-Key after a worker becomes available RESUMES that row to
+        # 'queued' (no orphan, no duplicate, key no longer poisoned).
+        with _client_and_db() as (client, db):
+            _seed_parents(client)
+            headers = {**_auth(_ORGANIZER), "Idempotency-Key": "launch-key-abc"}
+            payload = {
+                "competition_id": _CID, "team": "Red",
+                "definition_slug": "sqli", "version_no": 1, "ttl_seconds": 3600,
+            }
+
+            first = client.post("/api/v1/instances", headers=headers, json=payload)
+            self.assertEqual(first.status_code, 409, first.text)
+            self.assertEqual(first.json()["error"]["code"], "conflict")
+
+            # The instance id is derived from the principal-scoped key, so the row
+            # persists in 'requested'. Find it and assert exactly one.
+            with db.session_scope() as s:
+                rows = list(
+                    s.execute(sa.text("SELECT id, state FROM instances")).all()
+                )
+            self.assertEqual(len(rows), 1, rows)
+            iid = str(rows[0][0])
+            self.assertEqual(rows[0][1], "requested")
+
+            # A worker is enabled; the SAME key resumes placement of the same row.
+            _enable_placeable_worker(db)
+            second = client.post("/api/v1/instances", headers=headers, json=payload)
+            self.assertEqual(second.status_code, 201, second.text)
+            body = second.json()
+            self.assertEqual(body["instance_id"], iid)
+            self.assertEqual(body["state"], "queued")
+            self.assertEqual(body["assigned_worker"], "w1")
+
+            # Resumed, not duplicated: still exactly one row, and a launch job was
+            # enqueued.
+            self.assertEqual(_count_instances(db, iid), 1)
+            self.assertEqual(_count_launch_jobs(db), 1)
 
     def test_launch_requests_instance(self) -> None:
         with _client_and_db() as (client, db):
