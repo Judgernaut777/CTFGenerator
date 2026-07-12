@@ -19,13 +19,14 @@
     <a href="{{ mount_path }}/competitions/{{ competition.competition_id }}/challenges">Challenges</a>
     <a href="{{ mount_path }}/competitions/{{ competition.competition_id }}/roster">Roster</a>
     <a href="{{ mount_path }}/competitions/{{ competition.competition_id }}/scoreboard">Scoreboard</a>
+    <a href="{{ mount_path }}/competitions/{{ competition.competition_id }}/submissions">My submissions</a>
   </div>
 </div>
 <div class="card">
   <h2>Challenges</h2>
   {% if catalog %}
   <table>
-    <thead><tr><th>Challenge</th><th>Category</th><th>Mode</th><th>Version</th></tr></thead>
+    <thead><tr><th>Challenge</th><th>Category</th><th>Mode</th><th>Version</th><th>Action</th></tr></thead>
     <tbody>
       {% for ch in catalog %}
       <tr>
@@ -33,6 +34,7 @@
         <td class="muted">{{ ch.category or "—" }}</td>
         <td class="muted">{{ ch.mode or "—" }}</td>
         <td class="muted">v{{ ch.version_no }}{% if not ch.available %} <span class="muted">(unavailable)</span>{% endif %}</td>
+        <td>{% if ch.available %}<a href="{{ mount_path }}/competitions/{{ competition.competition_id }}/challenges/{{ ch.slug }}/{{ ch.version_no }}/submit">Submit</a>{% else %}<span class="muted">—</span>{% endif %}</td>
       </tr>
       {% endfor %}
     </tbody>

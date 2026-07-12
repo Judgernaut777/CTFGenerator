@@ -1,0 +1,35 @@
+{% extends "base.html" %}
+{% block title %}Submit - {{ title }}{% endblock %}
+{% block content %}
+<div class="card">
+  <p class="muted"><a href="{{ mount_path }}/competitions/{{ competition_id }}/challenges">&larr; Back to challenges</a></p>
+  <h1>Submit an answer</h1>
+  <dl class="kv">
+    <dt>Challenge</dt><dd>{{ title }}<br><span class="muted mono">{{ definition_slug }} v{{ version_no }}</span></dd>
+    {% if has_team %}<dt>Recorded for</dt><dd>{{ team_name }}</dd>{% endif %}
+  </dl>
+
+  {% if not has_team %}
+  <div class="error-banner">You are not on a team in this competition, so you cannot submit answers.</div>
+  {% else %}
+  {% if result %}
+    {% if result_correct %}
+    <div class="notice-ok">{{ result }}</div>
+    {% else %}
+    <div class="error-banner">{{ result }}</div>
+    {% endif %}
+  {% endif %}
+  {% if error %}<div class="error-banner">{{ error }}</div>{% endif %}
+  <form method="post" action="{{ form_action }}">
+    {% if csrf_token %}<input type="hidden" name="csrf_token" value="{{ csrf_token }}">{% endif %}
+    <input type="hidden" name="idempotency_nonce" value="{{ idempotency_nonce }}">
+    <div class="form-row">
+      <label for="answer">Your answer</label>
+      <input id="answer" name="answer" type="text" class="field-full" autocomplete="off" required>
+    </div>
+    <button type="submit" class="btn">Submit answer</button>
+  </form>
+  <p class="muted"><a href="{{ mount_path }}/competitions/{{ competition_id }}/submissions">Your team's submissions</a></p>
+  {% endif %}
+</div>
+{% endblock %}
