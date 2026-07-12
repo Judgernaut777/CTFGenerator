@@ -29,6 +29,7 @@ from sqlalchemy.orm import Session
 from ctf_generator.domain.auth.models import (
     AuthCredential,
     AuthSession,
+    OidcLoginTransaction,
     SystemRoleAssignment,
 )
 
@@ -39,10 +40,13 @@ from .mappers import (
     auth_credential_to_orm,
     auth_session_from_orm,
     auth_session_to_orm,
+    oidc_login_transaction_from_orm,
+    oidc_login_transaction_to_orm,
     to_utc,
 )
 from .models import AuthCredential as AuthCredentialRow
 from .models import AuthSession as AuthSessionRow
+from .models import OidcLoginTransaction as OidcLoginTransactionRow
 from .models import UserSystemRole as UserSystemRoleRow
 
 
@@ -139,6 +143,58 @@ class SqlAlchemyAuthSessionRepository:
         if row.revoked_at is None:
             row.revoked_at = to_utc(revoked_at)
             self._session.flush()
+
+
+class SqlAlchemyOidcLoginTransactionRepository:
+    """Transient, one-time-use OIDC login transactions, looked up by the sha256
+    hex of the anti-forgery state. CONSUME deletes the row (one-time-use by
+    construction); expired rows are pruned. No FK (pre-authentication) and no
+    freeze trigger -- DELETE is this table's normal operation."""
+
+    def __init__(self, session: Session) -> None:
+        self._session = session
+
+    def add(self, txn: OidcLoginTransaction) -> None:
+        """Insert a new login transaction. A duplicate ``state_hash`` (a state
+        reuse) -> IntegrityError."""
+        self._session.add(oidc_login_transaction_to_orm(txn))
+        self._session.flush()
+
+    def consume(
+        self, state_hash: str, now: datetime
+    ) -> OidcLoginTransaction | None:
+        """Atomically CONSUME the transaction for ``state_hash``: lock the row,
+        DELETE it (so it can never be replayed -- one-time-use), and return it
+        ONLY if it is still live at ``now``. An unknown / already-consumed state
+        returns ``None``; an expired state is deleted AND returns ``None`` (both
+        are rejections the service maps to a generic 401). A concurrent second
+        consume blocks on the row lock, then finds it gone -> ``None``."""
+        row = self._session.scalars(
+            select(OidcLoginTransactionRow)
+            .where(OidcLoginTransactionRow.state_hash == state_hash)
+            .with_for_update()
+        ).one_or_none()
+        if row is None:
+            return None
+        mapped = oidc_login_transaction_from_orm(row)
+        # Delete unconditionally -- consuming an expired state must still remove
+        # it (it can never become valid again), and one-time-use means a valid
+        # state is gone after this call too.
+        self._session.delete(row)
+        self._session.flush()
+        return mapped if mapped.is_live(now) else None
+
+    def prune_expired(self, now: datetime) -> int:
+        """Best-effort housekeeping: delete every expired transaction. Returns
+        the number removed. Called opportunistically at ``add`` time so the
+        pre-auth table cannot accumulate abandoned rows."""
+        result = self._session.execute(
+            delete(OidcLoginTransactionRow).where(
+                OidcLoginTransactionRow.expires_at <= to_utc(now)
+            )
+        )
+        self._session.flush()
+        return result.rowcount
 
 
 class SqlAlchemySystemRoleRepository:

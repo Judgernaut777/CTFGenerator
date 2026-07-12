@@ -1601,3 +1601,35 @@ class UserSystemRole(Base):
             f"role IN ({_SYSTEM_ROLE_IN_LIST})", name="role_valid"
         ),
     )
+
+
+class OidcLoginTransaction(Base):
+    """Persistent form of the domain ``OidcLoginTransaction`` -- a transient,
+    pre-authentication OIDC login transaction (M10c). Keyed for lookup by
+    ``state_hash`` (sha256 hex of the anti-forgery state, UNIQUE, 64-hex CHECK --
+    so a plaintext state can never satisfy the CHECK and be stored by mistake).
+    Rows are DELETED on consume (one-time-use by construction) and pruned on
+    expiry, so -- unlike the append-only auth aggregates -- there is no freeze
+    trigger and no FK (it exists before any user identity is known)."""
+
+    __tablename__ = "oidc_login_transactions"
+
+    id: Mapped[uuid.UUID] = mapped_column(sa.Uuid, primary_key=True, default=uuid.uuid4)
+    state_hash: Mapped[str] = mapped_column(sa.Text, nullable=False)
+    nonce: Mapped[str] = mapped_column(sa.Text, nullable=False)
+    code_verifier: Mapped[str] = mapped_column(sa.Text, nullable=False)
+    redirect_uri: Mapped[str] = mapped_column(sa.Text, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        sa.DateTime(timezone=True), nullable=False, server_default=sa.func.now()
+    )
+    expires_at: Mapped[datetime] = mapped_column(
+        sa.DateTime(timezone=True), nullable=False
+    )
+
+    __table_args__ = (
+        UniqueConstraint("state_hash", name="uq_oidc_login_transactions_state_hash"),
+        CheckConstraint(
+            "state_hash ~ '^[0-9a-f]{64}$'", name="state_hash_format"
+        ),
+        CheckConstraint("expires_at > created_at", name="expiry_after_created"),
+    )
