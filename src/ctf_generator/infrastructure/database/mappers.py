@@ -33,6 +33,14 @@ from ctf_generator.domain.ledger.models import (
     ScoreEvent,
     Solve,
 )
+from ctf_generator.domain.scheduling.models import (
+    VALID_DIMENSIONS,
+    VALID_QUOTA_SCOPES,
+    VALID_RESERVATION_STATES,
+    QuotaReservation,
+    ReservationItem,
+    ResourceQuota,
+)
 from ctf_generator.domain.work.models import (
     VALID_JOB_ERROR_CLASSES,
     VALID_JOB_STATUSES,
@@ -49,6 +57,9 @@ from .models import CompetitionChallenge as CompetitionChallengeRow
 from .models import Job as JobRow
 from .models import JobTransition as JobTransitionRow
 from .models import Membership as MembershipRow
+from .models import QuotaReservation as QuotaReservationRow
+from .models import QuotaReservationItem as QuotaReservationItemRow
+from .models import ResourceQuota as ResourceQuotaRow
 from .models import ScoreboardProjection as ScoreboardProjectionRow
 from .models import ScoreEvent as ScoreEventRow
 from .models import ScoreProjectionOutbox as ScoreProjectionOutboxRow
@@ -832,4 +843,114 @@ def scoreboard_projection_from_orm(
         as_of_seq=row.as_of_seq,
         entries=dict(row.entries),
         computed_at=to_utc(row.computed_at),
+    )
+
+
+# --- Scheduling & quota aggregates (M8) -------------------------------------
+#
+# Quota rows carry no surrogate resolution -- scope keys are text business keys
+# stored verbatim. ``*_to_orm`` fail loud on a value the domain forbids
+# (mirroring the job/worker mappers); ``*_from_orm`` fail loud on an unmappable
+# enumerated value read back (a corruption signal, never silently dropped).
+
+
+def resource_quota_to_orm(
+    quota: ResourceQuota, existing: ResourceQuotaRow | None = None
+) -> ResourceQuotaRow:
+    """Map a domain ``ResourceQuota`` onto its ORM row.
+
+    Fresh row when ``existing is None`` (``reserved_value`` starts at the
+    domain value, normally 0 for a newly-seeded limit). With ``existing`` given,
+    only ``limit_value`` is updated -- the live ``reserved_value`` counter is
+    owned by reserve/release and is NEVER overwritten by a limit upsert (so a
+    limit reduction grandfathers current holds)."""
+    if existing is None:
+        return ResourceQuotaRow(
+            scope_type=quota.scope_type,
+            scope_key=quota.scope_key,
+            dimension=quota.dimension,
+            limit_value=quota.limit_value,
+            reserved_value=quota.reserved_value,
+        )
+    existing.limit_value = quota.limit_value
+    return existing
+
+
+def resource_quota_from_orm(row: ResourceQuotaRow) -> ResourceQuota:
+    if row.scope_type not in VALID_QUOTA_SCOPES:
+        raise ValueError(f"unmappable quota scope_type from store: {row.scope_type!r}")
+    if row.dimension not in VALID_DIMENSIONS:
+        raise ValueError(f"unmappable quota dimension from store: {row.dimension!r}")
+    return ResourceQuota(
+        scope_type=row.scope_type,
+        scope_key=row.scope_key,
+        dimension=row.dimension,
+        limit_value=row.limit_value,
+        reserved_value=row.reserved_value,
+    )
+
+
+def quota_reservation_to_orm(reservation: QuotaReservation) -> QuotaReservationRow:
+    """Map a domain ``QuotaReservation`` header onto a fresh ORM row (create
+    only -- the sole later mutation, the release flip, is applied by the
+    repository directly on the row). A fresh reservation must be ``held`` with
+    no ``released_at`` -- fail loud rather than insert an inconsistent header."""
+    if reservation.state != "held":
+        raise ValueError(
+            f"only held reservations can be inserted, got {reservation.state!r}"
+        )
+    if reservation.released_at is not None:
+        raise ValueError("a fresh reservation must not carry released_at")
+    return QuotaReservationRow(
+        reservation_id=_as_uuid(reservation.reservation_id),
+        worker_key=reservation.worker_key,
+        competition_key=reservation.competition_key,
+        team_key=reservation.team_key,
+        challenge_key=reservation.challenge_key,
+        state=reservation.state,
+        expires_at=to_utc(reservation.expires_at),
+    )
+
+
+def quota_reservation_from_orm(
+    row: QuotaReservationRow, items: tuple[ReservationItem, ...] = ()
+) -> QuotaReservation:
+    if row.state not in VALID_RESERVATION_STATES:
+        raise ValueError(f"unmappable reservation state from store: {row.state!r}")
+    return QuotaReservation(
+        reservation_id=str(row.reservation_id),
+        worker_key=row.worker_key,
+        expires_at=to_utc(row.expires_at),
+        state=row.state,
+        created_at=to_utc(row.created_at),
+        released_at=to_utc(row.released_at),
+        competition_key=row.competition_key,
+        team_key=row.team_key,
+        challenge_key=row.challenge_key,
+        items=items,
+    )
+
+
+def reservation_item_to_orm(
+    item: ReservationItem, reservation_uuid: uuid.UUID
+) -> QuotaReservationItemRow:
+    return QuotaReservationItemRow(
+        reservation_id=reservation_uuid,
+        scope_type=item.scope_type,
+        scope_key=item.scope_key,
+        dimension=item.dimension,
+        amount=item.amount,
+    )
+
+
+def reservation_item_from_orm(row: QuotaReservationItemRow) -> ReservationItem:
+    if row.scope_type not in VALID_QUOTA_SCOPES:
+        raise ValueError(f"unmappable item scope_type from store: {row.scope_type!r}")
+    if row.dimension not in VALID_DIMENSIONS:
+        raise ValueError(f"unmappable item dimension from store: {row.dimension!r}")
+    return ReservationItem(
+        scope_type=row.scope_type,
+        scope_key=row.scope_key,
+        dimension=row.dimension,
+        amount=row.amount,
     )
