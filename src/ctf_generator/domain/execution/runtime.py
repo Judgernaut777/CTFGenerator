@@ -26,6 +26,7 @@ Security invariants encoded here (never relaxable through this API):
 
 from __future__ import annotations
 
+from collections.abc import Sequence
 from dataclasses import dataclass
 from typing import Protocol, runtime_checkable
 
@@ -230,6 +231,43 @@ class RuntimeEndpoint:
 
 
 @dataclass(frozen=True)
+class RuntimeResourceRef:
+    """A runtime object a launch created that the worker must record (and
+    eventually reap) for an instance: ``kind`` is a
+    ``VALID_RUNTIME_RESOURCE_KINDS`` token (``container`` / ``network`` / ...) and
+    ``external_ref`` the runtime id. Carried in a :class:`RuntimeLaunch` so a leak
+    of a live container/network is reap-able. References only -- never a secret."""
+
+    kind: str
+    external_ref: str
+
+    def __post_init__(self) -> None:
+        _require_nonempty(self.kind, "kind")
+        _require_nonempty(self.external_ref, "external_ref")
+
+
+@runtime_checkable
+class RuntimeLaunch(Protocol):
+    """The structural result of :meth:`RuntimeBackend.launch`: the observed
+    container state PLUS the runtime resources to persist, the endpoints it
+    published, and the capability gaps acknowledged for this launch (surfaced,
+    never hidden). Defined here so the worker types against the domain seam, not
+    the concrete adapter's return class."""
+
+    @property
+    def observation(self) -> RuntimeObservation: ...
+
+    @property
+    def runtime_resources(self) -> tuple[RuntimeResourceRef, ...]: ...
+
+    @property
+    def endpoints(self) -> tuple[RuntimeEndpoint, ...]: ...
+
+    @property
+    def acknowledged_gaps(self) -> frozenset[str]: ...
+
+
+@dataclass(frozen=True)
 class RuntimeObservation:
     """What the backend reports observing about one container: its runtime id,
     liveness/health phase, and published endpoints. This is the observed-state
@@ -265,24 +303,51 @@ class RuntimeBackend(Protocol):
         """Probe the local runtime and report what it can honestly enforce."""
         ...
 
-    def launch(self, request: ContainerRequest) -> RuntimeObservation:
-        """Create and start one policy-constrained container; report it."""
+    def launch(
+        self, request: ContainerRequest, *, command: Sequence[str] | None = ...
+    ) -> RuntimeLaunch:
+        """Create and start one policy-constrained container; return a
+        :class:`RuntimeLaunch` (observation + runtime resources + endpoints +
+        acknowledged gaps). Refuses (``UnsupportedRuntimeError``) BEFORE creating
+        anything if a required hardening -- seccomp or the isolated-network
+        host-block -- cannot be enforced on this host."""
         ...
 
     def stop(self, instance_id: str, container_id: str) -> None:
         """Stop a running container (idempotent)."""
         ...
 
-    def remove(self, instance_id: str, container_id: str) -> None:
+    def restart(self, instance_id: str, container_id: str) -> None:
+        """Restart a running container in place (idempotent)."""
+        ...
+
+    def remove(self, instance_id: str, container_id: str | None) -> None:
         """Remove a container and its per-instance runtime resources (network,
-        volumes) -- idempotent, so a re-run after a partial failure converges."""
+        volumes, host-block firewall) -- idempotent, so a re-run after a partial
+        failure converges."""
         ...
 
     def observe(self, instance_id: str, container_id: str | None) -> RuntimeObservation:
         """Report the current observed state of one instance's container."""
         ...
 
+    def health_check(self, instance_id: str, container_id: str) -> RuntimeObservation:
+        """A liveness/health probe for one instance's container."""
+        ...
+
     def collect_logs(self, instance_id: str, container_id: str) -> str:
         """Capture the container's logs to a storage reference and return the
         reference (never the raw logs, which may contain challenge output)."""
+        ...
+
+    def find_container(self, instance_id: str) -> str | None:
+        """Return THIS worker's container id for ``instance_id`` (scoped to the
+        worker so a multi-worker host never returns a peer's container), or None.
+        Keeps runtime-query verbs inside the adapter."""
+        ...
+
+    def reap_managed(self, worker: str | None = ...) -> int:
+        """Force-remove every managed container this worker owns (crash-recovery
+        sweep), scoped by the worker label so peers' live containers are untouched.
+        Returns the count reaped."""
         ...
