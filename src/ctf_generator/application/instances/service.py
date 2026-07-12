@@ -343,15 +343,17 @@ class InstanceLifecycleService:
             return self._repo(session).get(instance_id)
 
     def list_instances(
-        self, *, competition_id: str | None = None, limit: int = 500
+        self, *, competition_id: str | None = None
     ) -> list[Instance]:
         """Operator list of instances, optionally scoped to one competition. Pure
-        read; returns domain objects (no runtime secrets)."""
+        read; returns the FULL ordered result set (no cap) so the router's
+        opaque-cursor pagination reaches every row -- consistent with the catalog
+        list endpoints. Returns domain objects (no runtime secrets)."""
         with self._database.session_scope() as session:
             repo = self._repo(session)
             if competition_id is not None:
-                return repo.list_for_competition(competition_id, limit)
-            return repo.list_all(limit)
+                return repo.list_for_competition(competition_id)
+            return repo.list_all()
 
     def get_operator_view(
         self, instance_id: str
