@@ -16,6 +16,11 @@ import os
 from collections.abc import Mapping
 from dataclasses import dataclass, field
 from datetime import timedelta
+from urllib.parse import urlparse
+
+# Loopback hosts for which a plaintext ``http://`` issuer is tolerated -- only
+# local/test IdPs (a discovery/JWKS fetch to loopback never leaves the host).
+_LOOPBACK_HOSTS = frozenset({"localhost", "127.0.0.1", "::1"})
 
 # Only asymmetric signature algorithms are ever accepted for an ID token. This is
 # the allow-list passed to ``jwt.decode`` -- it structurally rejects ``alg:none``
@@ -43,6 +48,19 @@ class OidcConfigurationError(ValueError):
     """The OIDC configuration is present but invalid (bad issuer / redirect_uri /
     scopes). A ``ValueError`` so the interface maps it to 400 if it ever surfaces
     on a request path (it normally fails fast at startup)."""
+
+
+def _is_secure_issuer(issuer: str) -> bool:
+    """True iff discovery/JWKS/token endpoints derived from ``issuer`` are
+    reached over a secure channel: ``https://`` always, or ``http://`` ONLY for a
+    loopback host (localhost / 127.0.0.1 / ::1) for local and test IdPs. A
+    plaintext ``http://`` issuer to any other host would fetch discovery + JWKS
+    over cleartext and is rejected."""
+    if issuer.startswith("https://"):
+        return True
+    if issuer.startswith("http://"):
+        return (urlparse(issuer).hostname or "") in _LOOPBACK_HOSTS
+    return False
 
 
 def _normalize_issuer(issuer: str) -> str:
@@ -83,9 +101,10 @@ class OidcProviderConfig:
     allowed_algorithms: tuple[str, ...] = ALLOWED_ID_TOKEN_ALGORITHMS
 
     def __post_init__(self) -> None:
-        if not self.issuer or not self.issuer.startswith(("https://", "http://")):
+        if not self.issuer or not _is_secure_issuer(self.issuer):
             raise OidcConfigurationError(
-                "issuer must be an absolute http(s) URL"
+                "issuer must be an https:// URL (http:// is permitted only for a "
+                "localhost / 127.0.0.1 loopback host, for local/test IdPs)"
             )
         # Normalize the issuer in place (frozen dataclass -> object.__setattr__).
         object.__setattr__(self, "issuer", _normalize_issuer(self.issuer))
