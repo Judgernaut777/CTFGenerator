@@ -22,13 +22,14 @@ Routes (paths are relative to the sub-app; mounted at ``/app`` they become
 from __future__ import annotations
 
 import dataclasses
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 
 from fastapi import APIRouter, Depends, Request
 from sqlalchemy.exc import IntegrityError
 from starlette.responses import RedirectResponse, Response
 
 from ctf_generator.application.auth import AuthService, InvalidCredentialsError
+from ctf_generator.application.authoring.build_service import BuildService
 from ctf_generator.application.catalog import (
     ChallengeDefinitionService,
     ChallengeVersionService,
@@ -39,6 +40,9 @@ from ctf_generator.application.catalog.competition_service import (
     CompetitionWindowError,
 )
 from ctf_generator.application.catalog.publication_service import PublicationService
+from ctf_generator.application.instances.service import InstanceLifecycleService
+from ctf_generator.application.jobs.service import JobService
+from ctf_generator.application.scoring.scoreboard_service import ScoreboardService
 from ctf_generator.domain.authoring.models import ChallengePublication
 from ctf_generator.domain.challenges.models import CompetitionConfig
 from ctf_generator.domain.identity.models import Team
@@ -67,10 +71,14 @@ from .csrf import (
 )
 from .deps import (
     get_web_auth_service,
+    get_web_build_service,
     get_web_challenge_definition_service,
     get_web_challenge_version_service,
     get_web_competition_service,
+    get_web_instance_lifecycle_service,
+    get_web_job_service,
     get_web_publication_service,
+    get_web_scoreboard_service,
     get_web_settings,
     get_web_team_service,
 )
@@ -78,10 +86,16 @@ from .formdata import read_form
 from .rendering import TemplateRenderer, get_renderer
 from .settings import WebSettings
 from .views import (
+    build_row,
     competition_detail,
     competition_form_values,
     competition_row,
+    instance_detail,
+    instance_row,
+    job_row,
     publication_row,
+    scoreboard_entry,
+    scoreboard_entry_key,
     team_row,
 )
 
@@ -89,6 +103,7 @@ router = APIRouter()
 
 _NOT_FOUND = "Competition not found"
 _PUBLICATION_NOT_FOUND = "Publication not found"
+_INSTANCE_NOT_FOUND = "Instance not found"
 # The ``version_no`` column is a 32-bit INTEGER; a client-tampered select value
 # above this would raise a DB DataError (a 500). Reject out-of-range at parse
 # time so an out-of-range selection is a field error, never a 500.
@@ -457,6 +472,9 @@ def dashboard(
         "competitions": [competition_row(c) for c in configs],
         "competition_count": len(configs),
         "can_create": principal.has(Permission.COMPETITION_WRITE),
+        # The job-queue ops surface is admin/support only (flat JOB_READ), so the
+        # nav link only shows for a caller who could actually open the page.
+        "can_view_jobs": principal.has(Permission.JOB_READ),
     }
     return renderer.render(request, "dashboard.html", context, principal=principal)
 
@@ -556,10 +574,13 @@ def competition_detail_view(
     config = service.get(competition_id)
     if config is None:
         raise LookupError(_NOT_FOUND)
-    can_manage = Permission.COMPETITION_WRITE in competition_permissions(
-        principal, competition_id
-    )
-    context = {"competition": competition_detail(config), "can_manage": can_manage}
+    perms = competition_permissions(principal, competition_id)
+    context = {
+        "competition": competition_detail(config),
+        "can_manage": Permission.COMPETITION_WRITE in perms,
+        "can_view_instances": Permission.INSTANCE_READ in perms,
+        "can_view_scoreboard": Permission.SCOREBOARD_READ in perms,
+    }
     return renderer.render(
         request, "competition_detail.html", context, principal=principal
     )
@@ -785,3 +806,401 @@ async def publication_detach(
         raise LookupError(_PUBLICATION_NOT_FOUND)
     pub_service.detach(competition_id, slug, version_no)
     return _redirect(request, "web_publications", competition_id=competition_id)
+
+
+# ===========================================================================
+# M11c -- organizer OPS views (monitor + operate). Every route is authz-scoped
+# IDENTICALLY to its JSON-API sibling; every POST is CSRF-protected; the control
+# plane NEVER launches a container from a handler (operate actions record desired
+# state / enqueue jobs via the services, exactly like the API). No secret
+# (credential / runtime token / instance_seed / job payload / flag) is ever placed
+# in a rendered context -- the view mappers delegate to the API DTO mappers, whose
+# redaction is the single source of truth.
+# ===========================================================================
+
+
+# -- instances (monitor + operate) ------------------------------------------
+#
+# The competition-scoped LIST is existence-hiding on a denial (the M11 web
+# convention): a competition the caller cannot read is a 404, indistinguishable
+# from a nonexistent one -- never weaker than the API's 403. The by-id routes
+# resolve the target competition from the LOADED instance row (no {competition_id}
+# in the path) and surface a cross-tenant denial as the SAME generic 404 as a
+# nonexistent id, mirroring the API's ``_load_for_action`` / ``_detail_or_404`` so
+# no cross-tenant existence oracle / competition-id disclosure is possible.
+
+
+def _instance_sort_key(instance) -> tuple[str, str]:
+    created = instance.created_at.isoformat() if instance.created_at else ""
+    return (created, instance.instance_id)
+
+
+def _load_instance_or_404(
+    service: InstanceLifecycleService,
+    principal: Principal,
+    instance_id: str,
+    permission: Permission,
+):
+    """Load an instance by id (generic 404 if absent) and authorize ``permission``
+    against ITS competition, surfacing a denial as the SAME generic 404 (no
+    existence/competition leak)."""
+    instance = service.get(instance_id)
+    if instance is None:
+        raise LookupError(_INSTANCE_NOT_FOUND)
+    assert_competition_permission_or_404(
+        principal, instance.competition_id, permission, not_found=_INSTANCE_NOT_FOUND
+    )
+    return instance
+
+
+@router.get("/competitions/{competition_id}/instances", name="web_instances")
+def instances_view(
+    competition_id: str,
+    request: Request,
+    principal: Principal = Depends(get_web_principal),
+    renderer: TemplateRenderer = Depends(get_renderer),
+    service: InstanceLifecycleService = Depends(get_web_instance_lifecycle_service),
+) -> Response:
+    assert_competition_permission_or_404(
+        principal, competition_id, Permission.INSTANCE_READ, not_found=_NOT_FOUND
+    )
+    instances = sorted(
+        service.list_instances(competition_id=competition_id),
+        key=_instance_sort_key,
+    )
+    context = {
+        "competition_id": competition_id,
+        "instances": [instance_row(i) for i in instances],
+    }
+    return renderer.render(
+        request, "instances_list.html", context, principal=principal
+    )
+
+
+@router.get("/instances/{instance_id}", name="web_instance_detail")
+def instance_detail_view(
+    instance_id: str,
+    request: Request,
+    principal: Principal = Depends(get_web_principal),
+    renderer: TemplateRenderer = Depends(get_renderer),
+    service: InstanceLifecycleService = Depends(get_web_instance_lifecycle_service),
+) -> Response:
+    view = service.get_operator_view(instance_id)
+    if view is None:
+        raise LookupError(_INSTANCE_NOT_FOUND)
+    instance, endpoints, health = view
+    assert_competition_permission_or_404(
+        principal, instance.competition_id, Permission.INSTANCE_READ,
+        not_found=_INSTANCE_NOT_FOUND,
+    )
+    can_operate = Permission.INSTANCE_OPERATE in competition_permissions(
+        principal, instance.competition_id
+    )
+    context = {
+        "instance": instance_detail(instance, endpoints, health),
+        "competition_id": instance.competition_id,
+        "can_operate": can_operate,
+    }
+    return renderer.render(
+        request, "instance_detail.html", context, principal=principal
+    )
+
+
+@router.post("/instances/{instance_id}/stop", name="web_instance_stop")
+async def instance_stop(
+    instance_id: str,
+    request: Request,
+    principal: Principal = Depends(get_web_principal),
+    service: InstanceLifecycleService = Depends(get_web_instance_lifecycle_service),
+    _csrf: None = Depends(require_csrf),
+) -> Response:
+    _load_instance_or_404(
+        service, principal, instance_id, Permission.INSTANCE_OPERATE
+    )
+    service.request_stop(instance_id, datetime.now(UTC))
+    return _redirect(request, "web_instance_detail", instance_id=instance_id)
+
+
+@router.post("/instances/{instance_id}/reset", name="web_instance_reset")
+async def instance_reset(
+    instance_id: str,
+    request: Request,
+    principal: Principal = Depends(get_web_principal),
+    service: InstanceLifecycleService = Depends(get_web_instance_lifecycle_service),
+    _csrf: None = Depends(require_csrf),
+) -> Response:
+    _load_instance_or_404(
+        service, principal, instance_id, Permission.INSTANCE_OPERATE
+    )
+    now = datetime.now(UTC)
+    service.request_reset(instance_id, now + timedelta(hours=1), now)
+    return _redirect(request, "web_instance_detail", instance_id=instance_id)
+
+
+@router.post("/instances/{instance_id}/delete", name="web_instance_delete")
+async def instance_delete(
+    instance_id: str,
+    request: Request,
+    principal: Principal = Depends(get_web_principal),
+    service: InstanceLifecycleService = Depends(get_web_instance_lifecycle_service),
+    _csrf: None = Depends(require_csrf),
+) -> Response:
+    instance = _load_instance_or_404(
+        service, principal, instance_id, Permission.INSTANCE_OPERATE
+    )
+    service.request_delete(instance_id, datetime.now(UTC))
+    # After a delete the instance list is the useful destination.
+    return _redirect(request, "web_instances", competition_id=instance.competition_id)
+
+
+# -- jobs (ops read + control; admin / support only) ------------------------
+#
+# Jobs are a SYSTEM surface: the API gates them with the FLAT ``require_permission``
+# (JOB_READ / JOB_OPERATE), which only ``admin`` / ``support`` hold. The web uses
+# the SAME flat check (``_require_flat``) -> a contestant or an
+# organizer-without-a-system-role gets a 403 page, nothing performed.
+
+
+def _render_ops_jobs(
+    request: Request,
+    renderer: TemplateRenderer,
+    principal: Principal,
+    service: JobService,
+    *,
+    lookup_id: str = "",
+    lookup=None,
+    lookup_not_found: bool = False,
+    error: str | None = None,
+    status_code: int = 200,
+) -> Response:
+    dead = sorted(service.list_dead_letter(), key=lambda j: j.job_id)
+    context = {
+        "dead_letter": [job_row(j) for j in dead],
+        "lookup_id": lookup_id,
+        "lookup": job_row(lookup) if lookup is not None else None,
+        "lookup_not_found": lookup_not_found,
+        "error": error,
+    }
+    return renderer.render(
+        request, "jobs.html", context, principal=principal, status_code=status_code
+    )
+
+
+@router.get("/ops/jobs", name="web_ops_jobs")
+def ops_jobs_view(
+    request: Request,
+    principal: Principal = Depends(get_web_principal),
+    renderer: TemplateRenderer = Depends(get_renderer),
+    service: JobService = Depends(get_web_job_service),
+    job_id: str | None = None,
+) -> Response:
+    _require_flat(principal, Permission.JOB_READ)
+    jid = (job_id or "").strip()
+    lookup = service.get(jid) if jid else None
+    return _render_ops_jobs(
+        request, renderer, principal, service,
+        lookup_id=jid, lookup=lookup, lookup_not_found=bool(jid) and lookup is None,
+    )
+
+
+@router.post("/ops/jobs/{job_id}/cancel", name="web_ops_job_cancel")
+async def ops_job_cancel(
+    job_id: str,
+    request: Request,
+    principal: Principal = Depends(get_web_principal),
+    renderer: TemplateRenderer = Depends(get_renderer),
+    service: JobService = Depends(get_web_job_service),
+    _csrf: None = Depends(require_csrf),
+) -> Response:
+    _require_flat(principal, Permission.JOB_OPERATE)
+    try:
+        service.cancel(job_id, datetime.now(UTC))
+    except LookupError as exc:
+        # An invalid target/state is a friendly re-render, NEVER a 500.
+        return _render_ops_jobs(
+            request, renderer, principal, service,
+            error=str(exc) or "That job could not be cancelled.", status_code=409,
+        )
+    return _redirect(request, "web_ops_jobs")
+
+
+@router.post("/ops/jobs/{job_id}/retry", name="web_ops_job_retry")
+async def ops_job_retry(
+    job_id: str,
+    request: Request,
+    principal: Principal = Depends(get_web_principal),
+    renderer: TemplateRenderer = Depends(get_renderer),
+    service: JobService = Depends(get_web_job_service),
+    _csrf: None = Depends(require_csrf),
+) -> Response:
+    _require_flat(principal, Permission.JOB_OPERATE)
+    try:
+        service.retry_dead_letter(job_id, datetime.now(UTC))
+    except LookupError as exc:
+        return _render_ops_jobs(
+            request, renderer, principal, service,
+            error=str(exc) or "That job could not be retried.", status_code=409,
+        )
+    return _redirect(request, "web_ops_jobs")
+
+
+# -- builds (list + trigger a build JOB) ------------------------------------
+#
+# Builds are an AUTHORING surface: the API gates them with the FLAT
+# ``require_permission`` (BUILD_READ / BUILD_CREATE). The trigger ENQUEUES a durable
+# ``build_challenge`` job (idempotent) -- the control plane never runs the build.
+
+
+def _render_builds(
+    request: Request,
+    renderer: TemplateRenderer,
+    principal: Principal,
+    service: BuildService,
+    slug: str,
+    version_no: int,
+    *,
+    can_trigger: bool,
+    values: dict[str, str],
+    errors: dict[str, str],
+    notice: str | None = None,
+    status_code: int = 200,
+) -> Response:
+    builds = sorted(
+        service.list_for_version(slug, version_no), key=lambda b: b.build_sha256
+    )
+    context = {
+        "slug": slug,
+        "version_no": version_no,
+        "builds": [build_row(b) for b in builds],
+        "can_trigger": can_trigger,
+        "values": values,
+        "errors": errors,
+        "notice": notice,
+    }
+    return renderer.render(
+        request, "builds.html", context, principal=principal, status_code=status_code
+    )
+
+
+def _parse_version_no(raw: str | None, errors: dict[str, str]) -> int | None:
+    """Parse a ``version_no`` form/query value; an out-of-range or malformed value
+    is a field error (re-render), never a DB DataError 500."""
+    raw = (raw or "").strip()
+    try:
+        version_no = int(raw)
+    except (TypeError, ValueError):
+        errors["version_no"] = "Enter a version number."
+        return None
+    if version_no < 1 or version_no > _INT32_MAX:
+        errors["version_no"] = "Enter a valid version number."
+        return None
+    return version_no
+
+
+@router.get("/challenge-definitions/{slug}/builds", name="web_builds")
+def builds_view(
+    slug: str,
+    request: Request,
+    principal: Principal = Depends(get_web_principal),
+    renderer: TemplateRenderer = Depends(get_renderer),
+    service: BuildService = Depends(get_web_build_service),
+    version_no: str | None = None,
+) -> Response:
+    _require_flat(principal, Permission.BUILD_READ)
+    errors: dict[str, str] = {}
+    parsed = _parse_version_no(version_no, errors)
+    can_trigger = principal.has(Permission.BUILD_CREATE)
+    if parsed is None:
+        # No (or bad) version selected: render the empty picker, no list yet.
+        return _render_builds(
+            request, renderer, principal, service, slug, 0,
+            can_trigger=can_trigger, values={"version_no": (version_no or "").strip()},
+            errors=errors,
+        )
+    return _render_builds(
+        request, renderer, principal, service, slug, parsed,
+        can_trigger=can_trigger,
+        values={"version_no": str(parsed)}, errors={},
+    )
+
+
+@router.post("/challenge-definitions/{slug}/builds", name="web_build_trigger")
+async def build_trigger(
+    slug: str,
+    request: Request,
+    principal: Principal = Depends(get_web_principal),
+    renderer: TemplateRenderer = Depends(get_renderer),
+    service: BuildService = Depends(get_web_build_service),
+    _csrf: None = Depends(require_csrf),
+) -> Response:
+    _require_flat(principal, Permission.BUILD_CREATE)
+    form = await read_form(request)
+    errors: dict[str, str] = {}
+    parsed = _parse_version_no(form.get("version_no"), errors)
+    if parsed is None:
+        return _render_builds(
+            request, renderer, principal, service, slug, 0,
+            can_trigger=True, values={"version_no": form.get("version_no", "").strip()},
+            errors=errors, status_code=400,
+        )
+    try:
+        _job, created = service.trigger_build(slug, parsed, datetime.now(UTC))
+    except LookupError:
+        errors["version_no"] = "That challenge version was not found."
+        return _render_builds(
+            request, renderer, principal, service, slug, parsed,
+            can_trigger=True, values={"version_no": str(parsed)}, errors=errors,
+            status_code=404,
+        )
+    notice = (
+        "Build job enqueued." if created else "A build for this version is already queued."
+    )
+    return _render_builds(
+        request, renderer, principal, service, slug, parsed,
+        can_trigger=True, values={"version_no": str(parsed)}, errors={},
+        notice=notice,
+    )
+
+
+# -- scoreboard (admin / organizer read of the projection) ------------------
+#
+# Read-only over the scoreboard PROJECTION (a GET never folds the ledger),
+# competition-scoped SCOREBOARD_READ. A cross-competition caller is an
+# existence-hiding 404 (never weaker than the API's scoped check). The optional lag
+# indicator is shown ONLY to a caller holding SCOREBOARD_LAG in this competition.
+
+
+@router.get("/competitions/{competition_id}/scoreboard", name="web_scoreboard")
+def scoreboard_view(
+    competition_id: str,
+    request: Request,
+    principal: Principal = Depends(get_web_principal),
+    renderer: TemplateRenderer = Depends(get_renderer),
+    service: ScoreboardService = Depends(get_web_scoreboard_service),
+) -> Response:
+    assert_competition_permission_or_404(
+        principal, competition_id, Permission.SCOREBOARD_READ, not_found=_NOT_FOUND
+    )
+    entries = sorted(
+        (scoreboard_entry(e) for e in service.standings(competition_id)),
+        key=scoreboard_entry_key,
+    )
+    lag = None
+    if Permission.SCOREBOARD_LAG_READ in competition_permissions(
+        principal, competition_id
+    ):
+        snapshot = service.lag()
+        lag = {
+            "pending_count": snapshot.pending_count,
+            "failed_count": snapshot.failed_count,
+            "latest_seq": snapshot.latest_seq,
+            "max_as_of_seq": snapshot.max_as_of_seq,
+        }
+    context = {
+        "competition_id": competition_id,
+        "entries": entries,
+        "lag": lag,
+    }
+    return renderer.render(
+        request, "scoreboard.html", context, principal=principal
+    )

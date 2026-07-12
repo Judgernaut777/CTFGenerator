@@ -1,0 +1,40 @@
+{% extends "base.html" %}
+{% block title %}Scoreboard - {{ competition_id }}{% endblock %}
+{% block content %}
+<div class="card">
+  <p class="muted"><a href="{{ mount_path }}/competitions/{{ competition_id }}">&larr; Competition</a></p>
+  <h1>Scoreboard</h1>
+  <p class="muted mono">{{ competition_id }}</p>
+  {% if entries %}
+  <table>
+    <thead>
+      <tr><th>Rank</th><th>Team</th><th>Score</th><th>Solves</th><th>Last solve</th></tr>
+    </thead>
+    <tbody>
+      {% for e in entries %}
+      <tr>
+        <td>{{ e.rank }}</td>
+        <td>{{ e.team_id }}</td>
+        <td>{{ e.score }}</td>
+        <td>{{ e.solve_count }}</td>
+        <td class="muted">{{ e.last_solve_at or "—" }}</td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  {% else %}
+  <p class="muted">No standings yet.</p>
+  {% endif %}
+</div>
+{% if lag is not none %}
+<div class="card">
+  <h2>Projection lag</h2>
+  <dl class="kv">
+    <dt>Pending</dt><dd>{{ lag.pending_count }}</dd>
+    <dt>Failed</dt><dd>{{ lag.failed_count }}</dd>
+    <dt>Latest seq</dt><dd>{{ lag.latest_seq }}</dd>
+    <dt>Folded through</dt><dd>{{ lag.max_as_of_seq }}</dd>
+  </dl>
+</div>
+{% endif %}
+{% endblock %}

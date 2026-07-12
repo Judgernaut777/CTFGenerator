@@ -1,0 +1,67 @@
+{% extends "base.html" %}
+{% block title %}Instance {{ instance.definition_slug }} - {{ competition_id }}{% endblock %}
+{% block content %}
+<div class="card">
+  <p class="muted"><a href="{{ mount_path }}/competitions/{{ competition_id }}/instances">&larr; Instances</a></p>
+  <h1>{{ instance.definition_slug }} v{{ instance.version_no }}</h1>
+  <dl class="kv">
+    <dt>Instance</dt><dd class="muted mono">{{ instance.instance_id }}</dd>
+    <dt>Competition</dt><dd class="muted">{{ instance.competition_id }}</dd>
+    <dt>Team</dt><dd>{{ instance.team }}</dd>
+    <dt>State</dt><dd>{{ instance.state }}</dd>
+    <dt>Desired state</dt><dd>{{ instance.desired_state }}</dd>
+    <dt>Generation</dt><dd>{{ instance.generation }}</dd>
+    <dt>Assigned worker</dt><dd class="muted">{{ instance.assigned_worker or "—" }}</dd>
+    <dt>Image</dt><dd class="muted mono">{{ instance.image_ref or "—" }}</dd>
+    <dt>Expires</dt><dd class="muted">{{ instance.expires_at or "—" }}</dd>
+    <dt>Created</dt><dd class="muted">{{ instance.created_at or "—" }}</dd>
+    <dt>Updated</dt><dd class="muted">{{ instance.updated_at or "—" }}</dd>
+  </dl>
+  {% if can_operate %}
+  <div class="actions">
+    <form class="inline" method="post" action="{{ mount_path }}/instances/{{ instance.instance_id }}/stop">
+      {% if csrf_token %}<input type="hidden" name="csrf_token" value="{{ csrf_token }}">{% endif %}
+      <button type="submit" class="btn">Stop</button>
+    </form>
+    <form class="inline" method="post" action="{{ mount_path }}/instances/{{ instance.instance_id }}/reset">
+      {% if csrf_token %}<input type="hidden" name="csrf_token" value="{{ csrf_token }}">{% endif %}
+      <button type="submit" class="btn">Reset</button>
+    </form>
+    <form class="inline" method="post" action="{{ mount_path }}/instances/{{ instance.instance_id }}/delete">
+      {% if csrf_token %}<input type="hidden" name="csrf_token" value="{{ csrf_token }}">{% endif %}
+      <button type="submit" class="btn">Delete</button>
+    </form>
+  </div>
+  {% endif %}
+</div>
+{% if instance.health %}
+<div class="card">
+  <h2>Health</h2>
+  <dl class="kv">
+    <dt>Observed state</dt><dd>{{ instance.health.observed_state }}</dd>
+    <dt>Healthy</dt><dd>{{ instance.health.healthy }}</dd>
+    <dt>Observed at</dt><dd class="muted">{{ instance.health.observed_at }}</dd>
+    <dt>Generation</dt><dd>{{ instance.health.generation }}</dd>
+  </dl>
+</div>
+{% endif %}
+<div class="card">
+  <h2>Endpoints</h2>
+  {% if instance.endpoints %}
+  <table>
+    <thead><tr><th>Name</th><th>Protocol</th><th>URL</th></tr></thead>
+    <tbody>
+      {% for e in instance.endpoints %}
+      <tr>
+        <td>{{ e.name }}</td>
+        <td>{{ e.protocol }}</td>
+        <td class="muted mono">{{ e.url }}</td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  {% else %}
+  <p class="muted">No public endpoints.</p>
+  {% endif %}
+</div>
+{% endblock %}

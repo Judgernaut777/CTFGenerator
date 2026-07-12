@@ -1,0 +1,56 @@
+{% extends "base.html" %}
+{% block title %}Builds - {{ slug }}{% endblock %}
+{% block content %}
+<div class="card">
+  <h1>Builds</h1>
+  <p class="muted mono">{{ slug }}</p>
+  {% if notice %}<div class="error-banner">{{ notice }}</div>{% endif %}
+  <form method="get" action="{{ mount_path }}/challenge-definitions/{{ slug }}/builds">
+    <div class="form-row">
+      <label for="version_no">Version number</label><br>
+      <input id="version_no" name="version_no" type="number" min="1" class="field-full"
+             value="{{ values.get('version_no', '') }}">
+      {% if errors.get("version_no") %}<div class="field-error">{{ errors["version_no"] }}</div>{% endif %}
+    </div>
+    <button type="submit" class="btn">Show builds</button>
+  </form>
+</div>
+
+{% if version_no %}
+<div class="card">
+  <h2>Builds for v{{ version_no }}</h2>
+  {% if builds %}
+  <table>
+    <thead>
+      <tr><th>Build</th><th>Family</th><th>Generator</th><th>Spec hash</th><th>Storage</th></tr>
+    </thead>
+    <tbody>
+      {% for b in builds %}
+      <tr>
+        <td class="muted mono">{{ b.build_sha256 }}</td>
+        <td>{{ b.family }}</td>
+        <td class="muted">{{ b.generator_version }}</td>
+        <td class="muted mono">{{ b.spec_sha256 }}</td>
+        <td class="muted mono">{{ b.storage_uri or "—" }}</td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  {% else %}
+  <p class="muted">No builds for this version yet.</p>
+  {% endif %}
+</div>
+
+{% if can_trigger %}
+<div class="card">
+  <h2>Trigger a build</h2>
+  <p class="muted">Enqueues a durable build job; a worker materializes the build.</p>
+  <form method="post" action="{{ mount_path }}/challenge-definitions/{{ slug }}/builds">
+    {% if csrf_token %}<input type="hidden" name="csrf_token" value="{{ csrf_token }}">{% endif %}
+    <input type="hidden" name="version_no" value="{{ version_no }}">
+    <button type="submit" class="btn">Enqueue build job</button>
+  </form>
+</div>
+{% endif %}
+{% endif %}
+{% endblock %}

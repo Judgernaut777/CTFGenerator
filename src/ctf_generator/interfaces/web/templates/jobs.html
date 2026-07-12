@@ -1,0 +1,82 @@
+{% extends "base.html" %}
+{% block title %}Job queue ops - CTFGenerator{% endblock %}
+{% block content %}
+<div class="card">
+  <h1>Job queue</h1>
+  <p class="muted">Operations view. Payloads, results, and error detail are never shown here.</p>
+  {% if error %}<div class="error-banner">{{ error }}</div>{% endif %}
+</div>
+
+<div class="card">
+  <h2>Look up a job</h2>
+  <form method="get" action="{{ mount_path }}/ops/jobs">
+    <div class="form-row">
+      <label for="job_id">Job ID</label><br>
+      <input id="job_id" name="job_id" type="text" class="field-full"
+             value="{{ lookup_id }}">
+    </div>
+    <button type="submit" class="btn">Look up</button>
+  </form>
+  {% if lookup_not_found %}
+  <p class="muted">No job with that ID.</p>
+  {% elif lookup %}
+  <dl class="kv">
+    <dt>Job</dt><dd class="muted mono">{{ lookup.job_id }}</dd>
+    <dt>Type</dt><dd>{{ lookup.job_type }}</dd>
+    <dt>Status</dt><dd>{{ lookup.status }}</dd>
+    <dt>Attempts</dt><dd>{{ lookup.attempt_count }} / {{ lookup.max_attempts }}</dd>
+    <dt>Error</dt><dd class="muted">{{ lookup.error_class or "—" }}</dd>
+    <dt>Created</dt><dd class="muted">{{ lookup.created_at or "—" }}</dd>
+    <dt>Finished</dt><dd class="muted">{{ lookup.finished_at or "—" }}</dd>
+  </dl>
+  {% if lookup.status == "dead_letter" or lookup.status not in ("cancelled", "succeeded") %}
+  <div class="actions">
+    {% if lookup.status == "dead_letter" %}
+    <form class="inline" method="post" action="{{ mount_path }}/ops/jobs/{{ lookup.job_id }}/retry">
+      {% if csrf_token %}<input type="hidden" name="csrf_token" value="{{ csrf_token }}">{% endif %}
+      <button type="submit" class="btn">Retry</button>
+    </form>
+    {% endif %}
+    <form class="inline" method="post" action="{{ mount_path }}/ops/jobs/{{ lookup.job_id }}/cancel">
+      {% if csrf_token %}<input type="hidden" name="csrf_token" value="{{ csrf_token }}">{% endif %}
+      <button type="submit" class="btn">Cancel</button>
+    </form>
+  </div>
+  {% endif %}
+  {% endif %}
+</div>
+
+<div class="card">
+  <h2>Dead-letter queue</h2>
+  {% if dead_letter %}
+  <table>
+    <thead>
+      <tr><th>Type</th><th>Attempts</th><th>Error</th><th>Finished</th><th></th></tr>
+    </thead>
+    <tbody>
+      {% for j in dead_letter %}
+      <tr>
+        <td>{{ j.job_type }}</td>
+        <td>{{ j.attempt_count }} / {{ j.max_attempts }}</td>
+        <td class="muted">{{ j.error_class or "—" }}</td>
+        <td class="muted">{{ j.finished_at or "—" }}</td>
+        <td>
+          <form class="inline" method="post" action="{{ mount_path }}/ops/jobs/{{ j.job_id }}/retry">
+            {% if csrf_token %}<input type="hidden" name="csrf_token" value="{{ csrf_token }}">{% endif %}
+            <button type="submit" class="linklike">Retry</button>
+          </form>
+          &middot;
+          <form class="inline" method="post" action="{{ mount_path }}/ops/jobs/{{ j.job_id }}/cancel">
+            {% if csrf_token %}<input type="hidden" name="csrf_token" value="{{ csrf_token }}">{% endif %}
+            <button type="submit" class="linklike">Cancel</button>
+          </form>
+        </td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  {% else %}
+  <p class="muted">The dead-letter queue is empty.</p>
+  {% endif %}
+</div>
+{% endblock %}

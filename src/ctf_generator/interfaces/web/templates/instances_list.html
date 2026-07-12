@@ -1,0 +1,35 @@
+{% extends "base.html" %}
+{% block title %}Instances - {{ competition_id }}{% endblock %}
+{% block content %}
+<div class="card">
+  <p class="muted"><a href="{{ mount_path }}/competitions/{{ competition_id }}">&larr; Competition</a></p>
+  <h1>Instances</h1>
+  <p class="muted mono">{{ competition_id }}</p>
+  {% if instances %}
+  <table>
+    <thead>
+      <tr>
+        <th>Challenge</th><th>Team</th><th>State</th><th>Desired</th>
+        <th>Worker</th><th>Updated</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for i in instances %}
+      <tr>
+        <td>
+          <a href="{{ mount_path }}/instances/{{ i.instance_id }}">{{ i.definition_slug }} v{{ i.version_no }}</a>
+        </td>
+        <td>{{ i.team }}</td>
+        <td>{{ i.state }}</td>
+        <td>{{ i.desired_state }}</td>
+        <td class="muted">{{ i.assigned_worker or "—" }}</td>
+        <td class="muted">{{ i.updated_at or "—" }}</td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  {% else %}
+  <p class="muted">No instances for this competition.</p>
+  {% endif %}
+</div>
+{% endblock %}
