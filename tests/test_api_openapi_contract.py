@@ -70,6 +70,74 @@ class OpenApiContractTests(unittest.TestCase):
             {"get"},
         )
 
+    def test_slice_c_resource_paths_present(self) -> None:
+        paths = self.spec["paths"]
+        for expected in (
+            "/api/v1/instances",
+            "/api/v1/instances/{instance_id}",
+            "/api/v1/competitions/{competition_id}/instances",
+            "/api/v1/instances/{instance_id}/stop",
+            "/api/v1/instances/{instance_id}/reset",
+            "/api/v1/instances/{instance_id}/delete",
+            "/api/v1/challenge-definitions/{slug}/builds",
+            "/api/v1/builds/{build_id}",
+            "/api/v1/competitions/{competition_id}/publications",
+            "/api/v1/competitions/{competition_id}/publications/"
+            "{definition_slug}/{version_no}",
+            "/api/v1/jobs/{job_id}",
+            "/api/v1/jobs/dead-letter",
+            "/api/v1/jobs/{job_id}/cancel",
+            "/api/v1/jobs/{job_id}/retry",
+            "/api/v1/system/health",
+            "/api/v1/system/ready",
+            "/api/v1/system/version",
+        ):
+            self.assertIn(expected, paths, f"missing path {expected}")
+
+    def test_slice_c_verbs(self) -> None:
+        paths = self.spec["paths"]
+        self.assertEqual(set(paths["/api/v1/instances"].keys()), {"get", "post"})
+        self.assertEqual(
+            set(paths["/api/v1/instances/{instance_id}"].keys()), {"get"}
+        )
+        self.assertEqual(
+            set(
+                paths[
+                    "/api/v1/competitions/{competition_id}/publications"
+                ].keys()
+            ),
+            {"get", "post"},
+        )
+        self.assertEqual(
+            set(
+                paths[
+                    "/api/v1/competitions/{competition_id}/publications/"
+                    "{definition_slug}/{version_no}"
+                ].keys()
+            ),
+            {"delete"},
+        )
+        self.assertEqual(
+            set(paths["/api/v1/challenge-definitions/{slug}/builds"].keys()),
+            {"get", "post"},
+        )
+
+    def test_system_probes_are_unauthenticated_in_spec(self) -> None:
+        # The unauthenticated probes carry no security requirement and are not
+        # documented with auth-related error codes.
+        paths = self.spec["paths"]
+        health = paths["/api/v1/system/health"]["get"]["responses"]
+        self.assertIn("200", health)
+        self.assertNotIn("401", health)
+
+    def test_trigger_build_documents_202(self) -> None:
+        responses = self.spec["paths"][
+            "/api/v1/challenge-definitions/{slug}/builds"
+        ]["post"]["responses"]
+        self.assertIn("202", responses)
+        for code in ("401", "403", "404", "409"):
+            self.assertIn(code, responses)
+
     def test_submit_documents_201_and_error_codes(self) -> None:
         responses = self.spec["paths"][
             "/api/v1/competitions/{competition_id}/submissions"
@@ -103,6 +171,11 @@ class OpenApiContractTests(unittest.TestCase):
         checked = 0
         for path, operations in paths.items():
             if not path.startswith("/api/v1/"):
+                continue
+            # The readiness probe legitimately returns its readiness body (not the
+            # error envelope) on 503 when a dependency is down -- it is not an
+            # error response, so it is exempt from the envelope invariant.
+            if path == "/api/v1/system/ready":
                 continue
             for operation in operations.values():
                 for status, response in operation.get("responses", {}).items():
