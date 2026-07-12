@@ -327,6 +327,15 @@ class InstanceLifecycleService:
         with self._database.session_scope() as session:
             self._repo(session).record_credential(credential)
 
+    def set_assignment(
+        self, instance_id: str, assigned_worker: str | None, now: datetime
+    ) -> Instance:
+        """Record (or clear) an instance's placement on a worker. Used by the
+        slice-2 launch-contract re-placement: after a worker re-reserves an
+        unassigned instance it records the fresh assignment before starting."""
+        with self._database.session_scope() as session:
+            return self._repo(session).set_assignment(instance_id, assigned_worker, now)
+
     # -- reads ---------------------------------------------------------------
 
     def get(self, instance_id: str) -> Instance | None:

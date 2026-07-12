@@ -52,6 +52,7 @@ ci = ["ruff>=0.6", "mypy>=1.11", "bandit>=1.7", "pip-audit>=2.7", "build>=1.2", 
 [project.scripts]
 ctfgen = "ctf_generator.cli:main"
 ctfgen-mcp = "ctf_generator.mcp_server:main"
+ctfgen-worker = "ctf_generator.workers.worker:main"
 
 [project.urls]
 Homepage = "https://github.com/Judgernaut777/CTFGenerator"
