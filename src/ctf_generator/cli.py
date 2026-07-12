@@ -10,6 +10,7 @@ from .generator import create_challenge
 from .replay_validator import cross_replay
 from .runtime_validator import validate_runtime
 from .score import score_challenge
+from .sdk.plugins import bootstrap_family_plugins
 from .sibling_validator import validate_siblings
 from .validator import validate_challenge
 
@@ -505,6 +506,13 @@ def build_parser() -> argparse.ArgumentParser:
 
 
 def main(argv: list[str] | None = None) -> int:
+    # EXPLICIT external-family bootstrap. This is the ONE place entry-point
+    # plugins are loaded (fail-safe, at most once per process). It lives on the
+    # generator-CLI bootstrap path deliberately -- NEVER at ``families`` import
+    # time and NEVER reachable from ``mcp_server`` (which must only ever expose
+    # the built-in families to a model host). See sdk/plugins.py.
+    bootstrap_family_plugins()
+
     parser = build_parser()
     args = parser.parse_args(argv)
 
