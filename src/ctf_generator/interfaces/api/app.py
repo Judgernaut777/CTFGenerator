@@ -34,11 +34,16 @@ from .middleware import (
     TokenBucketLimiter,
 )
 from .routers import (
+    builds,
     challenge_definitions,
     challenge_versions,
     competitions,
+    instances,
+    jobs,
+    publications,
     scoreboard,
     submissions,
+    system,
     teams,
     users,
 )
@@ -101,6 +106,11 @@ def create_app(
         users,
         submissions,
         scoreboard,
+        instances,
+        builds,
+        publications,
+        jobs,
+        system,
     ):
         app.include_router(module.router, prefix=API_V1_PREFIX)
 
