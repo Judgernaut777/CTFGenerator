@@ -25,6 +25,7 @@ from ..deps import (
     Permission,
     Principal,
     assert_competition_permission,
+    assert_competition_permission_or_404,
     authorized_competitions,
     get_instance_lifecycle_service,
     get_principal,
@@ -80,11 +81,18 @@ def _paged(instances, *, limit, cursor):
 def _load_for_action(service, principal, instance_id: str, permission: Permission):
     """Load an instance by id (404 if absent) and authorize ``permission`` against
     ITS competition before any mutation/return -- the competition is not a path
-    param on the by-id routes, so tenancy is resolved from the loaded row."""
+    param on the by-id routes, so tenancy is resolved from the loaded row. A caller
+    unauthorized for that competition gets the SAME generic 404 as a nonexistent id
+    (no existence/competition-id leak), not a 403 that names the resource."""
     instance = service.get(instance_id)
     if instance is None:
         raise LookupError(f"instance not found: {instance_id!r}")
-    assert_competition_permission(principal, instance.competition_id, permission)
+    assert_competition_permission_or_404(
+        principal,
+        instance.competition_id,
+        permission,
+        not_found=f"instance not found: {instance_id!r}",
+    )
     return instance
 
 
@@ -93,8 +101,13 @@ def _detail_or_404(service, principal, instance_id: str):
     if view is None:
         raise LookupError(f"instance not found: {instance_id!r}")
     instance, endpoints, health = view
-    assert_competition_permission(
-        principal, instance.competition_id, Permission.INSTANCE_READ
+    # Unauthorized for the loaded instance's competition -> generic 404, not a 403
+    # (no cross-tenant existence oracle / competition-id disclosure).
+    assert_competition_permission_or_404(
+        principal,
+        instance.competition_id,
+        Permission.INSTANCE_READ,
+        not_found=f"instance not found: {instance_id!r}",
     )
     envelope = resource_envelope(
         INSTANCE_SCHEMA, instance_to_response(instance, endpoints, health)
