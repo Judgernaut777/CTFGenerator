@@ -54,6 +54,18 @@ class CapabilityDetectionTests(unittest.TestCase):
             "docker daemon reports seccomp disabled -- launches would be refused",
         )
 
+    def test_firewall_control_is_capability_detected(self) -> None:
+        # The isolated-network host-block is a HARD FLOOR: firewall_available()
+        # must return a bool (never raise), and an isolated launch is refused when
+        # it is False. On this host (iptables + docker access) it must be True, so
+        # the host-block can actually be enforced.
+        available = _BACKEND.firewall_available()
+        self.assertIsInstance(available, bool)
+        self.assertTrue(
+            available,
+            "host-block firewall control unavailable -- isolated launches refuse",
+        )
+
 
 if __name__ == "__main__":  # pragma: no cover
     unittest.main()

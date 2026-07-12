@@ -145,6 +145,48 @@ class DockerBackendIntegrationTests(unittest.TestCase):
         ).stdout
         self.assertIn("NOEXEC", noexec)
 
+    def test_non_root_can_write_its_tmpfs(self) -> None:
+        # Under --read-only the tmpfs is the container's ONLY writable path; it is
+        # owned by the non-root uid so a uid-65534 process CAN write there.
+        iid, cid = self._launch(ContainerPolicy(memory_mb=64, cpu_millis=250, tmpfs_mb=8))
+        self.assertEqual(_dx(cid, "id", "-u"), "65534")
+        wrote = subprocess.run(
+            ["docker", "exec", cid, "sh", "-c",
+             "echo hello > /tmp/probe && cat /tmp/probe"],
+            capture_output=True, text=True,
+        )
+        self.assertEqual(wrote.returncode, 0, wrote.stderr)
+        self.assertIn("hello", wrote.stdout)
+
+    def test_reap_managed_is_scoped_to_this_worker(self) -> None:
+        # A second worker's crash-recovery sweep must NOT touch the first worker's
+        # live containers (they carry distinct ctfgen.worker labels).
+        worker_a = DockerRuntimeBackend(
+            require_rootless=False, acknowledged_gaps=_ACKED, worker_name="reap-a"
+        )
+        iid = f"it-{uuid.uuid4().hex[:12]}"
+        self._instance_ids.append(iid)
+        req = ContainerRequest(
+            instance_id=iid, team_key="red", image_ref=_BENIGN_IMAGE,
+            policy=ContainerPolicy(memory_mb=64, cpu_millis=250),
+        )
+        worker_a.launch(req, command=_SLEEP)
+        # Worker B reaps its OWN managed containers -> must not reap A's.
+        worker_b = DockerRuntimeBackend(
+            require_rootless=False, acknowledged_gaps=_ACKED, worker_name="reap-b"
+        )
+        reaped_by_b = worker_b.reap_managed()
+        self.assertEqual(reaped_by_b, 0, "worker B reaped a container it does not own")
+        still_there = subprocess.run(
+            ["docker", "ps", "-q", "--filter", f"label=ctfgen.instance={iid}"],
+            capture_output=True, text=True,
+        ).stdout.strip()
+        self.assertTrue(still_there, "worker B's reap wrongly removed worker A's container")
+        # Worker A's own reap DOES remove it.
+        self.assertEqual(worker_a.reap_managed(), 1)
+        worker_a.destroy(iid, None)
+        self._assert_clean(iid)
+
     def test_health_check_passes_for_running_container(self) -> None:
         iid, cid = self._launch(ContainerPolicy(memory_mb=64, cpu_millis=250))
         obs = self._backend.health_check(iid, cid)
