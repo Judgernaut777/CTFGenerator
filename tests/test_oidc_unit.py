@@ -106,6 +106,24 @@ class ConfigTests(unittest.TestCase):
         with self.assertRaises(OidcConfigurationError):
             _config(issuer="idp.example.test")
 
+    def test_plaintext_http_issuer_rejected(self) -> None:
+        # A non-localhost http:// issuer would fetch discovery + JWKS in cleartext.
+        with self.assertRaises(OidcConfigurationError):
+            _config(issuer="http://idp.example.test")
+
+    def test_https_issuer_accepted(self) -> None:
+        cfg = _config(issuer="https://idp.example.test")
+        self.assertEqual(cfg.issuer, "https://idp.example.test")
+
+    def test_http_localhost_issuer_allowed_for_local_idp(self) -> None:
+        # Explicit loopback exception for local / test IdPs (never leaves host).
+        for issuer in (
+            "http://localhost:8080",
+            "http://127.0.0.1:9000",
+        ):
+            cfg = _config(issuer=issuer)
+            self.assertEqual(cfg.issuer, issuer)
+
     def test_symmetric_alg_in_allowlist_rejected(self) -> None:
         with self.assertRaises(OidcConfigurationError):
             _config(allowed_algorithms=("RS256", "HS256"))
