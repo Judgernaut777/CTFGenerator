@@ -83,6 +83,19 @@ class SqlAlchemySolveRepository:
         ).one_or_none()
         return self._map(row) if row is not None else None
 
+    def get_by_submission(self, submission_id: str) -> Solve | None:
+        """The solve derived from ``submission_id`` (unique per the schema's
+        ``uq_solves_submission_id``), or ``None``. Malformed ids are a clean
+        miss, symmetric with ``get``."""
+        try:
+            key = _as_uuid(submission_id)
+        except (ValueError, AttributeError, TypeError):
+            return None
+        row = self._session.execute(
+            _hydrate_query().where(SolveRow.submission_id == key)
+        ).one_or_none()
+        return self._map(row) if row is not None else None
+
     def get_for_challenge(
         self,
         competition_id: str,

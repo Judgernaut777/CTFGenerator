@@ -17,20 +17,47 @@ from ctf_generator.domain.authoring.models import (
     ChallengeVersion,
 )
 from ctf_generator.domain.challenges.models import CompetitionConfig
+from ctf_generator.domain.execution.models import (
+    VALID_CREDENTIAL_SCOPES,
+    VALID_RUNTIME_TYPES,
+    VALID_TRUST_STATES,
+    Worker,
+    WorkerCredential,
+)
 from ctf_generator.domain.identity.models import Membership, Team, User
-from ctf_generator.domain.ledger.models import LedgerSubmission, ScoreEvent, Solve
+from ctf_generator.domain.ledger.models import (
+    VALID_PROJECTION_TASK_STATUSES,
+    LedgerSubmission,
+    ProjectionTask,
+    ScoreboardProjectionRecord,
+    ScoreEvent,
+    Solve,
+)
+from ctf_generator.domain.work.models import (
+    VALID_JOB_ERROR_CLASSES,
+    VALID_JOB_STATUSES,
+    VALID_JOB_TYPES,
+    Job,
+    JobTransition,
+)
 
 from .models import ChallengeBuild as ChallengeBuildRow
 from .models import ChallengeDefinition as ChallengeDefinitionRow
 from .models import ChallengeVersion as ChallengeVersionRow
 from .models import Competition
 from .models import CompetitionChallenge as CompetitionChallengeRow
+from .models import Job as JobRow
+from .models import JobTransition as JobTransitionRow
 from .models import Membership as MembershipRow
+from .models import ScoreboardProjection as ScoreboardProjectionRow
 from .models import ScoreEvent as ScoreEventRow
+from .models import ScoreProjectionOutbox as ScoreProjectionOutboxRow
 from .models import Solve as SolveRow
 from .models import Submission as SubmissionRow
 from .models import Team as TeamRow
 from .models import User as UserRow
+from .models import Worker as WorkerRow
+from .models import WorkerCredential as WorkerCredentialRow
 
 
 def _as_uuid(value: str) -> uuid.UUID:
@@ -517,4 +544,251 @@ def score_event_from_orm(
         submission_id=str(row.submission_id) if row.submission_id is not None else None,
         solve_id=str(row.solve_id) if row.solve_id is not None else None,
         seq=row.seq,
+    )
+
+
+# --- Job queue aggregates (M7) ---------------------------------------------
+#
+# Jobs are created via ``job_to_orm`` (enqueue only); every subsequent state
+# change is applied by the repository directly on the locked row (claim/start/
+# complete/... are explicit methods, not a generic update). ``job_from_orm``
+# fails loud (ValueError) on any value the domain cannot represent -- an
+# unknown status/type/error_class read back from the DB is a corruption signal,
+# never silently dropped.
+
+
+def _capabilities_to_orm(capabilities: tuple[str, ...]) -> list[str]:
+    """Canonicalize the capability set for storage: sorted and deduped, so the
+    array containment predicate and equality comparisons are deterministic."""
+    return sorted(set(capabilities))
+
+
+def job_to_orm(
+    job: Job,
+    competition_uuid: uuid.UUID | None,
+    version_uuid: uuid.UUID | None,
+) -> JobRow:
+    """Map a domain ``Job`` onto a fresh ORM row (enqueue only). The optional
+    audit-linkage uuids are resolved by the repository from the job's
+    ``competition_id`` slug / ``(definition_slug, version_no)`` pair. Only a
+    ``queued`` job may be enqueued -- anything else is a programming error."""
+    if job.status != "queued":
+        raise ValueError(f"only queued jobs can be enqueued, got {job.status!r}")
+    return JobRow(
+        id=_as_uuid(job.job_id),
+        job_type=job.job_type,
+        status=job.status,
+        priority=job.priority,
+        payload=dict(job.payload),
+        idempotency_key=job.idempotency_key,
+        required_capabilities=_capabilities_to_orm(job.required_capabilities),
+        attempt_count=job.attempt_count,
+        max_attempts=job.max_attempts,
+        backoff_base_seconds=job.backoff_base_seconds,
+        available_at=to_utc(job.available_at),
+        competition_id=competition_uuid,
+        challenge_version_id=version_uuid,
+    )
+
+
+def job_from_orm(
+    row: JobRow,
+    competition_slug: str | None,
+    definition_slug: str | None,
+    version_no: int | None,
+) -> Job:
+    """Map an ORM ``Job`` row back to the domain. The parent business keys are
+    read by the repository alongside the row (``None`` when the row carries no
+    audit linkage). Unknown enumerated values fail loud."""
+    if row.status not in VALID_JOB_STATUSES:
+        raise ValueError(f"unmappable job status from store: {row.status!r}")
+    if row.job_type not in VALID_JOB_TYPES:
+        raise ValueError(f"unmappable job type from store: {row.job_type!r}")
+    if row.error_class is not None and row.error_class not in VALID_JOB_ERROR_CLASSES:
+        raise ValueError(f"unmappable job error_class from store: {row.error_class!r}")
+    if (row.competition_id is None) != (competition_slug is None):
+        raise ValueError(
+            "competition linkage inconsistency: resolved slug "
+            f"{competition_slug!r} does not match row.competition_id"
+        )
+    if (row.challenge_version_id is None) != (definition_slug is None):
+        raise ValueError(
+            "version linkage inconsistency: resolved slug "
+            f"{definition_slug!r} does not match row.challenge_version_id"
+        )
+    return Job(
+        job_id=str(row.id),
+        job_type=row.job_type,
+        idempotency_key=row.idempotency_key,
+        available_at=to_utc(row.available_at),
+        status=row.status,
+        priority=row.priority,
+        payload=dict(row.payload),
+        required_capabilities=tuple(row.required_capabilities),
+        attempt_count=row.attempt_count,
+        max_attempts=row.max_attempts,
+        backoff_base_seconds=row.backoff_base_seconds,
+        claimed_by=row.claimed_by,
+        heartbeat_at=to_utc(row.heartbeat_at),
+        lease_expires_at=to_utc(row.lease_expires_at),
+        cancel_requested_at=to_utc(row.cancel_requested_at),
+        started_at=to_utc(row.started_at),
+        finished_at=to_utc(row.finished_at),
+        error_class=row.error_class,
+        error_detail=row.error_detail,
+        result_json=dict(row.result_json) if row.result_json is not None else None,
+        result_ref=row.result_ref,
+        log_ref=row.log_ref,
+        competition_id=competition_slug,
+        definition_slug=definition_slug,
+        version_no=version_no,
+        created_at=to_utc(row.created_at),
+    )
+
+
+def job_transition_to_orm(
+    transition: JobTransition, job_uuid: uuid.UUID
+) -> JobTransitionRow:
+    return JobTransitionRow(
+        job_id=job_uuid,
+        from_status=transition.from_status,
+        to_status=transition.to_status,
+        attempt=transition.attempt,
+        worker_id=transition.worker_id,
+        error_class=transition.error_class,
+        error_detail=transition.error_detail,
+        occurred_at=to_utc(transition.occurred_at),
+    )
+
+
+def job_transition_from_orm(row: JobTransitionRow) -> JobTransition:
+    if row.to_status not in VALID_JOB_STATUSES:
+        raise ValueError(f"unmappable transition to_status: {row.to_status!r}")
+    if row.from_status is not None and row.from_status not in VALID_JOB_STATUSES:
+        raise ValueError(f"unmappable transition from_status: {row.from_status!r}")
+    return JobTransition(
+        job_id=str(row.job_id),
+        from_status=row.from_status,
+        to_status=row.to_status,
+        attempt=row.attempt,
+        occurred_at=to_utc(row.occurred_at),
+        worker_id=row.worker_id,
+        error_class=row.error_class,
+        error_detail=row.error_detail,
+    )
+
+
+# --- Worker identity & trust aggregates (M7) --------------------------------
+
+
+def worker_to_orm(worker: Worker, existing: WorkerRow | None = None) -> WorkerRow:
+    """Map a domain ``Worker`` onto its ORM row.
+
+    Fresh row when ``existing is None`` (registration: the row starts
+    ``pending`` regardless of the aggregate's transient state -- registration
+    only ever inserts pending identities, enforced here). With ``existing``
+    given, only the mutable *profile* fields are updated; trust/drain/
+    quarantine state moves are explicit repository methods, never a mapper
+    side effect."""
+    if existing is None:
+        if worker.trust_state != "pending":
+            raise ValueError(
+                f"only pending workers can be registered, got {worker.trust_state!r}"
+            )
+        return WorkerRow(
+            name=worker.name,
+            runtime_type=worker.runtime_type,
+            architectures=list(worker.architectures),
+            capabilities=list(worker.capabilities),
+            capacity=worker.capacity,
+            version=worker.version,
+        )
+    existing.runtime_type = worker.runtime_type
+    existing.architectures = list(worker.architectures)
+    existing.capabilities = list(worker.capabilities)
+    existing.capacity = worker.capacity
+    existing.version = worker.version
+    return existing
+
+
+def worker_from_orm(row: WorkerRow) -> Worker:
+    if row.trust_state not in VALID_TRUST_STATES:
+        raise ValueError(f"unmappable trust_state from store: {row.trust_state!r}")
+    if row.runtime_type not in VALID_RUNTIME_TYPES:
+        raise ValueError(f"unmappable runtime_type from store: {row.runtime_type!r}")
+    return Worker(
+        name=row.name,
+        runtime_type=row.runtime_type,
+        architectures=tuple(row.architectures),
+        capabilities=tuple(row.capabilities),
+        capacity=row.capacity,
+        version=row.version,
+        trust_state=row.trust_state,
+        revoked_at=to_utc(row.revoked_at),
+        drain_requested_at=to_utc(row.drain_requested_at),
+        quarantined_at=to_utc(row.quarantined_at),
+        quarantine_reason=row.quarantine_reason,
+        last_heartbeat_at=to_utc(row.last_heartbeat_at),
+    )
+
+
+def worker_credential_to_orm(
+    credential: WorkerCredential, worker_uuid: uuid.UUID
+) -> WorkerCredentialRow:
+    """Insert-only (the single legal mutation -- the revocation stamp -- is
+    applied by the repository directly on the row)."""
+    return WorkerCredentialRow(
+        id=_as_uuid(credential.credential_id),
+        worker_id=worker_uuid,
+        token_hash=credential.token_hash,
+        scopes=sorted(set(credential.scopes)),
+        issued_at=to_utc(credential.issued_at),
+        expires_at=to_utc(credential.expires_at),
+        revoked_at=to_utc(credential.revoked_at),
+    )
+
+
+def worker_credential_from_orm(
+    row: WorkerCredentialRow, worker_name: str
+) -> WorkerCredential:
+    for scope in row.scopes:
+        if scope not in VALID_CREDENTIAL_SCOPES:
+            raise ValueError(f"unmappable credential scope from store: {scope!r}")
+    return WorkerCredential(
+        credential_id=str(row.id),
+        worker_name=worker_name,
+        token_hash=row.token_hash,
+        scopes=tuple(row.scopes),
+        issued_at=to_utc(row.issued_at),
+        expires_at=to_utc(row.expires_at),
+        revoked_at=to_utc(row.revoked_at),
+    )
+
+
+# --- Score projection (M7) ---------------------------------------------------
+
+
+def projection_task_from_orm(
+    row: ScoreProjectionOutboxRow, competition_slug: str
+) -> ProjectionTask:
+    if row.status not in VALID_PROJECTION_TASK_STATUSES:
+        raise ValueError(f"unmappable projection status from store: {row.status!r}")
+    return ProjectionTask(
+        seq=row.seq,
+        competition_id=competition_slug,
+        status=row.status,
+        attempts=row.attempts,
+        created_at=to_utc(row.created_at),
+        last_error=row.last_error,
+    )
+
+
+def scoreboard_projection_from_orm(
+    row: ScoreboardProjectionRow, competition_slug: str
+) -> ScoreboardProjectionRecord:
+    return ScoreboardProjectionRecord(
+        competition_id=competition_slug,
+        as_of_seq=row.as_of_seq,
+        entries=dict(row.entries),
+        computed_at=to_utc(row.computed_at),
     )
