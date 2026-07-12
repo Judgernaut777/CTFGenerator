@@ -17,6 +17,7 @@ import unittest
 import uuid
 from contextlib import contextmanager
 from datetime import UTC, datetime, timedelta
+from unittest import mock
 
 try:
     import sqlalchemy as sa
@@ -159,6 +160,27 @@ def _seed(db, *, flag: str | None = _FLAG, attach: bool = True) -> None:
                     competition_id="cup", definition_slug="sql", version_no=1
                 )
             )
+
+
+def _seed_second_competition(db, comp_id: str = "other", team: str = "Red") -> None:
+    """A second competition + team attaching the SAME already-published sql v1
+    (so a submission_id can be reused across competitions)."""
+    with db.session_scope() as s:
+        SqlAlchemyCompetitionRepository(s).add(
+            CompetitionConfig(
+                competition_id=comp_id,
+                name=comp_id,
+                start_time=_NOW - timedelta(hours=1),
+                end_time=_NOW + timedelta(hours=47),
+            )
+        )
+        SqlAlchemyTeamRepository(s).add(Team(comp_id, team))
+    with db.session_scope() as s:
+        SqlAlchemyChallengePublicationRepository(s).add(
+            ChallengePublication(
+                competition_id=comp_id, definition_slug="sql", version_no=1
+            )
+        )
 
 
 def _request(candidate: str, **overrides) -> SubmissionRequest:
@@ -353,6 +375,61 @@ class SubmissionProcessingTests(unittest.TestCase):
                             "sid": dup.submission.submission_id,
                             "at": _NOW,
                         },
+                    )
+
+    def test_duplicate_solve_savepoint_returns_accepted_duplicate(self) -> None:
+        # Correctness of at-most-one-solve must NOT depend on the advisory lock
+        # or the isolation level: if the pre-check misses an existing solve (a
+        # racing winner committed after our snapshot), the solve insert hits
+        # uq_solves_* and the SAVEPOINT converts it to an accepted duplicate --
+        # never a raw IntegrityError.
+        with _migrated_database() as (db, _url):
+            _seed(db)
+            service = SubmissionProcessingService(db)
+            service.process_submission(_request(_FLAG))  # creates the solve
+            with mock.patch.object(
+                SqlAlchemySolveRepository, "get_for_challenge", return_value=None
+            ):
+                outcome = service.process_submission(
+                    _request(_FLAG, submitted_at=_NOW + timedelta(minutes=1))
+                )
+            self.assertTrue(outcome.accepted)
+            self.assertFalse(outcome.first_solve)
+            self.assertIsNone(outcome.solve)
+            with db.session_scope() as s:
+                solves = SqlAlchemySolveRepository(s).list_for_competition("cup")
+                events = SqlAlchemyScoreLedger(s).list_for_competition("cup")
+        self.assertEqual(len(solves), 1)  # still exactly one solve
+        self.assertEqual(len(events), 1)  # no duplicate 'solve' event
+
+    def test_concurrent_cross_competition_reuse_is_idempotency_conflict(self) -> None:
+        # A submission_id reused across competitions takes a DIFFERENT advisory
+        # lock, so the two are not serialized. The loser's submission insert
+        # hits pk_submissions; the SAVEPOINT re-reads the committed row and
+        # routes through _replay, yielding the SAME typed IdempotencyConflictError
+        # as sequential reuse -- never a raw IntegrityError.
+        with _migrated_database() as (db, _url):
+            _seed(db)
+            _seed_second_competition(db, comp_id="other")
+            service = SubmissionProcessingService(db)
+            sid = str(uuid.uuid4())
+            service.process_submission(_request(_FLAG, submission_id=sid))  # cup
+
+            original_get = SqlAlchemyLedgerSubmissionRepository.get
+            calls = {"n": 0}
+
+            def fake_get(self, submission_id):
+                calls["n"] += 1
+                if calls["n"] == 1:  # the pre-check misses (concurrent window)
+                    return None
+                return original_get(self, submission_id)  # the post-conflict re-read
+
+            with mock.patch.object(
+                SqlAlchemyLedgerSubmissionRepository, "get", fake_get
+            ):
+                with self.assertRaises(IdempotencyConflictError):
+                    service.process_submission(
+                        _request(_FLAG, submission_id=sid, competition_id="other")
                     )
 
     def test_eight_simultaneous_correct_submissions_one_solve(self) -> None:

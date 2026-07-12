@@ -41,8 +41,7 @@ from __future__ import annotations
 
 import uuid as _uuid
 
-import sqlalchemy as sa
-from sqlalchemy.orm import Session
+from sqlalchemy.exc import IntegrityError
 
 from ctf_generator.domain.ledger.models import LedgerSubmission, ScoreEvent, Solve
 from ctf_generator.domain.ledger.processing import (
@@ -53,13 +52,13 @@ from ctf_generator.domain.ledger.processing import (
     SubmissionRequest,
 )
 from ctf_generator.domain.repositories import FlagVerifier
-from ctf_generator.infrastructure.database import _resolve
 from ctf_generator.infrastructure.database.challenge_publication_repository import (
     SqlAlchemyChallengePublicationRepository,
 )
 from ctf_generator.infrastructure.database.challenge_version_repository import (
     SqlAlchemyChallengeVersionRepository,
 )
+from ctf_generator.infrastructure.database.locks import acquire_competition_lock
 from ctf_generator.infrastructure.database.score_ledger_repository import (
     SqlAlchemyScoreLedger,
 )
@@ -74,15 +73,12 @@ from ctf_generator.infrastructure.database.submission_repository import (
 from .verifier import SpecFlagVerifier, normalize_candidate
 
 
-def competition_lock(session: Session, competition_uuid: _uuid.UUID) -> None:
-    """Take the competition-scoped transaction advisory lock (shared key
-    derivation with the scoreboard projector: ``hashtextextended(uuid_text,
-    0)``). Auto-released at commit/rollback. Hash collisions across
-    competitions only cause spurious serialization, never incorrectness."""
-    session.execute(
-        sa.text("SELECT pg_advisory_xact_lock(hashtextextended(:key, 0))"),
-        {"key": str(competition_uuid)},
-    )
+def _violated_constraint(exc: IntegrityError) -> str | None:
+    """The name of the DB constraint an IntegrityError violated, if the driver
+    exposes it (psycopg's ``diag.constraint_name``). ``None`` when unknown."""
+    orig = getattr(exc, "orig", None)
+    diag = getattr(orig, "diag", None)
+    return getattr(diag, "constraint_name", None) if diag is not None else None
 
 
 class SubmissionProcessingService:
@@ -98,10 +94,7 @@ class SubmissionProcessingService:
 
     def process_submission(self, request: SubmissionRequest) -> SubmissionOutcome:
         with self._database.session_scope() as session:
-            competition_uuid = _resolve.competition_uuid(
-                session, request.competition_id
-            )
-            competition_lock(session, competition_uuid)
+            acquire_competition_lock(session, request.competition_id)
 
             submissions = SqlAlchemyLedgerSubmissionRepository(session)
             solves = SqlAlchemySolveRepository(session)
@@ -154,7 +147,22 @@ class SubmissionProcessingService:
                 submitter_email=request.submitter_email,
                 instance_seed=request.instance_seed,
             )
-            submissions.add(submission)
+            # A SAVEPOINT around the insert: a concurrent reuse of this
+            # submission_id in a DIFFERENT competition takes a different
+            # advisory lock (so the two are not serialized) and both may pass
+            # the idempotency short-circuit above. The loser's insert then hits
+            # pk_submissions -- re-read the committed row and route through the
+            # same replay/identity-conflict path as sequential reuse, so
+            # concurrent and sequential reuse produce the SAME typed error
+            # rather than a raw IntegrityError.
+            try:
+                with session.begin_nested():
+                    submissions.add(submission)
+            except IntegrityError:
+                stored = submissions.get(request.submission_id)
+                if stored is None:  # pragma: no cover - not a pk collision
+                    raise
+                return self._replay(stored, request, solves)
 
             if not correct:
                 return SubmissionOutcome(
@@ -195,20 +203,41 @@ class SubmissionProcessingService:
                 solved_at=submission.submitted_at,
                 instance_seed=submission.instance_seed,
             )
-            solves.add(solve)
-            event = SqlAlchemyScoreLedger(session).append(
-                ScoreEvent(
-                    competition_id=request.competition_id,
-                    team_name=request.team_name,
-                    definition_slug=request.definition_slug,
-                    version_no=request.version_no,
-                    type="solve",
-                    ts=solve.solved_at.isoformat(),
-                    submission_id=submission.submission_id,
-                    solve_id=solve.solve_id,
-                    payload={},
+            # A SAVEPOINT around solve + event so at-most-one-solve does NOT
+            # depend on the advisory lock or the isolation level: if a rival
+            # committed the team's solve between our post-lock re-check and this
+            # insert, ``uq_solves_*`` bites, we roll back only the solve/event,
+            # and this submission stands as an accepted duplicate. The advisory
+            # lock is then a pure throughput optimization, not a correctness
+            # dependency.
+            try:
+                with session.begin_nested():
+                    solves.add(solve)
+                    event = SqlAlchemyScoreLedger(session).append(
+                        ScoreEvent(
+                            competition_id=request.competition_id,
+                            team_name=request.team_name,
+                            definition_slug=request.definition_slug,
+                            version_no=request.version_no,
+                            type="solve",
+                            ts=solve.solved_at.isoformat(),
+                            submission_id=submission.submission_id,
+                            solve_id=solve.solve_id,
+                            payload={},
+                        )
+                    )
+            except IntegrityError as exc:
+                constraint = _violated_constraint(exc)
+                if constraint is not None and not constraint.startswith("uq_solves"):
+                    raise
+                # A concurrent winner already recorded the solve.
+                return SubmissionOutcome(
+                    submission=submission,
+                    solve=None,
+                    score_event=None,
+                    accepted=True,
+                    first_solve=False,
                 )
-            )
             return SubmissionOutcome(
                 submission=submission,
                 solve=solve,

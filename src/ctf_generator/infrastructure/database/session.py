@@ -26,6 +26,12 @@ class Database:
             echo=config.echo,
             pool_pre_ping=config.pool_pre_ping,
             future=True,
+            # Pin READ COMMITTED explicitly. It is the PostgreSQL default, but
+            # the submission service's post-lock solve re-check relies on the
+            # per-statement fresh snapshot READ COMMITTED gives; making it
+            # explicit means a server-wide / DSN ``default_transaction_isolation``
+            # override cannot silently break that assumption.
+            isolation_level="READ COMMITTED",
         )
         self._session_factory = sessionmaker(
             bind=self._engine, expire_on_commit=False, future=True
