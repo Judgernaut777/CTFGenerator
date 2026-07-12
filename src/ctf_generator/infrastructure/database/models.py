@@ -28,6 +28,12 @@ from ...domain.ledger.models import (
     VALID_PROJECTION_TASK_STATUSES,
     VALID_SCORE_EVENT_TYPES,
 )
+from ...domain.scheduling.models import (
+    CEILING_DIMENSIONS,
+    VALID_DIMENSIONS,
+    VALID_QUOTA_SCOPES,
+    VALID_RESERVATION_STATES,
+)
 from ...domain.work.models import (
     TERMINAL_JOB_STATUSES,
     VALID_JOB_ERROR_CLASSES,
@@ -65,6 +71,15 @@ _PROJECTION_STATUS_IN_LIST = ", ".join(
 )
 _TERMINAL_JOB_STATUS_IN_LIST = ", ".join(
     f"'{s}'" for s in sorted(TERMINAL_JOB_STATUSES)
+)
+# M8: scheduling/quota enumerations -- rendered from the domain frozensets
+# (single source of truth) and sorted, so the ORM CHECK SQL and the migration
+# SQL cannot drift from the domain or each other.
+_QUOTA_SCOPE_IN_LIST = ", ".join(f"'{s}'" for s in sorted(VALID_QUOTA_SCOPES))
+_QUOTA_DIMENSION_IN_LIST = ", ".join(f"'{d}'" for d in sorted(VALID_DIMENSIONS))
+_CEILING_DIMENSION_IN_LIST = ", ".join(f"'{d}'" for d in sorted(CEILING_DIMENSIONS))
+_RESERVATION_STATE_IN_LIST = ", ".join(
+    f"'{s}'" for s in sorted(VALID_RESERVATION_STATES)
 )
 
 
@@ -992,4 +1007,183 @@ class ScoreboardProjection(Base):
 
     __table_args__ = (
         CheckConstraint("as_of_seq >= 0", name="as_of_seq_nonnegative"),
+    )
+
+
+class ResourceQuota(Base):
+    """Persistent form of the domain ``ResourceQuota`` (M8). One row per
+    ``(scope_type, scope_key, dimension)`` carrying the ``limit_value`` and the
+    live ``reserved_value`` counter. Mutable (a limit adjustment and the
+    reserve/release counter update are legal), so there is no ``reject_mutation``
+    -- but a ``resource_quotas_guard`` BEFORE DELETE trigger (owned by migration
+    0009) refuses to drop a row while ``reserved_value > 0``. The unique
+    ``(scope_type, scope_key, dimension)`` is the composite-FK target for
+    ``quota_reservation_items``; a ceiling dimension's ``reserved_value`` is
+    pinned to 0 by CHECK."""
+
+    __tablename__ = "resource_quotas"
+
+    id: Mapped[uuid.UUID] = mapped_column(sa.Uuid, primary_key=True, default=uuid.uuid4)
+    scope_type: Mapped[str] = mapped_column(sa.Text, nullable=False)
+    scope_key: Mapped[str] = mapped_column(sa.Text, nullable=False)
+    dimension: Mapped[str] = mapped_column(sa.Text, nullable=False)
+    limit_value: Mapped[int] = mapped_column(sa.BigInteger, nullable=False)
+    reserved_value: Mapped[int] = mapped_column(
+        sa.BigInteger, nullable=False, server_default=sa.text("0")
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        sa.DateTime(timezone=True), nullable=False, server_default=sa.func.now()
+    )
+
+    __table_args__ = (
+        # Also the composite-FK target for quota_reservation_items.
+        UniqueConstraint(
+            "scope_type", "scope_key", "dimension", name="uq_resource_quotas_scope"
+        ),
+        CheckConstraint(
+            f"scope_type IN ({_QUOTA_SCOPE_IN_LIST})", name="scope_type_valid"
+        ),
+        CheckConstraint(
+            f"dimension IN ({_QUOTA_DIMENSION_IN_LIST})", name="dimension_valid"
+        ),
+        CheckConstraint("limit_value >= 0", name="limit_non_negative"),
+        CheckConstraint("reserved_value >= 0", name="reserved_non_negative"),
+        # A ceiling dimension is a scalar cap: it never counts, so its counter
+        # is pinned to 0.
+        CheckConstraint(
+            f"dimension NOT IN ({_CEILING_DIMENSION_IN_LIST}) OR reserved_value = 0",
+            name="ceiling_no_reserve",
+        ),
+        Index("ix_resource_quotas_scope_type_scope_key", "scope_type", "scope_key"),
+    )
+
+
+class QuotaReservation(Base):
+    """Persistent form of the domain ``QuotaReservation`` header (M8). PK
+    ``reservation_id`` equals the instance business id (a duplicate reserve ->
+    IntegrityError, the idempotent re-launch guard). Denormalized scope keys let
+    release/reconcile/scheduling avoid a join. Mutable only via the release flip
+    (held -> released), guarded by CHECK ties; the append-only detail lives in
+    ``quota_reservation_items``."""
+
+    __tablename__ = "quota_reservations"
+
+    reservation_id: Mapped[uuid.UUID] = mapped_column(sa.Uuid, primary_key=True)
+    worker_key: Mapped[str] = mapped_column(sa.Text, nullable=False)
+    competition_key: Mapped[str | None] = mapped_column(sa.Text, nullable=True)
+    team_key: Mapped[str | None] = mapped_column(sa.Text, nullable=True)
+    challenge_key: Mapped[str | None] = mapped_column(sa.Text, nullable=True)
+    state: Mapped[str] = mapped_column(
+        sa.Text, nullable=False, server_default=sa.text("'held'")
+    )
+    expires_at: Mapped[datetime] = mapped_column(
+        sa.DateTime(timezone=True), nullable=False
+    )
+    released_at: Mapped[datetime | None] = mapped_column(
+        sa.DateTime(timezone=True), nullable=True
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        sa.DateTime(timezone=True), nullable=False, server_default=sa.func.now()
+    )
+
+    __table_args__ = (
+        CheckConstraint(
+            f"state IN ({_RESERVATION_STATE_IN_LIST})", name="state_valid"
+        ),
+        CheckConstraint(
+            "(state = 'released') = (released_at IS NOT NULL)",
+            name="released_state_consistent",
+        ),
+        CheckConstraint(r"worker_key !~ '^\s*$'", name="worker_key_non_empty"),
+        Index(
+            "ix_quota_reservations_expires_at",
+            "expires_at",
+            postgresql_where=sa.text("state = 'held'"),
+        ),
+        Index(
+            "ix_quota_reservations_worker_key",
+            "worker_key",
+            postgresql_where=sa.text("state = 'held'"),
+        ),
+    )
+
+
+class QuotaReservationItem(Base):
+    """Persistent form of the domain ``ReservationItem`` (M8) -- one pooled
+    counter increment inside a reservation. Append-only via the shared
+    ``reject_mutation()`` (owned by 0004, reused BY NAME): the reserved_value
+    counter is what moves on release, not these ledger rows. The composite FK
+    ``(scope_type, scope_key, dimension) -> resource_quotas`` guarantees every
+    item points at a real quota row."""
+
+    __tablename__ = "quota_reservation_items"
+
+    id: Mapped[uuid.UUID] = mapped_column(sa.Uuid, primary_key=True, default=uuid.uuid4)
+    reservation_id: Mapped[uuid.UUID] = mapped_column(
+        sa.Uuid,
+        ForeignKey("quota_reservations.reservation_id", ondelete="RESTRICT"),
+        nullable=False,
+    )
+    scope_type: Mapped[str] = mapped_column(sa.Text, nullable=False)
+    scope_key: Mapped[str] = mapped_column(sa.Text, nullable=False)
+    dimension: Mapped[str] = mapped_column(sa.Text, nullable=False)
+    amount: Mapped[int] = mapped_column(sa.BigInteger, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        sa.DateTime(timezone=True), nullable=False, server_default=sa.func.now()
+    )
+
+    __table_args__ = (
+        UniqueConstraint(
+            "reservation_id",
+            "scope_type",
+            "scope_key",
+            "dimension",
+            name="uq_quota_reservation_items_reservation",
+        ),
+        ForeignKeyConstraint(
+            ["scope_type", "scope_key", "dimension"],
+            [
+                "resource_quotas.scope_type",
+                "resource_quotas.scope_key",
+                "resource_quotas.dimension",
+            ],
+            ondelete="RESTRICT",
+            name="fk_quota_reservation_items_scope_resource_quotas",
+        ),
+        CheckConstraint("amount > 0", name="amount_positive"),
+        Index(
+            "ix_quota_reservation_items_scope",
+            "scope_type",
+            "scope_key",
+            "dimension",
+        ),
+    )
+
+
+class WorkerImageCache(Base):
+    """Which image references a worker has cached locally (M8). Populated by
+    worker events in slice 2; slice 1 LEFT JOINs it for scheduler affinity
+    ranking only (never a gate), so its emptiness never changes correctness.
+    Mutable work table (no reject_mutation)."""
+
+    __tablename__ = "worker_image_cache"
+
+    id: Mapped[uuid.UUID] = mapped_column(sa.Uuid, primary_key=True, default=uuid.uuid4)
+    worker_id: Mapped[uuid.UUID] = mapped_column(
+        sa.Uuid, ForeignKey("workers.id", ondelete="RESTRICT"), nullable=False
+    )
+    image_ref: Mapped[str] = mapped_column(sa.Text, nullable=False)
+    cached_at: Mapped[datetime] = mapped_column(
+        sa.DateTime(timezone=True), nullable=False, server_default=sa.func.now()
+    )
+    last_used_at: Mapped[datetime | None] = mapped_column(
+        sa.DateTime(timezone=True), nullable=True
+    )
+
+    __table_args__ = (
+        UniqueConstraint(
+            "worker_id", "image_ref", name="uq_worker_image_cache_worker_id_image_ref"
+        ),
+        CheckConstraint(r"image_ref !~ '^\s*$'", name="image_ref_non_empty"),
+        Index("ix_worker_image_cache_image_ref", "image_ref"),
     )
