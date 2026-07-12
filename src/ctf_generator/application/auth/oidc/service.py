@@ -268,6 +268,16 @@ class OidcService:
         except jwt.InvalidTokenError as exc:
             raise OidcAuthError("id token validation failed") from exc
 
+        # OIDC Core 3.1.3.7: PyJWT only checks ``client_id in aud``. When the ID
+        # token has MULTIPLE audiences (or carries an ``azp``), the authorized
+        # party MUST be our client_id -- otherwise a token minted for a different
+        # relying party (co-audienced with us) would be accepted.
+        aud = claims.get("aud")
+        azp = claims.get("azp")
+        if (isinstance(aud, list) and len(aud) > 1) or azp is not None:
+            if azp != self._config.client_id:
+                raise OidcAuthError("id token azp does not match client_id")
+
         # PyJWT does not validate the OIDC ``nonce`` -- bind it here.
         if not expected_nonce or claims.get("nonce") != expected_nonce:
             raise OidcAuthError("id token nonce mismatch")

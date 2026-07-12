@@ -513,6 +513,42 @@ class OidcSecurityTests(unittest.TestCase):
             with self.assertRaises(OidcAuthError):
                 svc.handle_callback(code, red.state, red.binding_secret, now)
 
+    def test_multi_audience_azp_mismatch_rejected(self) -> None:
+        # OIDC Core 3.1.3.7: a multi-audience token whose azp is a DIFFERENT
+        # relying party must be rejected even though our client_id is in aud.
+        with self._svc() as (svc, fake, _db):
+            now = self._now()
+            red = svc.build_authorization_url(now)
+            ctx = fake.parse_auth(red.url)
+            code = fake.register_code(
+                ctx,
+                id_token=fake.mint_id_token(
+                    nonce=ctx["nonce"],
+                    aud=[fake.client_id, "some-other-client"],
+                    azp="some-other-client",
+                ),
+            )
+            with self.assertRaises(OidcAuthError):
+                svc.handle_callback(code, red.state, red.binding_secret, now)
+
+    def test_multi_audience_azp_match_accepted(self) -> None:
+        # A multi-audience token whose azp IS our client_id is accepted.
+        with self._svc() as (svc, fake, _db):
+            now = self._now()
+            red = svc.build_authorization_url(now)
+            ctx = fake.parse_auth(red.url)
+            code = fake.register_code(
+                ctx,
+                id_token=fake.mint_id_token(
+                    nonce=ctx["nonce"],
+                    aud=[fake.client_id, "some-other-client"],
+                    azp=fake.client_id,
+                ),
+            )
+            issued = svc.handle_callback(code, red.state, red.binding_secret, now)
+            self.assertTrue(issued.token)
+            self.assertEqual(issued.user_email, DEFAULT_EMAIL)
+
     def test_token_exchange_failure_rejected(self) -> None:
         with self._svc() as (svc, fake, _db):
             now = self._now()
