@@ -497,6 +497,22 @@ class OidcSecurityTests(unittest.TestCase):
             with self.assertRaises(OidcAuthError):
                 svc.handle_callback(code, red.state, red.binding_secret, now)
 
+    def test_email_verified_absent_rejected(self) -> None:
+        # FAIL CLOSED: an ID token that OMITS email_verified entirely must NOT be
+        # treated as verified (email is the identity join key).
+        with self._svc() as (svc, fake, _db):
+            now = self._now()
+            red = svc.build_authorization_url(now)
+            ctx = fake.parse_auth(red.url)
+            code = fake.register_code(
+                ctx,
+                id_token=fake.mint_id_token(
+                    nonce=ctx["nonce"], omit=("email_verified",)
+                ),
+            )
+            with self.assertRaises(OidcAuthError):
+                svc.handle_callback(code, red.state, red.binding_secret, now)
+
     def test_token_exchange_failure_rejected(self) -> None:
         with self._svc() as (svc, fake, _db):
             now = self._now()
