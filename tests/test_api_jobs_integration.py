@@ -82,8 +82,12 @@ def _alembic_config(url) -> AlembicConfig:
 def _authenticator() -> StubAuthenticator:
     return StubAuthenticator(
         {
-            _ADMIN: principal_for("admin-user", {"admin"}),
-            _SUPPORT: principal_for("support-user", {"support"}),
+            # Jobs are a SYSTEM surface (flat require_permission, unchanged in
+            # M10b); admin/support are deployment-global system roles.
+            _ADMIN: principal_for("admin-user", {"admin"}, system_roles={"admin"}),
+            _SUPPORT: principal_for(
+                "support-user", {"support"}, system_roles={"support"}
+            ),
             _ORGANIZER: principal_for("org-user", {"organizer"}),
             _PLAYER: principal_for("player-user", {"player"}, team="Red"),
         }

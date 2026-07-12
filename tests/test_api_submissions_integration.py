@@ -108,13 +108,32 @@ def _alembic_config(url) -> AlembicConfig:
 def _authenticator() -> StubAuthenticator:
     return StubAuthenticator(
         {
-            _ADMIN: principal_for("admin-user", {"admin"}),
-            _RED: principal_for("red-player", {"player"}, team="Red"),
-            _BLUE: principal_for("blue-player", {"player"}, team="Blue"),
-            # A contestant with the player role but NOT placed on a team: has the
-            # submission permissions, so any denial is the fail-closed tenancy
-            # check, not require_permission.
-            _NOTEAM: principal_for("no-team-player", {"player"}),
+            _ADMIN: principal_for("admin-user", {"admin"}, system_roles={"admin"}),
+            # Red plays in BOTH competitions (the cross-competition idempotency
+            # test submits to _CID and _CID_B), placed on team Red in each.
+            _RED: principal_for(
+                "red-player",
+                {"player"},
+                team="Red",
+                memberships={
+                    _CID: ("player", "Red"),
+                    _CID_B: ("player", "Red"),
+                },
+            ),
+            _BLUE: principal_for(
+                "blue-player",
+                {"player"},
+                team="Blue",
+                memberships={_CID: ("player", "Blue")},
+            ),
+            # A contestant with a player membership in _CID but NOT placed on a
+            # team there: has submission permissions in _CID, so any denial is the
+            # fail-closed per-competition team check, not require_competition_permission.
+            _NOTEAM: principal_for(
+                "no-team-player",
+                {"player"},
+                memberships={_CID: ("player", None)},
+            ),
         }
     )
 

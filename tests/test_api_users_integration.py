@@ -72,7 +72,7 @@ def _alembic_config(url) -> AlembicConfig:
 def _authenticator() -> StubAuthenticator:
     return StubAuthenticator(
         {
-            _ADMIN: principal_for("admin-user", {"admin"}),
+            _ADMIN: principal_for("admin-user", {"admin"}, system_roles={"admin"}),
             _PLAYER: principal_for("player-user", {"player"}, team="Red"),
         }
     )

@@ -77,7 +77,10 @@ def _alembic_config(url) -> AlembicConfig:
 def _authenticator() -> StubAuthenticator:
     return StubAuthenticator(
         {
-            _ADMIN: principal_for("admin-user", {"admin"}),
+            # Admin is a deployment-global SYSTEM role: authorized in every
+            # competition (M10b scoped checks consult system_roles ∪ membership).
+            _ADMIN: principal_for("admin-user", {"admin"}, system_roles={"admin"}),
+            # Player has no membership: every scoped op it attempts here is a denial.
             _PLAYER: principal_for("player-user", {"player"}),
         }
     )
