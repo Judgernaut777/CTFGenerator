@@ -34,13 +34,19 @@ from ctf_generator.application.catalog import (
     CompetitionService,
     TeamService,
 )
+from ctf_generator.application.identity import IdentityService
+from ctf_generator.application.scoring.scoreboard_service import ScoreboardService
+from ctf_generator.application.submissions.query_service import SubmissionQueryService
+from ctf_generator.application.submissions.service import (
+    SubmissionProcessingService,
+)
 from ctf_generator.infrastructure.database.session import Database
 
 from .exceptions import AuthenticationError, AuthorizationError
 
 
 class Permission(StrEnum):
-    """Fine-grained permissions gating slice-a operations."""
+    """Fine-grained permissions gating the control-plane operations."""
 
     COMPETITION_READ = "competition:read"
     COMPETITION_WRITE = "competition:write"
@@ -49,16 +55,33 @@ class Permission(StrEnum):
     CHALLENGE_READ = "challenge:read"
     CHALLENGE_WRITE = "challenge:write"
     CHALLENGE_PUBLISH = "challenge:publish"
+    # slice-b contestant competition-loop surface.
+    USER_READ = "user:read"
+    USER_WRITE = "user:write"
+    SUBMISSION_CREATE = "submission:create"
+    SUBMISSION_READ = "submission:read"
+    SCOREBOARD_READ = "scoreboard:read"
+    SCOREBOARD_LAG_READ = "scoreboard:lag"
 
 
 _ALL = frozenset(Permission)
-_READ_ONLY = frozenset(
+_CATALOG_READ = frozenset(
     {Permission.COMPETITION_READ, Permission.TEAM_READ, Permission.CHALLENGE_READ}
 )
+# A contestant (player / captain): read the catalog + scoreboard, submit
+# answers, and read submissions (confined to their own team by the tenancy
+# check in :func:`submission_team_scope`, not by this coarse grant).
+_CONTESTANT = _CATALOG_READ | frozenset(
+    {
+        Permission.SCOREBOARD_READ,
+        Permission.SUBMISSION_CREATE,
+        Permission.SUBMISSION_READ,
+    }
+)
 
-# Role -> permission set. Roles are the identity domain's ``VALID_ROLES``; only
-# the roles relevant to slice-a resources carry write grants. Unknown roles
-# contribute nothing (fail closed).
+# Role -> permission set. Roles are the identity domain's ``VALID_ROLES``. Only
+# the roles relevant to a resource carry write grants; unknown roles contribute
+# nothing (fail closed).
 ROLE_PERMISSIONS: dict[str, frozenset[Permission]] = {
     "admin": _ALL,
     "organizer": frozenset(
@@ -68,6 +91,11 @@ ROLE_PERMISSIONS: dict[str, frozenset[Permission]] = {
             Permission.TEAM_READ,
             Permission.TEAM_WRITE,
             Permission.CHALLENGE_READ,
+            Permission.USER_READ,
+            Permission.USER_WRITE,
+            Permission.SUBMISSION_READ,
+            Permission.SCOREBOARD_READ,
+            Permission.SCOREBOARD_LAG_READ,
         }
     ),
     "author": frozenset(
@@ -76,14 +104,27 @@ ROLE_PERMISSIONS: dict[str, frozenset[Permission]] = {
             Permission.CHALLENGE_READ,
             Permission.CHALLENGE_WRITE,
             Permission.CHALLENGE_PUBLISH,
+            Permission.SCOREBOARD_READ,
         }
     ),
-    "captain": _READ_ONLY,
-    "judge": _READ_ONLY,
-    "observer": _READ_ONLY,
-    "support": _READ_ONLY,
-    "player": _READ_ONLY,
+    "captain": _CONTESTANT,
+    "player": _CONTESTANT,
+    "judge": _CATALOG_READ
+    | frozenset({Permission.SUBMISSION_READ, Permission.SCOREBOARD_READ}),
+    "observer": _CATALOG_READ | frozenset({Permission.SCOREBOARD_READ}),
+    "support": _CATALOG_READ
+    | frozenset({Permission.SCOREBOARD_READ, Permission.SCOREBOARD_LAG_READ}),
 }
+
+
+# Roles whose submission reads are NOT confined to a single team. Everyone else
+# (``player`` / ``captain``) may only see their own ``Principal.team``. This is
+# the coarse team-scope tenancy slice-b can enforce from what the Principal
+# already carries; full per-org/per-team resource ownership is deferred to M10
+# (see docs/api/slice-a-limitations.md).
+TENANCY_UNRESTRICTED_ROLES = frozenset(
+    {"admin", "organizer", "judge", "support", "observer", "author"}
+)
 
 
 @dataclass(frozen=True)
@@ -120,6 +161,17 @@ def principal_for(
         org=org,
         team=team,
     )
+
+
+def submission_team_scope(principal: Principal) -> str | None:
+    """The single team a principal may read submissions for, or ``None`` when the
+    principal is tenancy-unrestricted (organizer / admin / staff -- may read any
+    team). Team-scoped principals (``player`` / ``captain``) are confined to their
+    own :attr:`Principal.team`; a principal with no team carries an empty scope
+    and can see nothing until placed on a team."""
+    if principal.roles & TENANCY_UNRESTRICTED_ROLES:
+        return None
+    return principal.team
 
 
 class Authenticator(Protocol):
@@ -223,3 +275,25 @@ def get_challenge_version_service(
     database: Database = Depends(get_database),
 ) -> ChallengeVersionService:
     return ChallengeVersionService(database)
+
+
+def get_identity_service(database: Database = Depends(get_database)) -> IdentityService:
+    return IdentityService(database)
+
+
+def get_submission_processing_service(
+    database: Database = Depends(get_database),
+) -> SubmissionProcessingService:
+    return SubmissionProcessingService(database)
+
+
+def get_submission_query_service(
+    database: Database = Depends(get_database),
+) -> SubmissionQueryService:
+    return SubmissionQueryService(database)
+
+
+def get_scoreboard_service(
+    database: Database = Depends(get_database),
+) -> ScoreboardService:
+    return ScoreboardService(database)
