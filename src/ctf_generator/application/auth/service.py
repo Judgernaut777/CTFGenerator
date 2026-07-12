@@ -11,6 +11,10 @@ implements local-password login + server-side sessions:
   unknown-email path burns a comparison against a dummy hash so response timing
   never reveals whether an email exists -- a real past bug in the prototype
   dashboard).
+* ``issue_federated_session`` -- issue a session for an ALREADY externally-
+  authenticated identity (OIDC federated login, M10c) WITHOUT a password, reusing
+  the exact server-side session model. The caller must have verified the identity
+  out of band (a validated OIDC ID token); see ``application.auth.oidc``.
 * ``refresh``           -- rotate a live session (issue new, revoke old, link
   ``rotated_from``). Rotation happens ONLY here -- never on an ordinary request
   (the prototype rotated per-GET and self-DoS'd its own page polls).
@@ -183,6 +187,28 @@ class AuthService:
                     )
                 )
             return self._issue_session(session, credential.user_email, now)
+
+    def issue_federated_session(
+        self, email: str, now: datetime
+    ) -> IssuedSession:
+        """Issue a local session for an ALREADY externally-authenticated identity
+        (OIDC federated login -- M10c) WITHOUT a password.
+
+        The caller (``OidcService``) MUST have verified the identity out of band
+        by validating a signed OIDC ID token (signature via JWKS, ``iss`` / ``aud``
+        / ``exp`` / ``nonce``), so no credential is presented or checked here. This
+        reuses the EXACT server-side session model of a password login -- the same
+        session repository, opaque ``token_urlsafe`` token, sha256-at-rest storage,
+        TTL, and rotate/revoke lifecycle -- so a federated login yields an ordinary
+        local session, indistinguishable downstream from a password login. It does
+        NOT fork the session model and never touches passwords.
+
+        Fails loud (:class:`LookupError`) if the user does not exist: provisioning
+        (creating the ``users`` row) is the OIDC service's responsibility and is
+        done BEFORE this call, so a missing user here is a programming error, not a
+        silent auto-provision."""
+        with self._database.session_scope() as session:
+            return self._issue_session(session, email, now)
 
     def refresh(self, token: str | None, now: datetime) -> IssuedSession:
         """Rotate a live session: issue a new token, revoke the presented one,
