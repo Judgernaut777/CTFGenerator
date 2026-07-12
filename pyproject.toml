@@ -47,6 +47,14 @@ db = ["sqlalchemy>=2.0", "alembic>=1.13", "psycopg[binary]>=3.1"]
 # this extra is absent, exactly like the `db` integration suites. The HTTP layer
 # is a thin adapter over the application services and requires `db` at runtime.
 api = ["fastapi>=0.110", "uvicorn[standard]>=0.29", "pydantic>=2", "httpx>=0.27"]
+# M10c federated login (OIDC/OAuth2). ID-token / JWKS verification uses the
+# vetted PyJWT + cryptography stack (RS256/ES256, JWKS via jwt.PyJWKSet) -- the
+# crypto is NEVER hand-rolled. Discovery / token-exchange HTTP reuses httpx from
+# [api]. Kept as an opt-in extra so the stdlib-only unit gate stays dependency-
+# free; the OIDC tests SKIP cleanly when this extra is absent, exactly like the
+# [db]/[api] suites. OIDC is a LOGIN method that issues a normal M10a local
+# session; it adds no new bearer type.
+oidc = ["pyjwt[crypto]>=2.8"]
 # The live dashboard (dashboard_server.py) is stdlib-only (http.server/hmac/
 # hashlib/secrets/pbkdf2); this extra is the opt-in gate / future home for
 # production niceties (e.g. a real WSGI server), not a package dependency.
@@ -107,6 +115,11 @@ ignore = ["E501"] # line length is enforced by the formatter, not the linter
 "tests/test_worker_loop_integration.py" = ["S603", "S607", "S110"]
 "tests/test_container_policy_flags.py" = ["S108"] # a docker --tmpfs spec literal, not a temp file
 "tests/test_worker_dispatch.py" = ["S105", "S106"] # fake bearer-token fixtures, not real secrets
+# The OIDC flow/security tests mint ID tokens, drive PKCE, and carry fake client
+# secrets / codes / tokens as literals -- S105/S106 (hardcoded "secret"-looking
+# strings) are the point of a federated-login test double, not real secrets.
+"tests/test_oidc_flow_integration.py" = ["S105", "S106"]
+"tests/fixtures/fake_idp.py" = ["S105", "S106"]
 
 [tool.mypy]
 python_version = "3.11"

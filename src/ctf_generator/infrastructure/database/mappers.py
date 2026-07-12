@@ -13,6 +13,7 @@ from datetime import UTC, datetime
 from ctf_generator.domain.auth.models import (
     AuthCredential,
     AuthSession,
+    OidcLoginTransaction,
     is_encoded_password_hash,
 )
 from ctf_generator.domain.authoring.models import (
@@ -82,6 +83,7 @@ from .models import InstanceEvent as InstanceEventRow
 from .models import Job as JobRow
 from .models import JobTransition as JobTransitionRow
 from .models import Membership as MembershipRow
+from .models import OidcLoginTransaction as OidcLoginTransactionRow
 from .models import QuotaReservation as QuotaReservationRow
 from .models import QuotaReservationItem as QuotaReservationItemRow
 from .models import ResourceQuota as ResourceQuotaRow
@@ -920,6 +922,34 @@ def auth_session_from_orm(row: AuthSessionRow, user_email: str) -> AuthSession:
             str(row.rotated_from) if row.rotated_from is not None else None
         ),
         revoked_at=to_utc(row.revoked_at),
+    )
+
+
+def oidc_login_transaction_to_orm(
+    txn: OidcLoginTransaction,
+) -> OidcLoginTransactionRow:
+    """Insert-only; the row is consumed (deleted) by the repository, never
+    updated. The surrogate ``id`` is defaulted by the ORM."""
+    return OidcLoginTransactionRow(
+        state_hash=txn.state_hash,
+        nonce=txn.nonce,
+        code_verifier=txn.code_verifier,
+        redirect_uri=txn.redirect_uri,
+        created_at=to_utc(txn.created_at),
+        expires_at=to_utc(txn.expires_at),
+    )
+
+
+def oidc_login_transaction_from_orm(
+    row: OidcLoginTransactionRow,
+) -> OidcLoginTransaction:
+    return OidcLoginTransaction(
+        state_hash=row.state_hash,
+        nonce=row.nonce,
+        code_verifier=row.code_verifier,
+        redirect_uri=row.redirect_uri,
+        created_at=to_utc(row.created_at),
+        expires_at=to_utc(row.expires_at),
     )
 
 

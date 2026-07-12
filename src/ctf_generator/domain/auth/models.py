@@ -160,6 +160,50 @@ class SystemRoleAssignment:
 
 
 @dataclass(frozen=True)
+class OidcLoginTransaction:
+    """A short-lived, one-time-use OIDC authorization-code login transaction
+    (M10c). Created when the login redirect is built and CONSUMED (deleted) when
+    the callback returns, it binds the anti-forgery ``state`` to the ``nonce``
+    (ID-token replay defense) and the PKCE ``code_verifier`` (code-interception
+    defense) so the callback can validate them.
+
+    Only the **sha256 hex** of the state is modelled (``state_hash``, 64-hex --
+    the exact ``AuthSession.token_hash`` discipline): the raw state travels only
+    in the authorization URL and the callback query, never at rest. The
+    ``code_verifier`` and ``nonce`` are transient server-only secrets kept here
+    solely until the one callback consumes them. ``redirect_uri`` is bound in so
+    the token exchange uses the exact value the authorization used.
+    """
+
+    state_hash: str
+    nonce: str
+    code_verifier: str
+    redirect_uri: str
+    created_at: datetime
+    expires_at: datetime
+
+    def __post_init__(self) -> None:
+        _require_token_hash(self.state_hash, "state_hash")
+        _require_nonempty(self.nonce, "nonce")
+        _require_nonempty(self.code_verifier, "code_verifier")
+        # RFC 7636: a PKCE code_verifier is 43..128 chars of the unreserved set.
+        # A stricter length floor here keeps a trivially weak verifier out of the
+        # store (the generator produces a 256-bit S256 verifier).
+        if not 43 <= len(self.code_verifier) <= 128:
+            raise ValueError("code_verifier must be 43..128 characters (RFC 7636)")
+        _require_nonempty(self.redirect_uri, "redirect_uri")
+        _require_tz_aware(self.created_at, "created_at")
+        _require_tz_aware(self.expires_at, "expires_at")
+        if self.expires_at <= self.created_at:
+            raise ValueError("expires_at must be after created_at")
+
+    def is_live(self, now: datetime) -> bool:
+        """True iff the transaction has not yet expired at ``now``."""
+        _require_tz_aware(now, "now")
+        return self.expires_at > now
+
+
+@dataclass(frozen=True)
 class IssuedSession:
     """The one-time return value carrying a freshly minted plaintext bearer
     token. ``token`` is ``repr``-suppressed so logging the object never prints
