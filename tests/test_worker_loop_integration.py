@@ -31,6 +31,9 @@ try:
     from alembic.config import Config as AlembicConfig
     from sqlalchemy.engine import make_url
 
+    from ctf_generator.application.execution.worker_instance_service import (
+        WorkerInstanceService,
+    )
     from ctf_generator.application.execution.worker_job_service import WorkerJobService
     from ctf_generator.application.instances.service import InstanceLifecycleService
     from ctf_generator.application.jobs.service import JobService
@@ -191,10 +194,13 @@ class WorkerLoopIntegrationTests(unittest.TestCase):
         lifecycle = InstanceLifecycleService(db, scheduling=scheduling, jobs=jobs)
         enrollment = WorkerEnrollmentService(db)
         worker_jobs = WorkerJobService(db, enrollment)
+        worker_instances = WorkerInstanceService(lifecycle, enrollment)
         issued = enrollment.approve_worker("w1", _NOW)  # trusted already; reissues cred
         token = f"{CREDENTIAL_TOKEN_PREFIX}.{issued.credential_id}.{issued.secret}"
+        arch = self._backend.probe().architecture  # arm64 host -> aarch64, never hardcoded
         client = LocalControlPlaneClient(
-            jobs=worker_jobs, lifecycle=lifecycle, scheduling=scheduling, token=token
+            jobs=worker_jobs, instances=worker_instances, lifecycle=lifecycle,
+            scheduling=scheduling, token=token, architecture=arch,
         )
         worker = Worker(
             WorkerConfig(worker_name="w1", lease_seconds=120),

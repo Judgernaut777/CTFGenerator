@@ -36,16 +36,17 @@ from typing import Protocol
 from ctf_generator.domain.execution.runtime import (
     ContainerPolicy,
     ContainerRequest,
+    RuntimeBackend,
+    RuntimeLaunch,
 )
 from ctf_generator.domain.instances.models import (
     HealthObservation,
     Instance,
+    InstanceEndpoint,
     RuntimeResource,
 )
 from ctf_generator.domain.work.models import JobLease
 from ctf_generator.infrastructure.runtime.docker_backend import (
-    DockerRuntimeBackend,
-    LaunchResult,
     UnsupportedRuntimeError,
 )
 
@@ -127,10 +128,16 @@ class WorkerControlPlaneClient(Protocol):
         (the slice-2 launch contract) and return the re-placed instance."""
         ...
 
-    def report_health(self, observation: HealthObservation) -> None:
+    def report_health(self, observation: HealthObservation, now: datetime) -> None:
+        """Report a health observation (authenticated + ownership-checked)."""
         ...
 
-    def report_runtime_resource(self, resource: RuntimeResource) -> None:
+    def report_runtime_resource(self, resource: RuntimeResource, now: datetime) -> None:
+        """Record a runtime resource (authenticated + ownership-checked)."""
+        ...
+
+    def report_endpoint(self, endpoint: InstanceEndpoint, now: datetime) -> None:
+        """Record a published endpoint (authenticated + ownership-checked)."""
         ...
 
     def transition_instance(
@@ -152,18 +159,22 @@ class WorkerConfig:
 @dataclass
 class _DispatchOutcome:
     result: dict | None = None
-    resources: tuple[RuntimeResource, ...] = ()
 
 
 class Worker:
     """The run loop: authenticate -> claim -> dispatch to the runtime -> report
-    facts + complete/fail -> repeat, with SIGTERM drain and restart recovery."""
+    facts + complete/fail -> repeat, with SIGTERM drain and restart recovery.
+
+    ``backend`` is typed against the domain :class:`RuntimeBackend` Protocol, not
+    the concrete docker adapter -- the loop never reaches into docker-CLI verbs
+    (it uses ``find_container`` / ``reap_managed``), so a different runtime
+    implementation is a drop-in."""
 
     def __init__(
         self,
         config: WorkerConfig,
         client: WorkerControlPlaneClient,
-        backend: DockerRuntimeBackend,
+        backend: RuntimeBackend,
         *,
         policy: ContainerPolicy = DEFAULT_POLICY,
         command: Sequence[str] | None = None,
@@ -189,19 +200,17 @@ class Worker:
         signal.signal(signal.SIGINT, self.request_drain)
 
     def recover_abandoned(self) -> int:
-        """At restart, force-remove any leftover ctfgen-managed containers this
-        worker owns from a prior crash (idempotent). Returns the count reaped."""
-        reaped = 0
+        """At restart, force-remove any leftover managed containers THIS worker
+        owns from a prior crash (idempotent). Scoped to this worker's label via
+        the backend's ``reap_managed`` so a multi-worker host never kills a peer
+        worker's live containers. Returns the count reaped."""
         try:
-            ids = self._backend._run(  # noqa: SLF001 - worker owns its backend
-                ["ps", "-aq", "--filter", "label=ctfgen.managed=true"], check=False
-            ).stdout.split()
-            for cid in ids:
-                self._backend._run(["rm", "--force", "--volumes", cid], check=False)  # noqa: SLF001
-                reaped += 1
-        except Exception:  # pragma: no cover - best-effort cleanup
+            # No arg -> the backend reaps exactly the label IT stamps
+            # (ctfgen.worker=<this backend's worker name>), so labels always match.
+            return self._backend.reap_managed()
+        except Exception:  # pragma: no cover - best-effort cleanup  # noqa: BLE001
             _LOG.warning("abandoned-container recovery failed", exc_info=True)
-        return reaped
+            return 0
 
     # -- run loop --------------------------------------------------------------
 
@@ -240,23 +249,34 @@ class Worker:
         try:
             outcome = self._dispatch(job.job_type, dict(job.payload), now)
         except UnsupportedRuntimeError as exc:
-            # A hardening cannot be applied on this host: NON-retryable (a retry on
-            # the same host fails identically). Fail loud, never launch degraded.
+            # A hardening (seccomp / the isolated-network host-block) cannot be
+            # applied on this host: NON-retryable (a retry on the same host fails
+            # identically). Fail loud, never launch degraded. Classified
+            # 'infrastructure' -- the queue's error vocabulary; the specific cause
+            # travels in error_detail.
             _LOG.error("job %s refused: unsupported runtime", job.job_id)
             self._client.fail(
-                token, job.job_id, lease.lease_token, "unsupported_runtime",
-                str(exc), False, self._clock(),
+                token, job.job_id, lease.lease_token, "infrastructure",
+                f"unsupported_runtime: {exc}", False, self._clock(),
             )
             return
         except Exception as exc:  # noqa: BLE001 - report any failure as retryable
+            # Any other dispatch failure is retryable and classified 'internal'
+            # (a valid queue error class -- the exception type is in error_detail;
+            # passing type(exc).__name__ as the class would be rejected).
             _LOG.exception("job %s failed", job.job_id)
             self._client.fail(
-                token, job.job_id, lease.lease_token, type(exc).__name__,
-                str(exc), True, self._clock(),
+                token, job.job_id, lease.lease_token, "internal",
+                f"{type(exc).__name__}: {exc}", True, self._clock(),
             )
             return
-        for resource in outcome.resources:
-            self._client.report_runtime_resource(resource)
+        # Renew the lease right before completing so a slow launch cannot lose its
+        # lease mid-flight and have the job double-executed by a reaper. (Runtime
+        # facts/resources are reported inside the dispatch, immediately after a
+        # successful backend.launch, not batched here.)
+        self._client.heartbeat(
+            token, job.job_id, lease.lease_token, self._config.lease_seconds, self._clock()
+        )
         self._client.complete(
             token, job.job_id, lease.lease_token, outcome.result, self._clock()
         )
@@ -304,19 +324,39 @@ class Worker:
             policy=self._policy,
         )
 
-    def _record_launch(
-        self, instance: Instance, launched: LaunchResult, now: datetime
-    ) -> tuple[RuntimeResource, ...]:
-        resources = tuple(
-            RuntimeResource(
-                instance_id=instance.instance_id,
-                kind=ref.kind,
-                external_ref=ref.external_ref,
-                worker=self._config.worker_name,
-                generation=instance.generation,
+    def _report_launched_facts(
+        self, instance: Instance, launched: RuntimeLaunch, now: datetime
+    ) -> None:
+        """Report the container/network resources, endpoints, and health for a
+        just-launched instance IMMEDIATELY after ``backend.launch`` -- before any
+        lifecycle transition -- so a live container/network can never escape
+        tracking. Raises on the first report failure (the caller compensates)."""
+        for ref in launched.runtime_resources:
+            self._client.report_runtime_resource(
+                RuntimeResource(
+                    instance_id=instance.instance_id,
+                    kind=ref.kind,
+                    external_ref=ref.external_ref,
+                    worker=self._config.worker_name,
+                    generation=instance.generation,
+                ),
+                now,
             )
-            for ref in launched.runtime_resources
-        )
+        for ep in launched.endpoints:
+            self._client.report_endpoint(
+                InstanceEndpoint(
+                    instance_id=instance.instance_id,
+                    name=f"port-{ep.container_port}",
+                    host=ep.host,
+                    port=ep.host_port,
+                    protocol="tcp",
+                    url=f"tcp://{ep.host}:{ep.host_port}",
+                    # Isolated instances are reachable only inside their network;
+                    # contestant ingress is via the M9 reverse proxy, not here.
+                    internal=True,
+                ),
+                now,
+            )
         healthy = launched.observation.phase == "running"
         self._client.report_health(
             HealthObservation(
@@ -326,9 +366,9 @@ class Worker:
                 worker=self._config.worker_name,
                 generation=instance.generation,
                 observed_at=now,
-            )
+            ),
+            now,
         )
-        return resources
 
     def _do_launch(self, instance_id: str, now: datetime) -> _DispatchOutcome:
         instance = self._require_instance(instance_id)
@@ -336,23 +376,39 @@ class Worker:
         # re-reserved through the control plane before we start a container.
         if instance.assigned_worker is None:
             instance = self._client.replace_instance(instance_id, now)
+        # After (re)placement the instance MUST be assigned to THIS worker before
+        # we start a container -- else a report/transition would be ownership-
+        # rejected and we would leak a live container. Fail retryable if not.
+        if instance.assigned_worker != self._config.worker_name:
+            raise RuntimeError(
+                f"instance {instance_id!r} is assigned "
+                f"{instance.assigned_worker!r}, not this worker "
+                f"{self._config.worker_name!r}; refusing to launch"
+            )
         request = self._build_request(instance)
         launched = self._backend.launch(request, command=self._command)
-        resources = self._record_launch(instance, launched, now)
-        # Drive the observed lifecycle forward (worker observed the container up).
-        self._client.transition_instance(
-            instance_id, "starting", reason="container started", now=now
-        )
-        if launched.observation.phase == "running":
+        container_id = launched.observation.container_id
+        try:
+            # Persist the runtime resources + endpoints + health IMMEDIATELY, then
+            # drive the observed lifecycle. If ANY post-launch step fails, remove
+            # the container so no orphaned live container escapes tracking.
+            self._report_launched_facts(instance, launched, now)
             self._client.transition_instance(
-                instance_id, "healthy", reason="health check passed", now=now
+                instance_id, "starting", reason="container started", now=now
             )
+            if launched.observation.phase == "running":
+                self._client.transition_instance(
+                    instance_id, "healthy", reason="health check passed", now=now
+                )
+        except Exception:
+            _LOG.error("post-launch step failed for %s; compensating (remove)", instance_id)
+            self._backend.remove(instance_id, container_id)
+            raise
         return _DispatchOutcome(
             result={
-                "container_id": launched.observation.container_id,
+                "container_id": container_id,
                 "phase": launched.observation.phase,
             },
-            resources=resources,
         )
 
     def _do_reset(self, instance_id: str, now: datetime) -> _DispatchOutcome:
@@ -374,7 +430,8 @@ class Worker:
                 worker=self._config.worker_name,
                 generation=instance.generation,
                 observed_at=now,
-            )
+            ),
+            now,
         )
         return _DispatchOutcome(result={"phase": obs.phase})
 
@@ -392,7 +449,8 @@ class Worker:
                 worker=self._config.worker_name,
                 generation=instance.generation,
                 observed_at=now,
-            )
+            ),
+            now,
         )
         self._client.transition_instance(
             instance_id, "stopping", reason="stop requested", now=now
@@ -420,7 +478,8 @@ class Worker:
                 worker=self._config.worker_name,
                 generation=instance.generation,
                 observed_at=now,
-            )
+            ),
+            now,
         )
         return _DispatchOutcome(result={"healthy": healthy})
 
@@ -433,16 +492,9 @@ class Worker:
         return _DispatchOutcome(result={"log_lines": len(logs.splitlines())})
 
     def _current_container(self, instance_id: str) -> str | None:
-        out = self._backend._run(  # noqa: SLF001 - worker owns its backend
-            [
-                "ps",
-                "-aq",
-                "--filter",
-                f"label=ctfgen.instance={instance_id}",
-            ],
-            check=False,
-        ).stdout.split()
-        return out[0] if out else None
+        # Via the Protocol -- keeps docker-CLI verbs inside the adapter and scopes
+        # the lookup to THIS worker's containers.
+        return self._backend.find_container(instance_id)
 
 
 def main(argv: Sequence[str] | None = None) -> int:  # pragma: no cover - entrypoint

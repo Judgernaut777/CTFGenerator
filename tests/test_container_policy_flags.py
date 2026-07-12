@@ -50,7 +50,12 @@ class FlagTranslationTests(unittest.TestCase):
         self.assertIn("no-new-privileges", flags)
         # read-only rootfs + size-capped, non-exec tmpfs
         self.assertIn("--read-only", flags)
-        self.assertIn("/tmp:rw,size=32m,mode=1770,noexec,nosuid,nodev", flags)
+        # The tmpfs is OWNED by the non-root uid/gid so a uid-65534 process can
+        # write the container's sole writable path under --read-only.
+        self.assertIn(
+            "/tmp:rw,size=32m,mode=1770,uid=65534,gid=65534,noexec,nosuid,nodev",
+            flags,
+        )
         # resource envelope: memory + swap disabled (equal) + cpus + pids
         self.assertIn("128m", flags)
         self.assertEqual(flags.count("128m"), 2)  # --memory and --memory-swap

@@ -74,11 +74,13 @@ class _FakeBackend:
     def collect_logs(self, instance_id, container_id, *, tail=2000):
         return "line1\nline2\n"
 
-    def _run(self, args, *, check=True, timeout=None):
-        # _current_container / recover_abandoned probe by label.
-        if args[:2] == ["ps", "-aq"]:
-            return _FakeProc(stdout=self.container_id + "\n")
-        return _FakeProc()
+    def find_container(self, instance_id):
+        self.calls.append(("find_container", instance_id))
+        return self.container_id
+
+    def reap_managed(self, worker=None):
+        self.calls.append(("reap_managed", worker))
+        return 0
 
 
 @dataclass
@@ -87,6 +89,7 @@ class _FakeClient:
     token: str = "ctfw1.cred.secret"
     health: list = field(default_factory=list)
     resources: list = field(default_factory=list)
+    endpoints: list = field(default_factory=list)
     transitions: list = field(default_factory=list)
     completed: list = field(default_factory=list)
     failed: list = field(default_factory=list)
@@ -129,11 +132,14 @@ class _FakeClient:
         )
         return self.instance
 
-    def report_health(self, observation):
+    def report_health(self, observation, now):
         self.health.append(observation)
 
-    def report_runtime_resource(self, resource):
+    def report_runtime_resource(self, resource, now):
         self.resources.append(resource)
+
+    def report_endpoint(self, endpoint, now):
+        self.endpoints.append(endpoint)
 
     def transition_instance(self, instance_id, to_state, *, reason, now):
         self.transitions.append((to_state, reason))
@@ -215,7 +221,9 @@ class LaunchDispatchTests(unittest.TestCase):
         _worker(client, backend).run_once()
         self.assertEqual(len(client.failed), 1)
         job_id, error_class, retryable = client.failed[0]
-        self.assertEqual(error_class, "unsupported_runtime")
+        # 'infrastructure' is the queue's error-class vocabulary for a host that
+        # cannot satisfy the isolation policy; the specific cause is in the detail.
+        self.assertEqual(error_class, "infrastructure")
         self.assertFalse(retryable)  # never retry a host that can't isolate
         self.assertEqual(client.completed, [])
 
@@ -249,7 +257,9 @@ class OtherDispatchTests(unittest.TestCase):
         client.claim_lease = _lease("launch_instance", {"generation": 1})
         _worker(client, _FakeBackend()).run_once()
         self.assertEqual(len(client.failed), 1)
-        self.assertEqual(client.failed[0][1], "ValueError")
+        # Generic dispatch failures map to the queue's 'internal' class (the
+        # exception type is preserved in error_detail, not the error_class).
+        self.assertEqual(client.failed[0][1], "internal")
 
     def test_draining_worker_stops_claiming(self) -> None:
         client = _FakeClient(instance=_instance())
