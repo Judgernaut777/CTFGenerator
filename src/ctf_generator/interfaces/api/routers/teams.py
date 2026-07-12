@@ -8,7 +8,14 @@ from __future__ import annotations
 from fastapi import APIRouter, Depends, Query, Request
 
 from ..concurrency import compute_etag
-from ..deps import Permission, Principal, get_team_service, require_permission
+from ..deps import (
+    Permission,
+    Principal,
+    assert_competition_permission,
+    get_principal,
+    get_team_service,
+    require_competition_permission,
+)
 from ..envelopes import (
     TEAM_LIST_SCHEMA,
     TEAM_SCHEMA,
@@ -42,9 +49,15 @@ _CREATE_SCOPE = "teams:create"
 def create_team(
     request: Request,
     body: TeamCreateRequest,
-    principal: Principal = Depends(require_permission(Permission.TEAM_WRITE)),
+    # The owning competition is in the BODY, not the path, so authorize it here:
+    # team:write is scoped to that competition (an organizer of A cannot seed teams
+    # in B).
+    principal: Principal = Depends(get_principal),
     service=Depends(get_team_service),
 ):
+    assert_competition_permission(
+        principal, body.competition_id, Permission.TEAM_WRITE
+    )
     body_json = body.model_dump(mode="json")
     scope = f"{principal.subject}:{_CREATE_SCOPE}"
     replayed = replay(request, scope, body_json)
@@ -77,9 +90,11 @@ def list_teams(
     ),
     limit: int | None = Query(default=None, ge=1),
     cursor: str | None = Query(default=None),
-    principal: Principal = Depends(require_permission(Permission.TEAM_READ)),
+    # The competition is a required QUERY param, so scope team:read to it here.
+    principal: Principal = Depends(get_principal),
     service=Depends(get_team_service),
 ):
+    assert_competition_permission(principal, competition_id, Permission.TEAM_READ)
     teams = sorted(
         service.list_for_competition(competition_id), key=lambda t: t.name
     )
@@ -105,7 +120,9 @@ def list_teams(
 def get_team(
     competition_id: str,
     name: str,
-    principal: Principal = Depends(require_permission(Permission.TEAM_READ)),
+    principal: Principal = Depends(
+        require_competition_permission(Permission.TEAM_READ)
+    ),
     service=Depends(get_team_service),
 ):
     team = service.get(competition_id, name)

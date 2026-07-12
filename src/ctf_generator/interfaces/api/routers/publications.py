@@ -16,7 +16,7 @@ from ..deps import (
     Permission,
     Principal,
     get_publication_service,
-    require_permission,
+    require_competition_permission,
 )
 from ..envelopes import (
     PUBLICATION_LIST_SCHEMA,
@@ -54,7 +54,9 @@ def attach_publication(
     request: Request,
     competition_id: str,
     body: PublicationCreateRequest,
-    principal: Principal = Depends(require_permission(Permission.PUBLICATION_WRITE)),
+    principal: Principal = Depends(
+        require_competition_permission(Permission.PUBLICATION_WRITE)
+    ),
     service=Depends(get_publication_service),
 ):
     body_json = body.model_dump(mode="json")
@@ -89,7 +91,9 @@ def list_publications(
     competition_id: str,
     limit: int | None = Query(default=None, ge=1),
     cursor: str | None = Query(default=None),
-    principal: Principal = Depends(require_permission(Permission.PUBLICATION_READ)),
+    principal: Principal = Depends(
+        require_competition_permission(Permission.PUBLICATION_READ)
+    ),
     service=Depends(get_publication_service),
 ):
     publications = sorted(
@@ -115,7 +119,9 @@ def detach_publication(
     competition_id: str,
     definition_slug: str,
     version_no: int,
-    principal: Principal = Depends(require_permission(Permission.PUBLICATION_WRITE)),
+    principal: Principal = Depends(
+        require_competition_permission(Permission.PUBLICATION_WRITE)
+    ),
     service=Depends(get_publication_service),
 ):
     service.detach(competition_id, definition_slug, version_no)
