@@ -101,9 +101,45 @@ class PublicationWriteTests(unittest.TestCase):
                 data={"csrf_token": token, "publication_target": "sqli:99"},
                 follow_redirects=False,
             )
-            self.assertEqual(resp.status_code, 409, resp.text)
+            self.assertEqual(resp.status_code, 404, resp.text)
             self.assertIn("was not found", resp.text)
             self.assertEqual(_pub_slugs(db, ws.COMP_A), [])
+
+    def test_out_of_range_version_is_field_error_not_500(self) -> None:
+        # A client-tampered version_no above INT32 must be a field error, never a
+        # DB DataError 500 (the "never a 500" invariant).
+        with ws.web_client() as (client, db, _svc):
+            ws.seed_published_version(db, "sqli", "SQL Injection")
+            ws.login(client, ws.ALICE)
+            _r, token = _csrf(client, f"/app/competitions/{ws.COMP_A}/publications")
+            resp = client.post(
+                f"/app/competitions/{ws.COMP_A}/publications",
+                data={
+                    "csrf_token": token,
+                    "publication_target": "sqli:999999999999999999999999",
+                },
+                follow_redirects=False,
+            )
+            self.assertEqual(resp.status_code, 400, resp.text)
+            self.assertIn("Choose a challenge version.", resp.text)
+            self.assertEqual(_pub_slugs(db, ws.COMP_A), [])
+
+    def test_detach_out_of_range_version_is_not_500(self) -> None:
+        with ws.web_client() as (client, db, _svc):
+            ws.seed_published_version(db, "sqli", "SQL Injection")
+            ws.login(client, ws.ALICE)
+            _r, token = _csrf(client, f"/app/competitions/{ws.COMP_A}/publications")
+            resp = client.post(
+                f"/app/competitions/{ws.COMP_A}/publications/detach",
+                data={
+                    "csrf_token": token,
+                    "definition_slug": "sqli",
+                    "version_no": "999999999999999999999999",
+                },
+                follow_redirects=False,
+            )
+            self.assertNotEqual(resp.status_code, 500, resp.text)
+            self.assertEqual(resp.status_code, 404, resp.text)
 
     def test_malformed_target_is_field_error(self) -> None:
         with ws.web_client() as (client, db, _svc):
