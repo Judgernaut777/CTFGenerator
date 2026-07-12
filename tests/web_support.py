@@ -230,6 +230,47 @@ def place_on_team(
             repo.update(membership)
 
 
+def record_submission(
+    db: Database,
+    cid: str,
+    team_name: str,
+    slug: str,
+    version_no: int,
+    answer: str,
+    *,
+    when: datetime | None = None,
+):
+    """Record ONE submission through the real transactional processing service --
+    used to seed another team's attempt/solve so a tenancy test can assert it never
+    leaks into the caller's own-team history. Returns the ``SubmissionOutcome``."""
+    from ctf_generator.application.submissions.service import (
+        SubmissionProcessingService,
+    )
+    from ctf_generator.domain.ledger.processing import SubmissionRequest
+
+    return SubmissionProcessingService(db).process_submission(
+        SubmissionRequest(
+            submission_id=str(uuid.uuid4()),
+            competition_id=cid,
+            team_name=team_name,
+            definition_slug=slug,
+            version_no=version_no,
+            submitted_at=when or NOW,
+            candidate_flag=answer,
+        )
+    )
+
+
+def team_submissions(db: Database, cid: str, team_name: str):
+    """The ledger's recorded submissions for one team (read-only, via the query
+    service) -- the authoritative fact a test asserts against."""
+    from ctf_generator.application.submissions.query_service import (
+        SubmissionQueryService,
+    )
+
+    return SubmissionQueryService(db).list_for_team(cid, team_name)
+
+
 def add_competition(db: Database, cid: str, name: str) -> None:
     """Add a competition with an arbitrary (possibly hostile) name, e.g. for XSS."""
     CompetitionService(db).create(competition_config(cid, name, with_scoring=False))
