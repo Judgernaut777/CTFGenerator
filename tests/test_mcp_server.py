@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 import tempfile
 import unittest
 from pathlib import Path
@@ -169,6 +170,194 @@ class ToolSurfaceTests(unittest.TestCase):
         names = {tool.__name__ for tool in mcp_server.TOOLS}
         for forbidden in ("validate_runtime", "cross_replay", "replay", "validate_siblings"):
             self.assertNotIn(forbidden, names)
+
+
+# The MCP security boundary (M13c): a model driving the MCP server must NEVER be
+# able to reach an EFFECTFUL surface (Docker/subprocess/challenge-execution) or the
+# platform DATA PLANE (the application services / DB / API). The tool-name check
+# above guards the exposed surface; these guard the IMPORT surface -- so a future
+# edit that pulls an effectful/platform module into mcp_server (even transitively)
+# fails the gate, not just one that adds a tool by name.
+
+# Effectful challenge-execution + standalone-engine modules, the platform data
+# plane, and heavy effectful deps. `subprocess` is the shell-exec primitive the
+# pure generator never needs.
+_FORBIDDEN_PREFIXES = (
+    "subprocess",
+    "sqlalchemy",
+    "fastapi",
+    "httpx",
+    "docker",
+    "psycopg",
+    "alembic",
+    "ctf_generator.scenario_runtime",
+    "ctf_generator.agent_eval",
+    "ctf_generator.dashboard_server",
+    "ctf_generator.competition_service",
+    # The Docker-driving validators + effectful writers/UI, named INDEPENDENTLY
+    # (not merely caught via their module-level ``import subprocess``).
+    "ctf_generator.runtime_validator",
+    "ctf_generator.replay_validator",
+    "ctf_generator.sibling_validator",
+    "ctf_generator.report_writer",
+    "ctf_generator.dashboard_ui",
+    "ctf_generator.application",
+    "ctf_generator.infrastructure",
+    "ctf_generator.interfaces.api",
+    "ctf_generator.interfaces.web",
+    "ctf_generator.interfaces.cli",
+    "ctf_generator.workers",
+)
+
+# Shell/exec primitives reachable WITHOUT importing subprocess/docker: os.system,
+# os.popen, os.exec*/spawn*/posix_spawn*. The import firewall cannot see these
+# (os is legitimately imported for os.environ), so a dedicated source guard forbids
+# them in mcp_server.py.
+_EXEC_OS_ATTRS = frozenset(
+    {"system", "popen"}
+    | {f"exec{s}" for s in ("l", "le", "lp", "v", "ve", "vp", "vpe")}
+    | {f"spawn{s}" for s in ("l", "le", "lp", "lpe", "v", "ve", "vp", "vpe")}
+    | {"posix_spawn", "posix_spawnp"}
+)
+
+
+def _forbidden(module: str) -> bool:
+    return any(module == p or module.startswith(p + ".") for p in _FORBIDDEN_PREFIXES)
+
+
+class MCPImportFirewallTests(unittest.TestCase):
+    def test_source_imports_no_effectful_or_platform_module(self) -> None:
+        # Static AST scan of mcp_server.py: no DIRECT import (absolute or the
+        # ``from . import <submodule>`` form) may name a forbidden module. Fast,
+        # exact, and points at the offending line if it ever regresses.
+        import ast
+        from pathlib import Path
+
+        src = Path(mcp_server.__file__).read_text(encoding="utf-8")
+        tree = ast.parse(src)
+        imported: list[str] = []
+        for node in ast.walk(tree):
+            if isinstance(node, ast.Import):
+                imported.extend(alias.name for alias in node.names)
+            elif isinstance(node, ast.ImportFrom):
+                if node.level and (node.module is None or node.level == 1):
+                    # ``from . import families, foo`` -> ctf_generator.<name>
+                    base = "ctf_generator"
+                    mod = f"{base}.{node.module}" if node.module else base
+                    imported.append(mod)
+                    imported.extend(f"{mod}.{a.name}" for a in node.names)
+                elif node.module:
+                    imported.append(node.module)
+                    # ``from ctf_generator import application`` -> record the
+                    # subpackage too, so the AST test itself names the offender
+                    # (not only the sys.modules backstop below).
+                    imported.extend(f"{node.module}.{a.name}" for a in node.names)
+        offenders = sorted(m for m in imported if _forbidden(m))
+        self.assertEqual(offenders, [], f"mcp_server imports forbidden modules: {offenders}")
+
+    def test_source_calls_no_shell_exec_primitive(self) -> None:
+        # os.system / os.popen / os.exec*/spawn*/posix_spawn* reach a shell WITHOUT
+        # importing subprocess or docker, so the import firewall alone cannot catch
+        # them. Forbid the call form in mcp_server.py's source (AST walks into tool
+        # bodies too, so a lazy shell-out inside a tool is caught).
+        import ast
+        from pathlib import Path
+
+        tree = ast.parse(Path(mcp_server.__file__).read_text(encoding="utf-8"))
+        offenders: list[str] = []
+        for node in ast.walk(tree):
+            if not isinstance(node, ast.Call):
+                continue
+            func = node.func
+            if (
+                isinstance(func, ast.Attribute)
+                and isinstance(func.value, ast.Name)
+                and func.value.id == "os"
+                and func.attr in _EXEC_OS_ATTRS
+            ):
+                offenders.append(f"os.{func.attr} at line {node.lineno}")
+            elif isinstance(func, ast.Name) and func.id in {"system", "popen"}:
+                offenders.append(f"{func.id}() at line {node.lineno}")
+        self.assertEqual(offenders, [], f"mcp_server calls a shell-exec primitive: {offenders}")
+
+    def test_fresh_import_pulls_no_forbidden_module(self) -> None:
+        # The strong guarantee: importing mcp_server in a FRESH interpreter must
+        # pull NONE of the forbidden modules into sys.modules -- catching a
+        # TRANSITIVE reach (a pure module that itself imports an effectful/platform
+        # one), which the static scan cannot see. Run in a subprocess so an
+        # already-imported module in THIS test process cannot mask a real leak.
+        import subprocess
+        import sys
+        from pathlib import Path
+
+        forbidden = ",".join(repr(p) for p in _FORBIDDEN_PREFIXES)
+        code = (
+            "import sys\n"
+            "from ctf_generator import mcp_server\n"
+            f"F = ({forbidden},)\n"
+            "hits = sorted(m for m in sys.modules "
+            "if any(m == p or m.startswith(p + '.') for p in F))\n"
+            "sys.stderr.write('HITS=' + ','.join(hits) + '\\n')\n"
+            "sys.exit(1 if hits else 0)\n"
+        )
+        # mcp_server.__file__ = <repo>/src/ctf_generator/mcp_server.py -> parents[1] is src/.
+        src_dir = str(Path(mcp_server.__file__).resolve().parents[1])
+        proc = subprocess.run(
+            [sys.executable, "-c", code],
+            env={**os.environ, "PYTHONPATH": src_dir},
+            capture_output=True,
+            text=True,
+        )
+        self.assertEqual(
+            proc.returncode, 0,
+            f"mcp_server transitively imports a forbidden module: {proc.stderr}",
+        )
+
+    def test_calling_tools_pulls_no_forbidden_module(self) -> None:
+        # The import checks are load-time; a tool body could LAZILY import an
+        # effectful/data-plane module (or one reached via importlib) that only
+        # fires when the tool is CALLED. Drive every pure tool in a FRESH
+        # interpreter, then re-check sys.modules -- closing the call-time gap.
+        import subprocess
+        import sys
+        from pathlib import Path
+
+        forbidden = ",".join(repr(p) for p in _FORBIDDEN_PREFIXES)
+        code = (
+            "import os, sys, tempfile\n"
+            "with tempfile.TemporaryDirectory() as ws:\n"
+            "    os.environ['CTFGEN_MCP_WORKSPACE'] = ws\n"
+            "    from ctf_generator import mcp_server\n"
+            "    mcp_server.set_workspace_root(ws)\n"
+            "    fams = mcp_server.list_families()['families']\n"
+            "    fam = fams[0] if fams else 'web_business_logic_tenant_export'\n"
+            "    mcp_server.spec_schema()\n"
+            "    mcp_server.family_info(fam)\n"
+            "    mcp_server.list_cves()\n"
+            "    r = mcp_server.build_spec(family=fam, difficulty='medium', seed='probe-seed')\n"
+            "    if isinstance(r, dict) and r.get('ok'):\n"
+            "        mcp_server.validate_spec(r['spec'])\n"
+            "        c = mcp_server.create_from_spec(r['spec'], 'chal')\n"
+            "        d = c.get('output_dir') if isinstance(c, dict) else None\n"
+            "        if d:\n"
+            "            mcp_server.validate_challenge(d)\n"
+            "            mcp_server.score_challenge(d)\n"
+            f"    F = ({forbidden},)\n"
+            "    hits = sorted(m for m in sys.modules if any(m == p or m.startswith(p + '.') for p in F))\n"
+            "    sys.stderr.write('HITS=' + ','.join(hits) + '\\n')\n"
+            "    sys.exit(1 if hits else 0)\n"
+        )
+        src_dir = str(Path(mcp_server.__file__).resolve().parents[1])
+        proc = subprocess.run(
+            [sys.executable, "-c", code],
+            env={**os.environ, "PYTHONPATH": src_dir},
+            capture_output=True,
+            text=True,
+        )
+        self.assertEqual(
+            proc.returncode, 0,
+            f"calling MCP tools pulled a forbidden module (or errored): {proc.stderr}",
+        )
 
 
 class ModeAndCveRefsTests(unittest.TestCase):

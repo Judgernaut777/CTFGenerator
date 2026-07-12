@@ -133,6 +133,9 @@ ignore = ["E501"] # line length is enforced by the formatter, not the linter
 "tests/test_build_isolation_integration.py" = ["S603", "S607"]
 "tests/test_worker_loop_integration.py" = ["S603", "S607", "S110"]
 "tests/test_container_policy_flags.py" = ["S108"] # a docker --tmpfs spec literal, not a temp file
+# sandbox-escape PoC path literals (never written -- assert the MCP sandbox REJECTS
+# them) + the import-firewall subprocess running a fixed snippet via sys.executable.
+"tests/test_mcp_server.py" = ["S108", "S603"]
 "tests/test_worker_dispatch.py" = ["S105", "S106"] # fake bearer-token fixtures, not real secrets
 # The OIDC flow/security tests mint ID tokens, drive PKCE, and carry fake client
 # secrets / codes / tokens as literals -- S105/S106 (hardcoded "secret"-looking
