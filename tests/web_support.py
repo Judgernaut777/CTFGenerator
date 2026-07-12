@@ -31,13 +31,18 @@ from ctf_generator.application.catalog import (
     ChallengeDefinitionService,
     ChallengeVersionService,
     CompetitionService,
+    TeamService,
 )
-from ctf_generator.domain.authoring.models import ChallengeDefinition
+from ctf_generator.application.catalog.publication_service import PublicationService
+from ctf_generator.domain.authoring.models import (
+    ChallengeDefinition,
+    ChallengePublication,
+)
 from ctf_generator.domain.challenges.models import (
     ChallengeScoringConfig,
     CompetitionConfig,
 )
-from ctf_generator.domain.identity.models import Membership, User
+from ctf_generator.domain.identity.models import Membership, Team, User
 from ctf_generator.infrastructure.database.config import DatabaseConfig
 from ctf_generator.infrastructure.database.membership_repository import (
     SqlAlchemyMembershipRepository,
@@ -162,10 +167,18 @@ def _seed(db: Database, service: AuthService) -> None:
 
 
 def seed_published_version(
-    db: Database, slug: str, title: str, *, family: str = "web"
+    db: Database,
+    slug: str,
+    title: str,
+    *,
+    family: str = "web",
+    spec: dict | None = None,
 ) -> tuple[str, int]:
     """Create a challenge definition + one draft version and publish it, returning
-    ``(slug, version_no)`` -- the pair an organizer can attach to a competition."""
+    ``(slug, version_no)`` -- the pair an organizer can attach to a competition.
+
+    ``spec`` overrides the stored (private) challenge spec payload -- e.g. to plant
+    a flag / private scenario field a leakage test asserts never reaches a page."""
     definitions = ChallengeDefinitionService(db)
     definitions.create(ChallengeDefinition(family=family, slug=slug, title=title))
     versions = ChallengeVersionService(db)
@@ -173,10 +186,48 @@ def seed_published_version(
         definition_slug=slug,
         seed="s",
         family_version="1.0.0",
-        spec={"title": title},
+        spec=spec if spec is not None else {"title": title},
     )
     versions.publish(slug, version.version_no, NOW)
     return slug, version.version_no
+
+
+def attach_publication(db: Database, cid: str, slug: str, version_no: int) -> None:
+    """Attach a published ``(slug, version_no)`` to a competition's catalog."""
+    PublicationService(db).attach(
+        ChallengePublication(
+            competition_id=cid, definition_slug=slug, version_no=version_no
+        )
+    )
+
+
+def add_team(db: Database, cid: str, name: str) -> None:
+    """Create a team in a competition."""
+    TeamService(db).create(Team(competition_id=cid, name=name))
+
+
+def add_user(db: Database, email: str, name: str) -> None:
+    """Register a fresh user profile (no auth credential -- for a roster-only member
+    that never signs in)."""
+    with db.session_scope() as s:
+        SqlAlchemyUserRepository(s).add(User(email=email, display_name=name))
+
+
+def place_on_team(
+    db: Database, email: str, cid: str, team_name: str | None, *, role: str = "player"
+) -> None:
+    """Place (or re-place) a user's membership on a team in a competition, adding
+    the membership if absent and updating it (team/role) if present. The team must
+    already exist (create it with :func:`add_team`)."""
+    with db.session_scope() as s:
+        repo = SqlAlchemyMembershipRepository(s)
+        membership = Membership(
+            user_email=email, competition_id=cid, role=role, team_name=team_name
+        )
+        if repo.get(email, cid) is None:
+            repo.add(membership)
+        else:
+            repo.update(membership)
 
 
 def add_competition(db: Database, cid: str, name: str) -> None:
