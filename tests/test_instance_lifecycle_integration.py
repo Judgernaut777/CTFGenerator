@@ -854,6 +854,92 @@ class ReconcilerFixTests(unittest.TestCase):
                     SqlAlchemyInstanceRepository(s).get(iid).state, "healthy"
                 )
 
+    # -- MEDIUM: a 'releasing' (dead-lettered-delete) resource is re-driven ---
+
+    def test_deleted_releasing_resource_re_driven_then_archives(self) -> None:
+        # A deleted instance whose delete job dead-lettered leaves its resource
+        # stuck in 'releasing'. The cleanup path must re-enqueue delete for a
+        # 'releasing' resource (not only an 'active' one) so it is re-driven; once
+        # the worker confirms 'released', the instance finally archives instead of
+        # stranding non-archived forever.
+        with _migrated_database() as db:
+            _seed_parents(db)
+            observed = _FakeObserved()
+            _sch, jobs, _life, rec = _components(db, observed=observed)
+            iid = _seed_instance(db, state="stopped", desired="deleted", assigned="w1")
+            with db.session_scope() as s:
+                repo = SqlAlchemyInstanceRepository(s)
+                repo.record_runtime_resource(
+                    RuntimeResource(iid, "container", "cid", "w1")
+                )
+                # A prior pass marked it releasing, but that delete job never
+                # completed (dead-lettered / reaped away) -> resource stranded.
+                repo.set_resource_state(iid, "container", "cid", "releasing", _NOW)
+            observed.set(HealthObservation(iid, "absent", False, "w1", 1, _NOW))
+            actions = rec.reconcile_once(_NOW)
+            # Delete is re-enqueued for the 'releasing' resource (no live delete
+            # job blocked the key -> a fresh live job is minted).
+            delete = [
+                a for a in actions if a.action == "delete" and a.instance_id == iid
+            ]
+            self.assertTrue(delete)
+            self.assertTrue(delete[0].job_created)
+            self.assertIsNotNone(jobs.get_by_idempotency_key(_key(iid, 1, "delete")))
+            # NOT archived while the resource is still unreleased.
+            with db.session_scope() as s:
+                self.assertEqual(
+                    SqlAlchemyInstanceRepository(s).get(iid).state, "stopped"
+                )
+            # Worker confirms release -> the instance finally archives.
+            with db.session_scope() as s:
+                SqlAlchemyInstanceRepository(s).set_resource_state(
+                    iid, "container", "cid", "released", _NOW
+                )
+            rec.reconcile_once(_NOW)
+            with db.session_scope() as s:
+                self.assertEqual(
+                    SqlAlchemyInstanceRepository(s).get(iid).state, "archived"
+                )
+
+    # -- LOW: one instance's failure must not abort the whole batch pass ------
+
+    def test_per_instance_fault_isolation(self) -> None:
+        with _migrated_database() as db:
+            _seed_parents(db)
+            observed = _FakeObserved()
+            _sch, jobs, _life, rec = _components(db, observed=observed)
+            bad = _seed_instance(db, state="active", desired="stopped", assigned="w1")
+            good = _seed_instance(db, state="active", desired="stopped", assigned="w1")
+            observed.set(HealthObservation(bad, "active", True, "w1", 1, _NOW))
+            observed.set(HealthObservation(good, "active", True, "w1", 1, _NOW))
+            original = rec._reconcile_instance
+
+            def boom(instance, now, stuck_after_seconds):
+                if instance.instance_id == bad:
+                    raise RuntimeError("simulated guard rejection")
+                return original(instance, now, stuck_after_seconds)
+
+            rec._reconcile_instance = boom
+            actions = rec.reconcile_once(_NOW)
+            # The failing instance is isolated (recorded as an error action) and
+            # the healthy instance still gets its corrective this pass.
+            self.assertTrue(
+                any(a.case == "error" and a.instance_id == bad for a in actions)
+            )
+            self.assertIsNotNone(jobs.get_by_idempotency_key(_key(good, 1, "stop")))
+
+    # -- LOW: request_delete on an archived instance is a clean no-op ---------
+
+    def test_request_delete_on_archived_is_noop(self) -> None:
+        with _migrated_database() as db:
+            _seed_parents(db)
+            _sch, _jobs, lifecycle, _rec = _components(db)
+            iid = _seed_instance(db, state="archived", desired="deleted")
+            # Must NOT raise a raw ProgrammingError from the archived-freeze guard.
+            got = lifecycle.request_delete(iid, _NOW)
+            self.assertEqual(got.state, "archived")
+            self.assertEqual(got.desired_state, "deleted")
+
 
 if __name__ == "__main__":
     unittest.main()

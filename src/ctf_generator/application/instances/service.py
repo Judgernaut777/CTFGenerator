@@ -246,9 +246,21 @@ class InstanceLifecycleService:
     def request_delete(self, instance_id: str, now: datetime) -> Instance:
         """Mark the instance ``desired_state = deleted``. The reconciler drives
         stop + resource/endpoint cleanup + archival (and releases the hold on
-        archival)."""
+        archival).
+
+        An already-``archived`` (terminal) instance is a clean idempotent no-op:
+        the delete goal is already met, and the row is frozen -- writing
+        ``desired_state`` to it would trip the archived-freeze guard and raise a
+        raw ``ProgrammingError``. Mirrors :meth:`expire`'s already-``expired``
+        no-op so a repeated / racing delete never errors."""
         with self._database.session_scope() as session:
-            return self._repo(session).set_desired_state(instance_id, "deleted", now)
+            repo = self._repo(session)
+            current = repo.get(instance_id)
+            if current is None:
+                raise LookupError(f"instance not found: {instance_id!r}")
+            if current.is_terminal:
+                return current
+            return repo.set_desired_state(instance_id, "deleted", now)
 
     def expire(self, instance_id: str, now: datetime) -> Instance:
         """TTL expiry: move the instance to ``expired`` and, ONLY when that

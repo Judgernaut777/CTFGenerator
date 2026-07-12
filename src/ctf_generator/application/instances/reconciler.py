@@ -147,9 +147,24 @@ class InstanceReconciler:
 
         actions: list[ReconcileAction] = []
         for instance in instances:
-            actions.extend(
-                self._reconcile_instance(instance, now, stuck_after_seconds)
-            )
+            # Per-instance fault isolation: one instance's guard rejection (e.g. a
+            # concurrent operator transition making this pass's drain edge illegal
+            # -> ProgrammingError) or any other error must not abort the whole
+            # batch. Record a structured, secret-free per-instance error and move
+            # on so every other instance still converges this pass.
+            try:
+                actions.extend(
+                    self._reconcile_instance(instance, now, stuck_after_seconds)
+                )
+            except Exception as exc:  # noqa: BLE001 - isolate, never abort the batch
+                actions.append(
+                    ReconcileAction(
+                        instance_id=instance.instance_id,
+                        case="error",
+                        action="reconcile_error",
+                        detail=f"{type(exc).__name__}: {exc}",
+                    )
+                )
         actions.extend(self._reconcile_leaks(now, limit))
         return actions
 
@@ -595,21 +610,36 @@ class InstanceReconciler:
     def _cleanup_exposed(
         self, instance: Instance, now: datetime, *, case: str
     ) -> list[ReconcileAction]:
-        """Delete an instance's endpoints and schedule deletion of its still-
-        active runtime resources (marking them releasing). Idempotent: once the
-        endpoints are gone and the resources releasing, a re-run is a no-op."""
+        """Delete an instance's endpoints and schedule deletion of every runtime
+        resource that is not yet worker-confirmed ``released`` (``active`` OR
+        ``releasing``), marking the still-``active`` ones ``releasing``.
+
+        The delete job is (re-)enqueued for a resource stuck in ``releasing`` --
+        not only for a fresh ``active`` one -- so a delete job that dead-lettered
+        (or was reaped away) is re-driven on the next pass instead of stranding
+        the resource, and its owning deleted instance, non-archived forever. The
+        idempotency key collapses duplicate enqueues while a delete job is still
+        live; once no live/blocking job holds the key a fresh enqueue is minted.
+        Idempotent: once the endpoints are gone and every resource is ``released``,
+        a re-run is a no-op."""
         resources, endpoints = self._load_facts(instance.instance_id)
         actions: list[ReconcileAction] = []
         actions.extend(
             self._delete_endpoints(instance.instance_id, endpoints, now, case=case)
         )
         active_resources = [r for r in resources if r.state == "active"]
-        if active_resources:
+        # Anything not yet 'released' still needs a delete driven; 'releasing'
+        # resources are included so a dead-lettered delete gets retried.
+        unreleased_resources = [
+            r for r in resources if r.state in ("active", "releasing")
+        ]
+        if unreleased_resources:
             actions.append(
                 self._enqueue(
                     instance, instance.generation, "delete", now, case=case
                 )
             )
+        if active_resources:
             actions.extend(
                 self._mark_releasing(
                     instance.instance_id, active_resources, now, case=case
