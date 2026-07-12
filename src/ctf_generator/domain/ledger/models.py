@@ -136,3 +136,81 @@ class ScoreEvent:
             _require_nonempty(self.submission_id, "submission_id")
         if self.solve_id is not None:
             _require_nonempty(self.solve_id, "solve_id")
+
+
+# --- Gap-safe projection (M7) ------------------------------------------------
+#
+# The transactional outbox row for score event ``seq`` is inserted by a DB
+# trigger in the same transaction as the event itself, so it becomes visible at
+# exactly the instant the event commits -- regardless of how many higher seqs
+# committed first. A committed event can therefore never be skipped by the
+# projector (deleting an outbox row happens only in the transaction that folded
+# its event into the projection). No seq cursor appears anywhere in the
+# correctness path.
+
+VALID_PROJECTION_TASK_STATUSES = frozenset({"pending", "failed"})
+
+
+@dataclass(frozen=True)
+class ProjectionTask:
+    """One pending/failed outbox row: score event ``seq`` awaiting projection.
+    ``last_error`` is sanitized (exception class + message only -- never
+    payloads, never flags)."""
+
+    seq: int
+    competition_id: str
+    status: str
+    attempts: int
+    created_at: datetime
+    last_error: str | None = None
+
+    def __post_init__(self) -> None:
+        if not isinstance(self.seq, int) or self.seq < 1:
+            raise ValueError(f"seq must be an int >= 1, got {self.seq!r}")
+        _require_nonempty(self.competition_id, "competition_id")
+        if self.status not in VALID_PROJECTION_TASK_STATUSES:
+            raise ValueError(
+                f"status must be one of {sorted(VALID_PROJECTION_TASK_STATUSES)}, "
+                f"got {self.status!r}"
+            )
+        if not isinstance(self.attempts, int) or self.attempts < 0:
+            raise ValueError(f"attempts must be an int >= 0, got {self.attempts!r}")
+
+
+@dataclass(frozen=True)
+class ScoreboardProjectionRecord:
+    """The rebuildable, discardable scoreboard cache for one competition,
+    stamped with ``as_of_seq`` (the max ``score_events.seq`` folded in). Never
+    a source of truth -- deleting it and replaying the ledger reproduces it."""
+
+    competition_id: str
+    as_of_seq: int
+    entries: Mapping[str, object] = field(default_factory=dict, compare=False)
+    computed_at: datetime | None = None
+
+    def __post_init__(self) -> None:
+        _require_nonempty(self.competition_id, "competition_id")
+        if not isinstance(self.as_of_seq, int) or self.as_of_seq < 0:
+            raise ValueError(f"as_of_seq must be an int >= 0, got {self.as_of_seq!r}")
+        if not isinstance(self.entries, Mapping):
+            raise ValueError("entries must be a mapping")
+
+
+@dataclass(frozen=True)
+class ProjectionLag:
+    """Observability snapshot of projection lag. These are *metrics only* --
+    never an incremental cursor (a naive committed low-water mark is
+    non-monotonic under the allocation-vs-commit-order race)."""
+
+    pending_count: int
+    latest_seq: int
+    max_as_of_seq: int
+    oldest_pending_created_at: datetime | None = None
+
+    def __post_init__(self) -> None:
+        if not isinstance(self.pending_count, int) or self.pending_count < 0:
+            raise ValueError("pending_count must be an int >= 0")
+        if not isinstance(self.latest_seq, int) or self.latest_seq < 0:
+            raise ValueError("latest_seq must be an int >= 0")
+        if not isinstance(self.max_as_of_seq, int) or self.max_as_of_seq < 0:
+            raise ValueError("max_as_of_seq must be an int >= 0")
