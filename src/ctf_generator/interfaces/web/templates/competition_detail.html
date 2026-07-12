@@ -1,0 +1,34 @@
+{% extends "base.html" %}
+{% block title %}{{ competition.name }} - CTFGenerator{% endblock %}
+{% block content %}
+<div class="card">
+  <p class="muted"><a href="{{ mount_path }}/competitions">&larr; All competitions</a></p>
+  <h1>{{ competition.name }}</h1>
+  <dl class="kv">
+    <dt>ID</dt><dd class="muted">{{ competition.competition_id }}</dd>
+    <dt>Start</dt><dd>{{ competition.start_time }}</dd>
+    <dt>End</dt><dd>{{ competition.end_time }}</dd>
+    <dt>Scoring start</dt><dd>{{ competition.scoring_start_time or "—" }}</dd>
+    <dt>Freeze</dt><dd>{{ competition.freeze_time or "—" }}</dd>
+  </dl>
+</div>
+{% if competition.scoring %}
+<div class="card">
+  <h2>Default scoring</h2>
+  <dl class="kv">
+    <dt>Challenge</dt><dd class="muted">{{ competition.scoring.challenge_id }}</dd>
+    <dt>Initial value</dt><dd>{{ competition.scoring.initial_value }}</dd>
+    <dt>Minimum value</dt><dd>{{ competition.scoring.minimum_value }}</dd>
+    <dt>Decay function</dt><dd>{{ competition.scoring.decay_function }}</dd>
+    <dt>Decay</dt><dd>{{ competition.scoring.decay }}</dd>
+    <dt>First blood</dt>
+    <dd>
+      {% if competition.scoring.first_blood_enabled %}
+        +{{ competition.scoring.first_blood_bonus_points }} pts
+        / {{ competition.scoring.first_blood_bonus_percent }}%
+      {% else %}disabled{% endif %}
+    </dd>
+  </dl>
+</div>
+{% endif %}
+{% endblock %}

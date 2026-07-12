@@ -256,6 +256,40 @@ def _oidc_service_from_env(database: Database | None, auth_service: AuthService 
     return OidcService(config, database, auth_service)
 
 
+def _maybe_mount_web_app(
+    api_app: FastAPI,
+    database: Database | None,
+    auth_service: AuthService | None,
+) -> None:
+    """Mount the M11 organizer web UI on the module-level (production) app under
+    ``/app`` when it is enabled and its prerequisites (a database + auth service +
+    the ``[web]`` extra) are present.
+
+    The import is LAZY + guarded so a deployment WITHOUT jinja2 (the ``[web]``
+    extra) still imports this module and serves the JSON API unaffected -- the UI
+    simply does not exist. Disabled explicitly via ``CTFGEN_WEB_ENABLED=0``. The
+    mounted sub-app owns its own middleware/handlers and is absent from
+    ``/api/v1/openapi.json`` (the JSON API surface is unchanged)."""
+    if database is None or auth_service is None:
+        return
+    if os.environ.get("CTFGEN_WEB_ENABLED", "1") == "0":
+        return
+    try:
+        from ..web import mount_web_app
+        from ..web.settings import WebSettings
+    except ImportError:
+        logging.getLogger("ctfgen.web").info(
+            "organizer web UI disabled: the [web] extra (jinja2) is not installed"
+        )
+        return
+    mount_web_app(
+        api_app,
+        database=database,
+        auth_service=auth_service,
+        settings=WebSettings.from_env(),
+    )
+
+
 _module_database = _database_from_env()
 _module_auth_service = (
     AuthService(_module_database) if _module_database is not None else None
@@ -270,3 +304,4 @@ app = create_app(
     authenticator=_authenticator_from_env(_module_auth_service),
     oidc_service=_oidc_service_from_env(_module_database, _module_auth_service),
 )
+_maybe_mount_web_app(app, _module_database, _module_auth_service)

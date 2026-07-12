@@ -1,0 +1,79 @@
+<!--
+  Base layout for the organizer web UI. All styling is INLINED here (no CDN, no
+  external stylesheet -- the CSP forbids external origins) and carries the
+  per-response nonce so the strict policy admits exactly this <style> block.
+  Every dynamic value below is autoescaped by Jinja2; no |safe is used on any
+  data-derived content.
+-->
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>{% block title %}CTFGenerator Organizer{% endblock %}</title>
+<style nonce="{{ csp_nonce }}">
+  :root { color-scheme: light dark; }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+    line-height: 1.5;
+    background: #f6f7f9;
+    color: #1a1d21;
+  }
+  @media (prefers-color-scheme: dark) {
+    body { background: #14171a; color: #e6e8eb; }
+    header.app-bar { background: #1d2126 !important; border-color: #2a2f36 !important; }
+    .card { background: #1d2126 !important; border-color: #2a2f36 !important; }
+    a { color: #7db3ff !important; }
+    th { border-color: #2a2f36 !important; }
+    td { border-color: #23282e !important; }
+  }
+  header.app-bar {
+    display: flex; align-items: center; justify-content: space-between;
+    gap: 1rem; padding: 0.75rem 1.25rem; background: #fff;
+    border-bottom: 1px solid #e2e5e9;
+  }
+  header.app-bar .brand { font-weight: 700; letter-spacing: -0.01em; }
+  header.app-bar nav { display: flex; gap: 1rem; align-items: center; }
+  main { max-width: 900px; margin: 1.5rem auto; padding: 0 1.25rem; }
+  .card {
+    background: #fff; border: 1px solid #e2e5e9; border-radius: 10px;
+    padding: 1.25rem 1.5rem; margin-bottom: 1.25rem;
+  }
+  h1 { font-size: 1.4rem; margin: 0 0 1rem; }
+  h2 { font-size: 1.1rem; margin: 0 0 0.75rem; }
+  table { width: 100%; border-collapse: collapse; }
+  th, td { text-align: left; padding: 0.5rem 0.6rem; border-bottom: 1px solid #eceef1; }
+  th { font-size: 0.8rem; text-transform: uppercase; letter-spacing: 0.03em; opacity: 0.7; }
+  a { color: #1c6fe0; text-decoration: none; }
+  a:hover { text-decoration: underline; }
+  .muted { opacity: 0.65; }
+  .count { font-size: 2rem; font-weight: 700; }
+  form.inline { display: inline; }
+  button.linklike {
+    background: none; border: none; padding: 0; margin: 0; cursor: pointer;
+    color: inherit; font: inherit; text-decoration: underline;
+  }
+  .error-banner {
+    background: #fdecea; color: #8a1c13; border: 1px solid #f5c6c0;
+    border-radius: 8px; padding: 0.6rem 0.85rem; margin-bottom: 1rem;
+  }
+  dl.kv { display: grid; grid-template-columns: max-content 1fr; gap: 0.35rem 1rem; margin: 0; }
+  dl.kv dt { font-weight: 600; opacity: 0.75; }
+  dl.kv dd { margin: 0; }
+</style>
+{% if principal_subject %}
+<header class="app-bar">
+  <span class="brand">CTFGenerator Organizer</span>
+  <nav>
+    <a href="{{ mount_path }}/">Dashboard</a>
+    <a href="{{ mount_path }}/competitions">Competitions</a>
+    <span class="muted">{{ principal_subject }}</span>
+    <form class="inline" method="post" action="{{ mount_path }}/logout">
+      {% if csrf_token %}<input type="hidden" name="csrf_token" value="{{ csrf_token }}">{% endif %}
+      <button class="linklike" type="submit">Log out</button>
+    </form>
+  </nav>
+</header>
+{% endif %}
+<main>
+  {% block content %}{% endblock %}
+</main>
