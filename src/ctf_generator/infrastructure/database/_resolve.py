@@ -65,17 +65,23 @@ def version_uuid(
     return result
 
 
-def user_uuid_optional(session: Session, email: str | None) -> uuid.UUID | None:
-    """Resolve a submitter email to a user uuid, or ``None`` if no email is
-    given. A given-but-unknown email fails loud."""
-    if email is None:
-        return None
+def user_uuid(session: Session, email: str) -> uuid.UUID:
+    """Resolve a user email (case-insensitive) to its surrogate uuid. A
+    given-but-unknown email fails loud."""
     result = session.scalars(
         select(User.id).where(func.lower(User.email) == email.lower())
     ).one_or_none()
     if result is None:
         raise LookupError(f"user not found: {email!r}")
     return result
+
+
+def user_uuid_optional(session: Session, email: str | None) -> uuid.UUID | None:
+    """Resolve a submitter email to a user uuid, or ``None`` if no email is
+    given. A given-but-unknown email fails loud."""
+    if email is None:
+        return None
+    return user_uuid(session, email)
 
 
 def competition_uuid_optional(
@@ -158,6 +164,15 @@ def version_business(
     if row is None:
         raise LookupError(f"challenge version id not found: {version_uuid_!r}")
     return row[0], row[1]
+
+
+def user_email(session: Session, user_uuid_: uuid.UUID) -> str:
+    result = session.scalars(
+        select(User.email).where(User.id == user_uuid_)
+    ).one_or_none()
+    if result is None:
+        raise LookupError(f"user id not found: {user_uuid_!r}")
+    return result
 
 
 def worker_name(session: Session, worker_uuid_: uuid.UUID) -> str:

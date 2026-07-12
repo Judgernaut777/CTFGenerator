@@ -10,6 +10,11 @@ from __future__ import annotations
 import uuid
 from datetime import UTC, datetime
 
+from ctf_generator.domain.auth.models import (
+    AuthCredential,
+    AuthSession,
+    is_encoded_password_hash,
+)
 from ctf_generator.domain.authoring.models import (
     ChallengeBuild,
     ChallengeDefinition,
@@ -62,6 +67,8 @@ from ctf_generator.domain.work.models import (
     JobTransition,
 )
 
+from .models import AuthCredential as AuthCredentialRow
+from .models import AuthSession as AuthSessionRow
 from .models import ChallengeBuild as ChallengeBuildRow
 from .models import ChallengeDefinition as ChallengeDefinitionRow
 from .models import ChallengeVersion as ChallengeVersionRow
@@ -832,6 +839,86 @@ def worker_credential_from_orm(
         scopes=tuple(row.scopes),
         issued_at=to_utc(row.issued_at),
         expires_at=to_utc(row.expires_at),
+        revoked_at=to_utc(row.revoked_at),
+    )
+
+
+# --- Authentication (M10 slice a) -------------------------------------------
+
+
+def auth_credential_to_orm(
+    credential: AuthCredential,
+    user_uuid: uuid.UUID,
+    existing: AuthCredentialRow | None = None,
+) -> AuthCredentialRow:
+    """Map a domain ``AuthCredential`` onto its ORM row.
+
+    Fresh row when ``existing is None`` (new surrogate uuid via the column
+    default). With ``existing`` given, only the mutable ``password_hash`` /
+    ``updated_at`` are written -- ``id``, ``user_id`` and ``created_at`` are the
+    immutable identity the repository's ``update`` (keyed on ``user_email``)
+    relies on."""
+    if existing is None:
+        return AuthCredentialRow(
+            user_id=user_uuid,
+            password_hash=credential.password_hash,
+            created_at=to_utc(credential.created_at),
+            updated_at=to_utc(credential.updated_at),
+        )
+    existing.password_hash = credential.password_hash
+    existing.updated_at = to_utc(credential.updated_at)
+    return existing
+
+
+def auth_credential_from_orm(
+    row: AuthCredentialRow, user_email: str
+) -> AuthCredential:
+    """Map an ORM credential row back to a domain ``AuthCredential``.
+    ``user_email`` is read by the repository (the row carries only the surrogate
+    ``user_id``). Fail loud on a stored hash that is not a valid encoded hash
+    (a corruption signal)."""
+    if not is_encoded_password_hash(row.password_hash):
+        raise ValueError("unmappable password hash from store (not encoded)")
+    return AuthCredential(
+        user_email=user_email,
+        password_hash=row.password_hash,
+        created_at=to_utc(row.created_at),
+        updated_at=to_utc(row.updated_at),
+    )
+
+
+def auth_session_to_orm(
+    session: AuthSession, user_uuid: uuid.UUID
+) -> AuthSessionRow:
+    """Insert-only (the single legal mutation -- the revocation stamp -- is
+    applied by the repository directly on the row)."""
+    return AuthSessionRow(
+        id=_as_uuid(session.session_id),
+        user_id=user_uuid,
+        token_hash=session.token_hash,
+        issued_at=to_utc(session.issued_at),
+        expires_at=to_utc(session.expires_at),
+        rotated_from=(
+            _as_uuid(session.rotated_from)
+            if session.rotated_from is not None
+            else None
+        ),
+        revoked_at=to_utc(session.revoked_at),
+    )
+
+
+def auth_session_from_orm(row: AuthSessionRow, user_email: str) -> AuthSession:
+    """Map an ORM session row back to a domain ``AuthSession``. ``user_email``
+    is read by the repository (the row carries only the surrogate ``user_id``)."""
+    return AuthSession(
+        session_id=str(row.id),
+        user_email=user_email,
+        token_hash=row.token_hash,
+        issued_at=to_utc(row.issued_at),
+        expires_at=to_utc(row.expires_at),
+        rotated_from=(
+            str(row.rotated_from) if row.rotated_from is not None else None
+        ),
         revoked_at=to_utc(row.revoked_at),
     )
 
