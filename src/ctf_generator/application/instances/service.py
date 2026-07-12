@@ -341,3 +341,35 @@ class InstanceLifecycleService:
     def get(self, instance_id: str) -> Instance | None:
         with self._database.session_scope() as session:
             return self._repo(session).get(instance_id)
+
+    def list_instances(
+        self, *, competition_id: str | None = None, limit: int = 500
+    ) -> list[Instance]:
+        """Operator list of instances, optionally scoped to one competition. Pure
+        read; returns domain objects (no runtime secrets)."""
+        with self._database.session_scope() as session:
+            repo = self._repo(session)
+            if competition_id is not None:
+                return repo.list_for_competition(competition_id, limit)
+            return repo.list_all(limit)
+
+    def get_operator_view(
+        self, instance_id: str
+    ) -> tuple[Instance, list[InstanceEndpoint], HealthObservation | None] | None:
+        """The operator detail view: the instance plus its PUBLIC (non-internal)
+        endpoints and its latest health observation. Deliberately does NOT read
+        credentials or runtime resources -- those carry secret handles/tokens that
+        must never reach an API response (the secret boundary). Returns ``None``
+        when the instance is unknown."""
+        with self._database.session_scope() as session:
+            repo = self._repo(session)
+            instance = repo.get(instance_id)
+            if instance is None:
+                return None
+            endpoints = [
+                endpoint
+                for endpoint in repo.list_endpoints(instance_id)
+                if not endpoint.internal
+            ]
+            health = repo.latest_observation(instance_id)
+            return instance, endpoints, health

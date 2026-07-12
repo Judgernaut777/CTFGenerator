@@ -135,6 +135,30 @@ class SqlAlchemyChallengePublicationRepository:
             for pub_row, definition_slug, version_no in rows
         ]
 
+    def remove(
+        self, competition_id: str, definition_slug: str, version_no: int
+    ) -> bool:
+        """Detach a published version from a competition, keyed by the business
+        triple. Returns ``True`` when a row was removed, ``False`` when the
+        attachment did not exist (so the caller can raise a 404). Fails loud
+        (:class:`LookupError`) only when the competition or version themselves are
+        unknown."""
+        competition_uuid = self._competition_uuid(competition_id)
+        version_uuid, _state = self._version_uuid_and_state(
+            definition_slug, version_no
+        )
+        row = self._session.scalars(
+            select(CompetitionChallengeRow).where(
+                CompetitionChallengeRow.competition_id == competition_uuid,
+                CompetitionChallengeRow.challenge_version_id == version_uuid,
+            )
+        ).one_or_none()
+        if row is None:
+            return False
+        self._session.delete(row)
+        self._session.flush()
+        return True
+
     def update(self, publication: ChallengePublication) -> None:
         """Update the mutable scoring fields of an existing publication, keyed by
         ``(competition_id, definition_slug, version_no)``. Raises

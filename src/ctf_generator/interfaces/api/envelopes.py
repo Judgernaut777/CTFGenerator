@@ -39,6 +39,18 @@ SUBMISSION_SCHEMA = "ctfgen.submission"
 SUBMISSION_LIST_SCHEMA = "ctfgen.submission-list"
 SCOREBOARD_SCHEMA = "ctfgen.scoreboard"
 SCOREBOARD_LAG_SCHEMA = "ctfgen.scoreboard-lag"
+# slice-c organizer / ops surface.
+INSTANCE_SCHEMA = "ctfgen.instance"
+INSTANCE_LIST_SCHEMA = "ctfgen.instance-list"
+BUILD_SCHEMA = "ctfgen.build"
+BUILD_LIST_SCHEMA = "ctfgen.build-list"
+PUBLICATION_SCHEMA = "ctfgen.publication"
+PUBLICATION_LIST_SCHEMA = "ctfgen.publication-list"
+JOB_SCHEMA = "ctfgen.job"
+JOB_LIST_SCHEMA = "ctfgen.job-list"
+SYSTEM_HEALTH_SCHEMA = "ctfgen.system-health"
+SYSTEM_READINESS_SCHEMA = "ctfgen.system-readiness"
+SYSTEM_VERSION_SCHEMA = "ctfgen.system-version"
 
 
 def resource_envelope(schema_id: str, body: Mapping[str, Any]) -> dict[str, Any]:

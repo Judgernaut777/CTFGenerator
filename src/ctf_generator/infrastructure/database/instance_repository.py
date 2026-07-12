@@ -171,6 +171,32 @@ class SqlAlchemyInstanceRepository:
         ).all()
         return [self._to_domain(row) for row in rows]
 
+    def list_all(self, limit: int = 500) -> list[Instance]:
+        """Every instance (including archived), stable-sorted by ``(created_at,
+        id)`` for the operator list view + cursor pagination. Read-only; the
+        API never mutates through this path."""
+        rows = self._session.scalars(
+            select(InstanceRow)
+            .order_by(InstanceRow.created_at.asc(), InstanceRow.id.asc())
+            .limit(limit)
+        ).all()
+        return [self._to_domain(row) for row in rows]
+
+    def list_for_competition(
+        self, competition_id: str, limit: int = 500
+    ) -> list[Instance]:
+        """Every instance of one competition, stable-sorted like :meth:`list_all`.
+        Resolves the competition slug to its surrogate key and fails loud
+        (:class:`LookupError`) on an unknown competition."""
+        competition_uuid = _resolve.competition_uuid(self._session, competition_id)
+        rows = self._session.scalars(
+            select(InstanceRow)
+            .where(InstanceRow.competition_id == competition_uuid)
+            .order_by(InstanceRow.created_at.asc(), InstanceRow.id.asc())
+            .limit(limit)
+        ).all()
+        return [self._to_domain(row) for row in rows]
+
     def transition(
         self,
         instance_id: str,

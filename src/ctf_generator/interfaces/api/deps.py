@@ -28,13 +28,18 @@ from typing import Protocol
 
 from fastapi import Depends, Request
 
+from ctf_generator.application.authoring.build_service import BuildService
 from ctf_generator.application.catalog import (
     ChallengeDefinitionService,
     ChallengeVersionService,
     CompetitionService,
     TeamService,
 )
+from ctf_generator.application.catalog.publication_service import PublicationService
 from ctf_generator.application.identity import IdentityService
+from ctf_generator.application.instances.service import InstanceLifecycleService
+from ctf_generator.application.jobs.service import JobService
+from ctf_generator.application.scheduling.service import SchedulingService
 from ctf_generator.application.scoring.scoreboard_service import ScoreboardService
 from ctf_generator.application.submissions.query_service import SubmissionQueryService
 from ctf_generator.application.submissions.service import (
@@ -62,6 +67,15 @@ class Permission(StrEnum):
     SUBMISSION_READ = "submission:read"
     SCOREBOARD_READ = "scoreboard:read"
     SCOREBOARD_LAG_READ = "scoreboard:lag"
+    # slice-c organizer / ops control-plane surface.
+    INSTANCE_READ = "instance:read"
+    INSTANCE_OPERATE = "instance:operate"
+    BUILD_READ = "build:read"
+    BUILD_CREATE = "build:create"
+    PUBLICATION_READ = "publication:read"
+    PUBLICATION_WRITE = "publication:write"
+    JOB_READ = "job:read"
+    JOB_OPERATE = "job:operate"
 
 
 _ALL = frozenset(Permission)
@@ -96,6 +110,15 @@ ROLE_PERMISSIONS: dict[str, frozenset[Permission]] = {
             Permission.SUBMISSION_READ,
             Permission.SCOREBOARD_READ,
             Permission.SCOREBOARD_LAG_READ,
+            # Organizer operator surface: drive instance lifecycle, trigger
+            # builds, and attach/detach published versions to competitions.
+            # NOT the job-queue ops surface (admin / support only).
+            Permission.INSTANCE_READ,
+            Permission.INSTANCE_OPERATE,
+            Permission.BUILD_READ,
+            Permission.BUILD_CREATE,
+            Permission.PUBLICATION_READ,
+            Permission.PUBLICATION_WRITE,
         }
     ),
     "author": frozenset(
@@ -105,6 +128,9 @@ ROLE_PERMISSIONS: dict[str, frozenset[Permission]] = {
             Permission.CHALLENGE_WRITE,
             Permission.CHALLENGE_PUBLISH,
             Permission.SCOREBOARD_READ,
+            # An author materializes their own challenge builds.
+            Permission.BUILD_READ,
+            Permission.BUILD_CREATE,
         }
     ),
     "captain": _CONTESTANT,
@@ -112,8 +138,19 @@ ROLE_PERMISSIONS: dict[str, frozenset[Permission]] = {
     "judge": _CATALOG_READ
     | frozenset({Permission.SUBMISSION_READ, Permission.SCOREBOARD_READ}),
     "observer": _CATALOG_READ | frozenset({Permission.SCOREBOARD_READ}),
+    # Support is the ops-staff role: read-only instance/build visibility plus the
+    # job-queue observability + control surface (dead-letter, cancel, retry).
     "support": _CATALOG_READ
-    | frozenset({Permission.SCOREBOARD_READ, Permission.SCOREBOARD_LAG_READ}),
+    | frozenset(
+        {
+            Permission.SCOREBOARD_READ,
+            Permission.SCOREBOARD_LAG_READ,
+            Permission.INSTANCE_READ,
+            Permission.BUILD_READ,
+            Permission.JOB_READ,
+            Permission.JOB_OPERATE,
+        }
+    ),
 }
 
 
@@ -313,3 +350,31 @@ def get_scoreboard_service(
     database: Database = Depends(get_database),
 ) -> ScoreboardService:
     return ScoreboardService(database)
+
+
+def get_job_service(database: Database = Depends(get_database)) -> JobService:
+    return JobService(database)
+
+
+def get_build_service(database: Database = Depends(get_database)) -> BuildService:
+    return BuildService(database, jobs=JobService(database))
+
+
+def get_publication_service(
+    database: Database = Depends(get_database),
+) -> PublicationService:
+    return PublicationService(database)
+
+
+def get_instance_lifecycle_service(
+    database: Database = Depends(get_database),
+) -> InstanceLifecycleService:
+    # The lifecycle service composes the scheduling + job collaborators exactly as
+    # the M8 workers do; the API only ever calls its desired-state / read methods
+    # (it never launches a container -- the corrective jobs it enqueues are claimed
+    # by workers with scoped credentials).
+    return InstanceLifecycleService(
+        database,
+        scheduling=SchedulingService(database),
+        jobs=JobService(database),
+    )
