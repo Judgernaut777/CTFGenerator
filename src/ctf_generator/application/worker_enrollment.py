@@ -51,7 +51,14 @@ from ctf_generator.infrastructure.database.worker_repository import (
 
 DEFAULT_CREDENTIAL_TTL = timedelta(hours=24)
 
-_DEFAULT_SCOPES = ("jobs:claim", "jobs:heartbeat", "jobs:complete", "artifacts:pull")
+_DEFAULT_SCOPES = (
+    "jobs:claim",
+    "jobs:heartbeat",
+    "jobs:complete",
+    "artifacts:pull",
+    "instances:report",
+    "instances:transition",
+)
 
 
 @dataclass(frozen=True)

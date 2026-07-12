@@ -146,7 +146,14 @@ class WorkerCredentialValidationTests(unittest.TestCase):
     def test_scope_vocabulary(self) -> None:
         self.assertEqual(
             VALID_CREDENTIAL_SCOPES,
-            {"jobs:claim", "jobs:heartbeat", "jobs:complete", "artifacts:pull"},
+            {
+                "jobs:claim",
+                "jobs:heartbeat",
+                "jobs:complete",
+                "artifacts:pull",
+                "instances:report",
+                "instances:transition",
+            },
         )
 
 
