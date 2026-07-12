@@ -59,6 +59,12 @@ class SecurityHeadersMiddleware(BaseHTTPMiddleware):
         response.headers["X-Content-Type-Options"] = "nosniff"
         response.headers["X-Frame-Options"] = "DENY"
         response.headers["Referrer-Policy"] = "no-referrer"
+        # No web response here is a cacheable public asset: every page carries
+        # per-user competition data and/or the session-bound CSRF token. Forbid
+        # ALL caching (shared caches AND the bfcache/back button) so nothing is
+        # readable after logout or via the back button.
+        response.headers["Cache-Control"] = "no-store"
+        response.headers["Pragma"] = "no-cache"
         response.headers.setdefault("Cross-Origin-Opener-Policy", "same-origin")
         response.headers.setdefault("Cross-Origin-Resource-Policy", "same-origin")
         return response

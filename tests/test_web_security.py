@@ -191,6 +191,25 @@ class WebInlineStyleTests(unittest.TestCase):
 
 
 @unittest.skipUnless(_ENABLED, _SKIP_REASON)
+class WebCacheControlTests(unittest.TestCase):
+    """Authenticated HTML + the login page carry ``Cache-Control: no-store`` so
+    per-user data / the CSRF token is not retained by a shared cache or the
+    bfcache (readable after logout / via the back button)."""
+
+    def test_web_html_carries_no_store(self) -> None:
+        with ws.web_client() as (client, _db, _svc):
+            login_page = client.get("/app/login")
+            self.assertEqual(
+                login_page.headers.get("cache-control"), "no-store", login_page.text
+            )
+            ws.login(client, ws.ALICE)
+            for path in ("/app/", "/app/competitions", f"/app/competitions/{ws.COMP_A}"):
+                page = client.get(path)
+                self.assertEqual(page.status_code, 200, page.text)
+                self.assertEqual(page.headers.get("cache-control"), "no-store")
+
+
+@unittest.skipUnless(_ENABLED, _SKIP_REASON)
 class WebCookieAttributeTests(unittest.TestCase):
     def test_session_cookie_is_httponly_secure_samesite(self) -> None:
         with ws.web_client() as (client, _db, _svc):
