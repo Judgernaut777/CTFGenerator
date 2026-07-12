@@ -88,10 +88,22 @@ controls below. Non-compliant bundles are rejected before launch, not hardened s
 
 | Control | Requirement | Current status |
 |---|---|---|
-| Per-instance network | Each instance on its own bridge network; internal services unpublished. | Partial (`internal: true` used today) |
-| Controlled ingress | Only the intended player-facing port is exposed, via the reverse proxy; no direct worker port exposure. | Planned |
-| Restricted egress | Default-deny egress from workload containers (no arbitrary outbound internet). | Planned |
-| No metadata access | Block routes to cloud instance-metadata endpoints (e.g. link-local metadata IP). | Planned |
+| Per-instance network | Each instance on its own bridge network; internal services unpublished. | Enforced (`--internal` per-instance net + host-block firewall) |
+| Controlled ingress | Only the intended player-facing port is exposed, via the reverse proxy; no direct worker port exposure. | Planned (M9 proxy; slice-2 publishes NO host port) |
+| Restricted egress | Default-deny egress from workload containers (no arbitrary outbound internet). | `none`/`isolated`: enforced (no route off-subnet). `egress` mode: **REFUSED** (not implemented — see §6.3) |
+| No metadata access | Block routes to cloud instance-metadata endpoints (e.g. link-local metadata IP). | Enforced (no default route off the internal per-instance network) |
+
+**Host-block firewall (critical).** A docker `--internal` network alone does **not** stop a
+container reaching HOST-bound services: the bridge gateway **is** the host, and container→gateway
+traffic is delivered to the host's `INPUT` chain, which `--internal` (a `FORWARD`-chain control)
+never touches — a container on an "isolated" network could read a secret from a host `0.0.0.0`
+service via the gateway IP. Slice 2 closes this: before a container is started, an explicit
+`iptables INPUT -s <instance-subnet> -j DROP` (plus a best-effort `DOCKER-USER` forward DROP) is
+installed in the host network namespace, blocking the container from reaching **any** host IP.
+This is **capability-detected** and a **hard floor** (like seccomp — never "acknowledged away"):
+if the host cannot enforce it (no working `iptables` backend / no `NET_ADMIN`), `launch()`
+**refuses** rather than running with the host reachable. Reproduced-and-blocked in
+`tests/test_team_isolation_integration.py`.
 
 ---
 
@@ -172,6 +184,14 @@ build-args / secrets**. `detect_capabilities()` refuses (`UnsupportedRuntimeErro
 represent a non-rootless one. `launch()` with the secure defaults (`require_rootless=True`,
 empty `acknowledged_gaps`) **refuses to launch on a rootful daemon** and refuses any hardening it
 cannot apply (e.g. a disabled seccomp) — it never silently runs a less-isolated container.
+
+### 6.3 Network modes and the egress deferral
+
+| Mode | Slice-2 behavior |
+|---|---|
+| `none` | docker's built-in `none` network — no interfaces at all; no bespoke network created. |
+| `isolated` | dedicated `--internal` per-instance bridge **plus** the host-block firewall (above). No cross-instance route, no host/DB/metadata/internet reachability. This is the default. |
+| `egress` | **REFUSED** with `UnsupportedRuntimeError`. Genuine egress restriction (a filtering proxy / per-destination allowlist with an unconditional DROP of `169.254.0.0/16` and the host/gateway) is a larger build not yet landed. A plain NAT bridge would reach the internet, the host, and (on cloud) the metadata endpoint while *claiming* to be "egress-restricted", so the mode is refused rather than shipped with a posture it does not enforce. **Deferred.** |
 
 ### 6.2 Unverified live paths on THIS host (honest capability gates)
 
