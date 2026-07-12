@@ -40,7 +40,17 @@ VALID_RUNTIME_TYPES = frozenset(
 # nothing else. (``artifacts:pull`` reserves the vocabulary; per-job scoped
 # artifact handles are an M8 slice.)
 VALID_CREDENTIAL_SCOPES = frozenset(
-    {"jobs:claim", "jobs:heartbeat", "jobs:complete", "artifacts:pull"}
+    {
+        "jobs:claim",
+        "jobs:heartbeat",
+        "jobs:complete",
+        "artifacts:pull",
+        # Instance-fact reporting + observed-lifecycle transitions a worker drives
+        # for instances it is assigned (gated + ownership-checked by
+        # ``WorkerInstanceService``; the reconciler remains the eventual authority).
+        "instances:report",
+        "instances:transition",
+    }
 )
 
 # Prefix of the presented (plaintext) bearer token: ctfw1.<credential_id>.<secret>.
