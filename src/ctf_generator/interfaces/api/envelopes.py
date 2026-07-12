@@ -33,6 +33,12 @@ CHALLENGE_DEFINITION_SCHEMA = "ctfgen.challenge-definition"
 CHALLENGE_DEFINITION_LIST_SCHEMA = "ctfgen.challenge-definition-list"
 CHALLENGE_VERSION_SCHEMA = "ctfgen.challenge-version"
 CHALLENGE_VERSION_LIST_SCHEMA = "ctfgen.challenge-version-list"
+USER_SCHEMA = "ctfgen.user"
+USER_LIST_SCHEMA = "ctfgen.user-list"
+SUBMISSION_SCHEMA = "ctfgen.submission"
+SUBMISSION_LIST_SCHEMA = "ctfgen.submission-list"
+SCOREBOARD_SCHEMA = "ctfgen.scoreboard"
+SCOREBOARD_LAG_SCHEMA = "ctfgen.scoreboard-lag"
 
 
 def resource_envelope(schema_id: str, body: Mapping[str, Any]) -> dict[str, Any]:

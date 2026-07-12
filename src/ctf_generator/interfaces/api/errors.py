@@ -15,6 +15,10 @@ exception                                    status   code
 ``LookupError``                              404      not_found
 ``IntegrityError`` / ``QuotaExceededError``  409      conflict
 domain ``IdempotencyConflictError``          409      conflict
+``ChallengeNotAttachedError``                404      not_found
+``FlagUnavailableError``                     409      conflict
+``FlagRejectedError`` / other                422      validation_failed
+``SubmissionProcessingError`` base
 ``PreconditionFailedError``                  412      precondition_failed
 non-JSON body (``json_invalid``)             415      unsupported_media_type
 ``CompetitionWindowError``                   422      validation_failed
@@ -47,6 +51,12 @@ from starlette.exceptions import HTTPException as StarletteHTTPException
 
 from ctf_generator.application.catalog.competition_service import (
     CompetitionWindowError,
+)
+from ctf_generator.domain.ledger.processing import (
+    ChallengeNotAttachedError,
+    FlagRejectedError,
+    FlagUnavailableError,
+    SubmissionProcessingError,
 )
 from ctf_generator.domain.ledger.processing import (
     IdempotencyConflictError as DomainIdempotencyConflictError,
@@ -184,6 +194,39 @@ async def _handle_domain_idempotency_conflict(
     return _response(request, 409, "conflict", str(exc) or "idempotency conflict")
 
 
+async def _handle_flag_rejected(
+    request: Request, exc: FlagRejectedError
+) -> JSONResponse:
+    # A malformed candidate answer (empty / control chars / over-long). The
+    # reason only -- the exception never carries the candidate.
+    return _response(
+        request, 422, "validation_failed", str(exc) or "invalid answer"
+    )
+
+
+async def _handle_flag_unavailable(
+    request: Request, exc: FlagUnavailableError
+) -> JSONResponse:
+    # The published version carries no expected flag: an organizer-side
+    # configuration defect, surfaced as a conflict with a generic message (never
+    # the spec internals).
+    return _response(
+        request, 409, "conflict", "challenge is not configured for submissions"
+    )
+
+
+async def _handle_submission_processing_error(
+    request: Request, exc: SubmissionProcessingError
+) -> JSONResponse:
+    # Base handler for the remaining submission-processing failures (e.g. a
+    # draft version is not submittable). ``ChallengeNotAttachedError`` (404) and
+    # ``IdempotencyConflictError`` (409) are more-derived and keep their own
+    # handlers via MRO precedence; the message here is domain-authored, no secret.
+    return _response(
+        request, 422, "validation_failed", str(exc) or "submission not processable"
+    )
+
+
 async def _handle_value_error(request: Request, exc: ValueError) -> JSONResponse:
     return _response(request, 400, "invalid_request", str(exc) or "invalid request")
 
@@ -221,6 +264,16 @@ def register_exception_handlers(app: FastAPI) -> None:
     app.add_exception_handler(QuotaExceededError, _handle_quota_exceeded)
     app.add_exception_handler(
         DomainIdempotencyConflictError, _handle_domain_idempotency_conflict
+    )
+    # Submission-processing errors. ChallengeNotAttachedError is registered
+    # explicitly so it stays a 404 (its own MRO entry wins over the
+    # SubmissionProcessingError base handler); the two flag errors get their
+    # specific status; the base catches the rest (e.g. draft-not-submittable).
+    app.add_exception_handler(ChallengeNotAttachedError, _handle_lookup_error)
+    app.add_exception_handler(FlagRejectedError, _handle_flag_rejected)
+    app.add_exception_handler(FlagUnavailableError, _handle_flag_unavailable)
+    app.add_exception_handler(
+        SubmissionProcessingError, _handle_submission_processing_error
     )
     app.add_exception_handler(LookupError, _handle_lookup_error)
     app.add_exception_handler(PermissionError, _handle_permission_error)
