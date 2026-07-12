@@ -36,6 +36,44 @@ Conventions used throughout:
 
 ---
 
+## Implementation status
+
+This document began as design-only; aggregates are now landing incrementally in
+M6, each following the Competition template (domain aggregate → ORM model →
+mapper → repository → Alembic migration → Docker-gated Postgres tests). Status:
+
+| Aggregate(s) | Migration | Status |
+|---|---|---|
+| `Competition` (§3) | `0002_competitions` | **Implemented** |
+| `User`, `Team`, `Membership` (§2) | `0003_identity` | **Implemented** (Epic 1) |
+| `ChallengeDefinition`, `ChallengeVersion`, `ChallengeBuild` (§4) | — | Pending (Epic 2) |
+| `Submission`, `Solve`, `ScoreEvent` (§5) | — | Pending (Epic 3) |
+
+Decisions made while implementing §2 (Identity), consistent with this design:
+
+- **Domain business keys, not surrogate uuids.** The domain aggregates
+  (`ctf_generator.domain.identity`) are keyed by business identity — `User` by
+  `email` (the design's case-insensitive login identity), `Team` by
+  `(competition_id, name)`, `Membership` by `(user_email, competition_id)`. The
+  surrogate `uuid` PKs and the lifecycle columns (`archived_at`, `created_at`)
+  live only in the ORM and never surface to the domain; repositories translate
+  business keys ↔ surrogate keys and fail loudly (`LookupError`) on a dangling
+  reference before any write.
+- **Role enum single source of truth.** The eight roles live in
+  `domain.identity.models.VALID_ROLES`; the ORM `CHECK` and the migration render
+  their SQL list from a sorted copy of that set, so the domain validation and
+  the DB constraint cannot silently drift.
+- **Cross-competition team integrity is a DB guarantee.** `teams` carries the
+  extra `UNIQUE (id, competition_id)` so `memberships (team_id, competition_id)`
+  can composite-FK it — a member can never be placed on a team from another
+  competition. Because that FK is MATCH SIMPLE (not enforced when `team_id` is
+  NULL), `memberships.competition_id` also FKs `competitions` directly so the
+  unteamed case stays integrity-checked.
+- **No `organizations` table.** Organization is not represented in the domain
+  (and is not in the Scope list above); it is intentionally out of Epic 1.
+
+---
+
 ## 1. ER diagram (ASCII)
 
 ```
