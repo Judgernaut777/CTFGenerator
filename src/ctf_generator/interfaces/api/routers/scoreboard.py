@@ -19,7 +19,6 @@ from ..envelopes import (
 from ..pagination import clamp_limit, paginate
 from ..schemas.common import ERROR_RESPONSES
 from ..schemas.scoreboard import (
-    ScoreboardEntryResponse,
     ScoreboardLagResponse,
     entry_sort_key,
     entry_to_response,
@@ -34,7 +33,6 @@ router = APIRouter(tags=["scoreboard"])
     "/competitions/{competition_id}/scoreboard",
     response_model=None,
     responses={
-        200: {"model": ScoreboardEntryResponse, "description": "OK"},
         **{k: ERROR_RESPONSES[k] for k in (400, 401, 403, 422, 429)},
     },
 )
