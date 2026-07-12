@@ -6,13 +6,13 @@ This is the seam M10 replaces with real local-auth + OIDC. Slice a ships:
   permissions, optional org/team context). Framework-free.
 * :class:`Permission` -- the fine-grained permission enum, and ``ROLE_PERMISSIONS``
   mapping the identity roles (``VALID_ROLES``) to permission sets.
-* :class:`Authenticator` -- a ``Protocol`` the API programs against, and
-  :class:`StubAuthenticator`, a dev-only bearer-token implementation for slice a
-  (a static ``token -> Principal`` table). **TODO(M10): replace StubAuthenticator
-  with real credential verification (local password/session + OIDC).** The stub
-  never logs or echoes a token. The module-level app registers a dev token ONLY
-  when ``CTFGEN_API_INSECURE_STUB_AUTH=1`` is explicitly set (see
-  ``app._authenticator_from_env``), so it is never a silent production default.
+* :class:`Authenticator` -- a ``Protocol`` the API programs against. The
+  production implementation is :class:`~.db_authenticator.DbAuthenticator`
+  (M10a: resolves a Bearer *session* token to a Principal from real local-auth
+  data). :class:`StubAuthenticator` (a static ``token -> Principal`` table)
+  survives only for dev/test behind the explicit ``CTFGEN_API_INSECURE_STUB_AUTH=1``
+  flag, so it is never a silent production default; it never logs/echoes a token.
+  (Federated OIDC/SSO is the next slice's implementation of the same protocol.)
 * dependencies: :func:`get_principal` (delegates to the app's authenticator),
   :func:`require_permission` (403 if the principal lacks the permission),
   :func:`get_database` (the request-scoped DB handle), and the per-resource
@@ -22,12 +22,14 @@ This is the seam M10 replaces with real local-auth + OIDC. Slice a ships:
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from dataclasses import dataclass, field
 from enum import StrEnum
 from typing import Protocol
 
 from fastapi import Depends, Request
 
+from ctf_generator.application.auth import AuthService
 from ctf_generator.application.authoring.build_service import BuildService
 from ctf_generator.application.catalog import (
     ChallengeDefinitionService,
@@ -167,13 +169,29 @@ TENANCY_UNRESTRICTED_ROLES = frozenset(
 @dataclass(frozen=True)
 class Principal:
     """An authenticated caller. Carries only identity + authorization context --
-    never a credential/secret."""
+    never a credential/secret.
+
+    ``roles`` is the FLAT union of the caller's deployment-global system roles
+    (``system_roles``) and every competition role it holds across its
+    memberships; ``permissions`` resolves from that flat set via
+    ``ROLE_PERMISSIONS`` (unchanged from slice a, so ``require_permission`` is
+    identical). The M10a additions are populated best-effort for forward
+    compatibility -- M10b tightens authorization to per-competition scoping using
+    ``memberships``:
+
+    * ``system_roles`` -- the deployment-global roles (``admin`` / ``support``)
+      granted on the auth account.
+    * ``memberships`` -- ``competition_id -> (role, team_name)`` for every
+      competition the caller has a membership in.
+    """
 
     subject: str
     roles: frozenset[str] = field(default_factory=frozenset)
     permissions: frozenset[Permission] = field(default_factory=frozenset)
     org: str | None = None
     team: str | None = None
+    system_roles: frozenset[str] = field(default_factory=frozenset)
+    memberships: Mapping[str, tuple[str, str | None]] = field(default_factory=dict)
 
     def has(self, permission: Permission) -> bool:
         return permission in self.permissions
@@ -185,8 +203,14 @@ def principal_for(
     *,
     org: str | None = None,
     team: str | None = None,
+    system_roles: frozenset[str] | set[str] | list[str] | None = None,
+    memberships: Mapping[str, tuple[str, str | None]] | None = None,
 ) -> Principal:
-    """Build a principal, resolving its permission set from its roles."""
+    """Build a principal, resolving its permission set from its (flat) roles.
+
+    ``system_roles`` / ``memberships`` are optional forward-compat context; they
+    do NOT change permission resolution (which stays over the flat ``roles``
+    set), so existing callers that pass only ``roles`` are unaffected."""
     role_set = frozenset(roles)
     perms: set[Permission] = set()
     for role in role_set:
@@ -197,6 +221,8 @@ def principal_for(
         permissions=frozenset(perms),
         org=org,
         team=team,
+        system_roles=frozenset(system_roles or frozenset()),
+        memberships=dict(memberships or {}),
     )
 
 
@@ -306,6 +332,21 @@ def get_database(request: Request) -> Database:
     if database is None:  # pragma: no cover - misconfiguration guard
         raise RuntimeError("no database configured on the API app")
     return database
+
+
+def get_auth_service(request: Request) -> AuthService:
+    """The shared, app-scoped :class:`AuthService`.
+
+    Unlike the per-resource services (constructed per request over the database
+    handle), the auth service is a single stateless instance stashed on
+    ``app.state`` at startup -- so its password hasher / session TTL / lazily
+    computed dummy-hash are shared with the app's ``DbAuthenticator`` (the seam
+    that resolves bearer sessions to a ``Principal``). Every method still opens
+    its own unit of work; nothing request-scoped is held."""
+    service = getattr(request.app.state, "auth_service", None)
+    if service is None:
+        raise RuntimeError("no auth service configured on the API app")
+    return service
 
 
 def get_competition_service(

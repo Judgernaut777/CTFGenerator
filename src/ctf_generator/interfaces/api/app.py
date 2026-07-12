@@ -17,6 +17,7 @@ import os
 from fastapi import FastAPI
 from starlette.middleware.cors import CORSMiddleware
 
+from ctf_generator.application.auth import AuthService
 from ctf_generator.infrastructure.database.config import (
     DatabaseConfig,
     DatabaseConfigError,
@@ -24,6 +25,7 @@ from ctf_generator.infrastructure.database.config import (
 from ctf_generator.infrastructure.database.session import Database
 
 from .audit import AuditSink, LoggingAuditSink
+from .db_authenticator import DbAuthenticator
 from .deps import Authenticator, StubAuthenticator, principal_for
 from .errors import register_exception_handlers
 from .idempotency import IdempotencyStore, InMemoryIdempotencyStore
@@ -34,6 +36,7 @@ from .middleware import (
     TokenBucketLimiter,
 )
 from .routers import (
+    auth,
     builds,
     challenge_definitions,
     challenge_versions,
@@ -58,6 +61,7 @@ def create_app(
     *,
     database: Database | None = None,
     authenticator: Authenticator | None = None,
+    auth_service: AuthService | None = None,
     idempotency_store: IdempotencyStore | None = None,
     audit_sink: AuditSink | None = None,
     rate_limiter=None,
@@ -75,6 +79,13 @@ def create_app(
 
     # Injected collaborators live on app.state; the dependencies read them.
     app.state.database = database
+    # The shared, app-scoped auth service (owns the password hasher + session
+    # TTL). Built over the database when not injected; the /auth routes read it
+    # via get_auth_service, and the module-level app shares this instance with
+    # its DbAuthenticator so both agree on hashing/session policy.
+    app.state.auth_service = auth_service or (
+        AuthService(database) if database is not None else None
+    )
     app.state.authenticator = authenticator or StubAuthenticator()
     app.state.idempotency_store = idempotency_store or InMemoryIdempotencyStore()
     app.state.audit_sink = audit_sink or LoggingAuditSink()
@@ -100,6 +111,7 @@ def create_app(
         )
 
     for module in (
+        auth,
         competitions,
         teams,
         challenge_definitions,
@@ -168,24 +180,31 @@ def create_worker_app(
     return app
 
 
-def _authenticator_from_env() -> Authenticator:
-    """Build the stub authenticator for the module-level app.
+def _authenticator_from_env(auth_service: AuthService | None) -> Authenticator:
+    """Build the authenticator for the module-level (production) app.
 
-    The insecure dev bearer token from ``CTFGEN_API_DEV_TOKEN`` is registered
-    ONLY when ``CTFGEN_API_INSECURE_STUB_AUTH=1`` is explicitly set -- so the stub
-    can never be a silent production default. With the flag set and a token
-    present it registers an admin principal and emits a prominent warning; without
-    the flag no token authenticates (every request is 401 until M10 wires real
-    auth). The token value is never logged or echoed."""
-    stub = StubAuthenticator()
+    The PRODUCTION default is the real :class:`DbAuthenticator` over the shared
+    :class:`AuthService` -- it resolves a Bearer session token to a Principal from
+    real data (M10a). The insecure ``StubAuthenticator`` is used ONLY when
+    ``CTFGEN_API_INSECURE_STUB_AUTH=1`` is explicitly set (dev/test escape hatch):
+    with the flag set and ``CTFGEN_API_DEV_TOKEN`` present it registers an admin
+    principal and emits a prominent warning. Without a configured database (no
+    auth service) and without the flag, an empty stub authenticates nothing (every
+    request is 401) rather than silently trusting anyone. No token is ever
+    logged/echoed."""
     if os.environ.get("CTFGEN_API_INSECURE_STUB_AUTH") == "1":
+        stub = StubAuthenticator()
         token = os.environ.get("CTFGEN_API_DEV_TOKEN")
         if token:
             logging.getLogger("ctfgen.api").warning(
                 "INSECURE: stub bearer auth enabled -- never use in production"
             )
             stub.register(token, principal_for("dev-admin", {"admin"}))
-    return stub
+        return stub
+    if auth_service is not None:
+        return DbAuthenticator(auth_service)
+    # No database configured: nothing can authenticate (fail closed).
+    return StubAuthenticator()
 
 
 def _database_from_env() -> Database | None:
@@ -201,10 +220,15 @@ def _database_from_env() -> Database | None:
 # (opt-OUT via CTFGEN_API_RATE_LIMIT=0) so the shipped production app is never
 # unthrottled; the create_app/test injection path keeps ApiSettings' False
 # default so the unit/OpenAPI suites stay unthrottled.
+_module_database = _database_from_env()
+_module_auth_service = (
+    AuthService(_module_database) if _module_database is not None else None
+)
 app = create_app(
     ApiSettings(
         rate_limit_enabled=os.environ.get("CTFGEN_API_RATE_LIMIT", "1") != "0",
     ),
-    database=_database_from_env(),
-    authenticator=_authenticator_from_env(),
+    database=_module_database,
+    auth_service=_module_auth_service,
+    authenticator=_authenticator_from_env(_module_auth_service),
 )
