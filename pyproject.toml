@@ -63,12 +63,19 @@ oidc = ["pyjwt[crypto]>=2.8"]
 # web tests SKIP cleanly when this extra is absent, exactly like [api]/[db]. The
 # legacy stdlib dashboard (dashboard_server.py) remains dependency-free.
 web = ["jinja2>=3.1"]
+# M13 supported platform CLI (interfaces/cli platform areas, e.g. `ctfgen auth`).
+# The CLI talks to the platform HTTP API over the network with a session bearer
+# token, so httpx is its ONLY dependency -- it deliberately does NOT pull in
+# fastapi/uvicorn (that is the server side, [api]). The legacy generator CLI
+# stays dependency-free; the platform areas fail cleanly with an "install the
+# extra" message when httpx is absent.
+cli = ["httpx>=0.27"]
 # Lint / type / security tooling used by CI (.github/workflows/pr.yml). Kept out
 # of `dev` so `pip install .[dev]` for running tests stays minimal.
 ci = ["ruff>=0.6", "mypy>=1.11", "bandit>=1.7", "pip-audit>=2.7", "build>=1.2", "twine>=5"]
 
 [project.scripts]
-ctfgen = "ctf_generator.cli:main"
+ctfgen = "ctf_generator.interfaces.cli.entry:main"
 ctfgen-mcp = "ctf_generator.mcp_server:main"
 ctfgen-worker = "ctf_generator.workers.worker:main"
 ctfgen-admin = "ctf_generator.interfaces.cli.admin:main"
@@ -132,6 +139,11 @@ ignore = ["E501"] # line length is enforced by the formatter, not the linter
 # strings) are the point of a federated-login test double, not real secrets.
 "tests/test_oidc_flow_integration.py" = ["S105", "S106"]
 "tests/fixtures/fake_idp.py" = ["S105", "S106"]
+# The platform-CLI tests carry fake bearer tokens / session tokens as literals
+# (token=/token_override= kwargs) -- S105/S106 (hardcoded "secret"-looking
+# strings) are the point of an auth-client test double, not real secrets.
+"tests/test_cli_client_unit.py" = ["S105", "S106"]
+"tests/test_cli_auth_integration.py" = ["S105", "S106"]
 
 [tool.mypy]
 python_version = "3.11"
