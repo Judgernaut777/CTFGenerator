@@ -109,7 +109,47 @@ transaction, gap-safe projection):
   live credential per worker so rotation is race-proof;
   `worker_credentials_freeze()` (owned by `0007`) permits exactly the
   `revoked_at NULL→value` stamp while `reject_mutation()` (owned by `0004`,
-  reused by name) blocks DELETE/TRUNCATE.
+  reused by name) blocks DELETE/TRUNCATE. **`revoked` is terminal on the trust
+  axis** — the `workers_revoked_terminal()` BEFORE UPDATE trigger (owned by
+  `0007`) rejects any change to `trust_state` once a row is `revoked` (the
+  pairing CHECK alone would let a raw UPDATE un-revoke by nulling
+  `revoked_at`).
+- **M8 OBLIGATION / INVARIANT — the worker-facing queue API.**
+  `JobQueue.claim()` accepts a `worker_id` *string* with no `workers`-table FK
+  and consults **no** trust/drain/quarantine/heartbeat state; it enforces queue
+  mechanics only. Therefore the M8 worker-facing API MUST expose only an
+  application-layer `WorkerJobService` that, before **every** queue verb
+  (claim / heartbeat / complete / fail): (i) authenticates the presented
+  credential, (ii) rejects a non-trusted / quarantined / draining /
+  heartbeat-stale worker, and (iii) derives `worker_id` **exclusively** from
+  the authenticated credential. Raw `JobQueue.claim` must never be reachable
+  with a request-supplied `worker_id`. `Worker.drain_requested_at` is currently
+  **dead state** whose enforcement lands in M8. (`authenticate()` already
+  returns an `AuthenticatedWorker` carrying credential id + scopes + expiry, and
+  `require_scope()` gates a verb on a granted scope, so M8 has the primitives.)
+- **Submission at-most-one-solve does not depend on the advisory lock or the
+  isolation level.** READ COMMITTED is pinned explicitly at engine creation
+  (a server/DSN `default_transaction_isolation` override cannot silently break
+  the post-lock re-check's fresh-snapshot assumption). The solve insert + its
+  `solve` ScoreEvent run inside a SAVEPOINT: a racing winner surfaces as
+  `uq_solves_*` → the savepoint rolls back only the solve/event and the
+  submission stands as an accepted duplicate, so the advisory lock is a pure
+  throughput optimization. The submission insert is likewise wrapped so a
+  concurrent cross-competition reuse of a `submission_id` (which takes a
+  *different* competition lock and is not serialized) collapses to the same
+  `IdempotencyConflictError` as sequential reuse rather than a raw
+  IntegrityError.
+- **The projector separates transient from deterministic (poison) failures.**
+  A poison event (`ProjectionUnsupportedEventError` / a malformed-`ts`
+  `ProjectionMalformedEventError`) isolates only its competition to `failed`;
+  a transient error (DB connectivity/deadlock/timeout) leaves the claimed rows
+  `pending` (re-claimable — the claim lock died with the rolled-back txn),
+  bumping an attempts counter and diverting to `failed` only after a bound.
+  `ProjectionLag.failed_count` makes a wedged competition observable. Stored
+  errors are sanitized (class + message, `[SQL: …]` echo stripped). The
+  submission service and projector share one **public** advisory-lock seam
+  (`infrastructure.database.locks.acquire_competition_lock`) rather than
+  reaching into `_resolve` or each other's private helpers.
 
 Decisions made while implementing §6 (the ledger), consistent with this design:
 
