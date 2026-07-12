@@ -25,6 +25,7 @@ from .challenges.models import (
     Submission,
 )
 from .competitions.events import EventStore
+from .identity.models import Membership, Team, User
 
 
 class CompetitionRepository(Protocol):
@@ -48,6 +49,77 @@ class CompetitionRepository(Protocol):
     def update(self, competition: CompetitionConfig) -> None:
         """Update the mutable fields of an existing competition, keyed by its
         (immutable) competition_id. Raises if the competition does not exist."""
+        ...
+
+
+class UserRepository(Protocol):
+    """Stores and retrieves users, keyed by their (case-insensitive) email.
+
+    Mirrors the Competition contract (add / get / list / update). ``get`` is
+    case-insensitive -- the store's uniqueness is over ``lower(email)`` -- and
+    ``update`` mutates only the mutable business fields (``display_name``),
+    keyed by the immutable ``email`` identity. No delete/archive is exposed;
+    archival, when needed, is a lifecycle transition, not a row removal.
+    """
+
+    def add(self, user: User) -> None:
+        ...
+
+    def get(self, email: str) -> User | None:
+        ...
+
+    def list(self) -> list[User]:
+        ...
+
+    def update(self, user: User) -> None:
+        """Update the mutable fields of an existing user, keyed by ``email``.
+        Raises if the user does not exist."""
+        ...
+
+
+class TeamRepository(Protocol):
+    """Stores competition-scoped teams, keyed by ``(competition_id, name)``.
+
+    A team belongs to exactly one competition. ``add`` fails loudly if the
+    owning competition does not exist (the store's FK), and a duplicate
+    ``(competition_id, name)`` is rejected. Listing is competition-scoped --
+    teams are never enumerated across competitions.
+    """
+
+    def add(self, team: Team) -> None:
+        ...
+
+    def get(self, competition_id: str, name: str) -> Team | None:
+        ...
+
+    def list_for_competition(self, competition_id: str) -> list[Team]:
+        ...
+
+
+class MembershipRepository(Protocol):
+    """Stores memberships -- a user's role and team placement in a competition.
+
+    Keyed by ``(user_email, competition_id)`` (at most one per pair). ``add``
+    resolves the referenced user, competition and (optional) team by their
+    business identities and fails loudly if any is missing or if the team
+    belongs to a different competition (the store enforces the latter with a
+    composite FK). ``update`` changes only the mutable ``role`` / ``team``
+    placement, keyed by the immutable ``(user_email, competition_id)``.
+    """
+
+    def add(self, membership: Membership) -> None:
+        ...
+
+    def get(self, user_email: str, competition_id: str) -> Membership | None:
+        ...
+
+    def list_for_competition(self, competition_id: str) -> list[Membership]:
+        ...
+
+    def update(self, membership: Membership) -> None:
+        """Update the mutable fields (role, team placement) of an existing
+        membership, keyed by ``(user_email, competition_id)``. Raises if it does
+        not exist."""
         ...
 
 
