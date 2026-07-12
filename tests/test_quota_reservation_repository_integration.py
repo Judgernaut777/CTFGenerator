@@ -248,6 +248,98 @@ class QuotaReserveReleaseTests(unittest.TestCase):
 
 
 @unittest.skipUnless(_ENABLED, _SKIP_REASON)
+class QuotaReactivateRenewTests(unittest.TestCase):
+    def _reserve(self, db, rid, *, amount=2):
+        demand = ResourceDemand(
+            reservation_id=rid,
+            worker_key="w1",
+            expires_at=_NOW + timedelta(hours=1),
+            items=(_platform_item(amount=amount),),
+        )
+        with db.session_scope() as s:
+            SqlAlchemyQuotaLedger(s).reserve(demand, _NOW)
+
+    def test_reserve_release_reactivate_reholds_capacity(self) -> None:
+        # A released reservation holds ZERO capacity; reusing its id must
+        # re-reserve (counter back up), not replay the stale placement.
+        with _migrated_database() as (db, _url):
+            _seed_quota(db, "active_instances", 5)
+            rid = str(uuid.uuid4())
+            self._reserve(db, rid, amount=2)
+            self.assertEqual(_reserved(db, "active_instances"), 2)
+            with db.session_scope() as s:
+                self.assertTrue(SqlAlchemyQuotaLedger(s).release(rid, _NOW))
+            self.assertEqual(_reserved(db, "active_instances"), 0)
+
+            with db.session_scope() as s:
+                reheld = SqlAlchemyQuotaLedger(s).reactivate(
+                    rid, _NOW + timedelta(hours=2), _NOW
+                )
+            self.assertEqual(reheld.state, "held")
+            self.assertIsNone(reheld.released_at)
+            self.assertEqual(_reserved(db, "active_instances"), 2)
+
+    def test_reactivate_held_is_idempotent_no_double_count(self) -> None:
+        with _migrated_database() as (db, _url):
+            _seed_quota(db, "active_instances", 5)
+            rid = str(uuid.uuid4())
+            self._reserve(db, rid, amount=2)
+            with db.session_scope() as s:
+                reheld = SqlAlchemyQuotaLedger(s).reactivate(
+                    rid, _NOW + timedelta(hours=2), _NOW
+                )
+            self.assertEqual(reheld.state, "held")
+            # A still-held reservation is returned unchanged -- no re-increment.
+            self.assertEqual(_reserved(db, "active_instances"), 2)
+
+    def test_reactivate_missing_raises_lookup(self) -> None:
+        with _migrated_database() as (db, _url):
+            with self.assertRaises(LookupError):
+                with db.session_scope() as s:
+                    SqlAlchemyQuotaLedger(s).reactivate(
+                        str(uuid.uuid4()), _NOW + timedelta(hours=1), _NOW
+                    )
+
+    def test_renew_extends_ttl_preventing_sweep(self) -> None:
+        with _migrated_database() as (db, _url):
+            _seed_quota(db, "active_instances", 5)
+            rid = str(uuid.uuid4())
+            demand = ResourceDemand(
+                reservation_id=rid,
+                worker_key="w1",
+                expires_at=_NOW - timedelta(minutes=1),  # already expired at _NOW
+                items=(_platform_item(),),
+            )
+            with db.session_scope() as s:
+                SqlAlchemyQuotaLedger(s).reserve(demand, _NOW - timedelta(hours=1))
+            with db.session_scope() as s:
+                before = [r.reservation_id for r in SqlAlchemyQuotaLedger(s).list_expired(_NOW)]
+            self.assertIn(rid, before)
+
+            with db.session_scope() as s:
+                SqlAlchemyQuotaLedger(s).renew(rid, _NOW + timedelta(hours=1), _NOW)
+            with db.session_scope() as s:
+                after = [r.reservation_id for r in SqlAlchemyQuotaLedger(s).list_expired(_NOW)]
+            self.assertNotIn(rid, after)
+
+    def test_renew_released_or_missing_raises_lookup(self) -> None:
+        with _migrated_database() as (db, _url):
+            _seed_quota(db, "active_instances", 5)
+            rid = str(uuid.uuid4())
+            self._reserve(db, rid, amount=1)
+            with db.session_scope() as s:
+                SqlAlchemyQuotaLedger(s).release(rid, _NOW)
+            with self.assertRaises(LookupError):
+                with db.session_scope() as s:
+                    SqlAlchemyQuotaLedger(s).renew(rid, _NOW + timedelta(hours=1), _NOW)
+            with self.assertRaises(LookupError):
+                with db.session_scope() as s:
+                    SqlAlchemyQuotaLedger(s).renew(
+                        str(uuid.uuid4()), _NOW + timedelta(hours=1), _NOW
+                    )
+
+
+@unittest.skipUnless(_ENABLED, _SKIP_REASON)
 class QuotaConcurrencyTests(unittest.TestCase):
     def test_concurrent_reserves_cannot_exceed_pool(self) -> None:
         pool = 5
@@ -289,7 +381,7 @@ class QuotaConcurrencyTests(unittest.TestCase):
 
     def test_reconcile_recomputes_from_held_items(self) -> None:
         with _migrated_database() as (db, _url):
-            _seed_quota(db, "active_instances", 10)
+            _seed_quota(db, "active_instances", 100)
             rid = str(uuid.uuid4())
             demand = ResourceDemand(
                 reservation_id=rid,
@@ -299,7 +391,9 @@ class QuotaConcurrencyTests(unittest.TestCase):
             )
             with db.session_scope() as s:
                 SqlAlchemyQuotaLedger(s).reserve(demand, _NOW)
-            # Corrupt the counter, then self-heal.
+            # Corrupt the counter, then self-heal. (99 stays within the limit so
+            # the within-limit UPDATE guard permits the injected drift; the guard
+            # only blocks raising reserved_value ABOVE limit_value.)
             with db.session_scope() as s:
                 s.execute(
                     sa.text(
@@ -311,6 +405,55 @@ class QuotaConcurrencyTests(unittest.TestCase):
                 changed = SqlAlchemyQuotaLedger(s).reconcile_counters()
             self.assertGreaterEqual(changed, 1)
             self.assertEqual(_reserved(db, "active_instances"), 3)
+
+    def test_reconcile_does_not_lose_concurrent_reserve(self) -> None:
+        # reconcile takes the quota-row FOR UPDATE locks BEFORE summing held
+        # items, so a reserve committing during the sweep is either already
+        # counted or blocked behind the lock -- never overwritten.
+        with _migrated_database() as (db, _url):
+            _seed_quota(db, "active_instances", 100)
+            n = 4
+            barrier = threading.Barrier(n + 1)
+            errors: list[Exception] = []
+            lock = threading.Lock()
+
+            def reserve_one() -> None:
+                demand = ResourceDemand(
+                    reservation_id=str(uuid.uuid4()),
+                    worker_key="w1",
+                    expires_at=_NOW + timedelta(hours=1),
+                    items=(_platform_item(),),
+                )
+                barrier.wait()
+                try:
+                    with db.session_scope() as s:
+                        SqlAlchemyQuotaLedger(s).reserve(demand, _NOW)
+                except Exception as exc:  # pragma: no cover - failure path
+                    with lock:
+                        errors.append(exc)
+
+            def reconcile() -> None:
+                barrier.wait()
+                try:
+                    with db.session_scope() as s:
+                        SqlAlchemyQuotaLedger(s).reconcile_counters()
+                except Exception as exc:  # pragma: no cover - failure path
+                    with lock:
+                        errors.append(exc)
+
+            threads = [threading.Thread(target=reserve_one) for _ in range(n)]
+            threads.append(threading.Thread(target=reconcile))
+            for t in threads:
+                t.start()
+            for t in threads:
+                t.join()
+
+            self.assertEqual(errors, [])
+            # Every reserve committed and none was lost by the mid-flight sweep.
+            self.assertEqual(_reserved(db, "active_instances"), n)
+            # A final reconcile is a no-op: the counter already equals held sum.
+            with db.session_scope() as s:
+                self.assertEqual(SqlAlchemyQuotaLedger(s).reconcile_counters(), 0)
 
     def test_list_expired_returns_stale_holds(self) -> None:
         with _migrated_database() as (db, _url):
@@ -351,7 +494,10 @@ class QuotaGuardTests(unittest.TestCase):
                         )
                     )
 
-    def test_delete_drained_quota_allowed(self) -> None:
+    def test_delete_never_referenced_quota_allowed(self) -> None:
+        # A pool that was NEVER reserved against (no item history, reserved 0) is
+        # freely deletable -- neither the reserved>0 guard nor the composite FK
+        # from reservation items applies.
         with _migrated_database() as (db, _url):
             _seed_quota(db, "active_instances", 5)
             with db.session_scope() as s:
@@ -367,6 +513,74 @@ class QuotaGuardTests(unittest.TestCase):
                         "platform", PLATFORM_SCOPE_KEY, "active_instances"
                     )
                 )
+
+    def test_delete_drained_quota_with_item_history_blocked_by_fk(self) -> None:
+        # Once a pool has been reserved against, its append-only item history
+        # keeps a composite FK (ON DELETE RESTRICT) onto the quota row -- so even
+        # after the hold is RELEASED (reserved back to 0, past the reserved>0
+        # guard) the quota row is NOT deletable while that history exists.
+        with _migrated_database() as (db, _url):
+            _seed_quota(db, "active_instances", 5)
+            rid = str(uuid.uuid4())
+            demand = ResourceDemand(
+                reservation_id=rid,
+                worker_key="w1",
+                expires_at=_NOW + timedelta(hours=1),
+                items=(_platform_item(),),
+            )
+            with db.session_scope() as s:
+                SqlAlchemyQuotaLedger(s).reserve(demand, _NOW)
+            with db.session_scope() as s:
+                self.assertTrue(SqlAlchemyQuotaLedger(s).release(rid, _NOW))
+            self.assertEqual(_reserved(db, "active_instances"), 0)
+            with self.assertRaises(IntegrityError):
+                with db.session_scope() as s:
+                    s.execute(
+                        sa.text(
+                            "DELETE FROM resource_quotas "
+                            "WHERE dimension = 'active_instances'"
+                        )
+                    )
+
+    def test_update_raising_reserved_above_limit_rejected(self) -> None:
+        with _migrated_database() as (db, _url):
+            _seed_quota(db, "active_instances", 1)  # limit 1, reserved 0
+            with self.assertRaises(ProgrammingError):
+                with db.session_scope() as s:
+                    s.execute(
+                        sa.text(
+                            "UPDATE resource_quotas SET reserved_value = 2 "
+                            "WHERE dimension = 'active_instances'"
+                        )
+                    )
+
+    def test_limit_cut_below_current_holds_is_grandfathered(self) -> None:
+        # Reducing a limit below the currently-held count is legal (holds
+        # grandfathered): the within-limit guard fires only on an INCREASE of
+        # reserved_value past the limit, never on a limit reduction.
+        with _migrated_database() as (db, _url):
+            _seed_quota(db, "active_instances", 5)
+            demand = ResourceDemand(
+                reservation_id=str(uuid.uuid4()),
+                worker_key="w1",
+                expires_at=_NOW + timedelta(hours=1),
+                items=(_platform_item(),),
+            )
+            with db.session_scope() as s:
+                SqlAlchemyQuotaLedger(s).reserve(demand, _NOW)
+            with db.session_scope() as s:  # no exception
+                s.execute(
+                    sa.text(
+                        "UPDATE resource_quotas SET limit_value = 0 "
+                        "WHERE dimension = 'active_instances'"
+                    )
+                )
+            with db.session_scope() as s:
+                quota = SqlAlchemyQuotaPolicyRepository(s).get(
+                    "platform", PLATFORM_SCOPE_KEY, "active_instances"
+                )
+            self.assertEqual(quota.limit_value, 0)
+            self.assertEqual(quota.reserved_value, 1)
 
     def test_reservation_items_are_append_only(self) -> None:
         with _migrated_database() as (db, _url):
