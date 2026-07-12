@@ -574,6 +574,32 @@ def job_to_orm(
     ``queued`` job may be enqueued -- anything else is a programming error."""
     if job.status != "queued":
         raise ValueError(f"only queued jobs can be enqueued, got {job.status!r}")
+    # A freshly enqueued job carries no lease/lifecycle/result state and has
+    # attempt_count 0 -- fail loud rather than silently drop a caller-supplied
+    # stamp on the insert path (every later mutation is a locked-row update).
+    for _field in (
+        "claimed_by",
+        "heartbeat_at",
+        "lease_expires_at",
+        "cancel_requested_at",
+        "started_at",
+        "finished_at",
+        "error_class",
+        "error_detail",
+        "result_json",
+        "result_ref",
+        "log_ref",
+    ):
+        if getattr(job, _field) is not None:
+            raise ValueError(
+                f"a freshly enqueued job must not carry {_field}, got "
+                f"{getattr(job, _field)!r}"
+            )
+    if job.attempt_count != 0:
+        raise ValueError(
+            f"a freshly enqueued job must have attempt_count 0, got "
+            f"{job.attempt_count!r}"
+        )
     return JobRow(
         id=_as_uuid(job.job_id),
         job_type=job.job_type,
@@ -695,6 +721,21 @@ def worker_to_orm(worker: Worker, existing: WorkerRow | None = None) -> WorkerRo
             raise ValueError(
                 f"only pending workers can be registered, got {worker.trust_state!r}"
             )
+        # A freshly registered worker is pending with none of the trust/drain/
+        # quarantine/heartbeat overlays set -- fail loud rather than silently
+        # drop a caller-supplied operational stamp on the insert path.
+        for _field in (
+            "revoked_at",
+            "drain_requested_at",
+            "quarantined_at",
+            "quarantine_reason",
+            "last_heartbeat_at",
+        ):
+            if getattr(worker, _field) is not None:
+                raise ValueError(
+                    f"a freshly registered worker must not carry {_field}, got "
+                    f"{getattr(worker, _field)!r}"
+                )
         return WorkerRow(
             name=worker.name,
             runtime_type=worker.runtime_type,
