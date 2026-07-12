@@ -87,24 +87,39 @@ class ApiClient:
         json: Any = None,
         params: Mapping[str, Any] | None = None,
         idempotency_key: str | None = None,
+        headers: Mapping[str, str] | None = None,
         authed: bool = True,
+        return_etag: bool = False,
     ) -> Any:
         """Send one request and return the unwrapped success body.
 
         Non-2xx -> a typed :class:`ApiError` (or :class:`AuthRequired` on an
         unrecoverable 401 for an authed request). A 204 / empty body -> ``None``.
         A resource envelope -> its body (schema stamp stripped); a list envelope
-        -> the envelope dict unchanged (so :meth:`list` can read ``page``)."""
+        -> the envelope dict unchanged (so :meth:`list` can read ``page``).
+
+        ``headers`` are extra request headers (e.g. ``If-Match`` for an
+        optimistic-concurrency PATCH); the ``Authorization`` and
+        ``Idempotency-Key`` headers this client manages ALWAYS win over any
+        same-named caller header, so a caller can never override the bearer.
+
+        ``return_etag=True`` returns ``(body, etag)`` where ``etag`` is the
+        response ``ETag`` header (or ``None``) -- used to read a resource's
+        version before a conditional update."""
         response = self._send_with_refresh(
             method,
             path,
             json=json,
             params=params,
             idempotency_key=idempotency_key,
+            headers=headers,
             authed=authed,
         )
         self._raise_for_error(response, authed=authed)
-        return _unwrap(_json_or_none(response))
+        body = _unwrap(_json_or_none(response))
+        if return_etag:
+            return body, response.headers.get("ETag")
+        return body
 
     def list(
         self,
@@ -155,11 +170,12 @@ class ApiClient:
         json: Any,
         params: Mapping[str, Any] | None,
         idempotency_key: str | None,
+        headers: Mapping[str, str] | None = None,
         authed: bool,
     ) -> httpx.Response:
         response = self._raw_send(
             method, path, json=json, params=params,
-            idempotency_key=idempotency_key, authed=authed,
+            idempotency_key=idempotency_key, headers=headers, authed=authed,
         )
         if response.status_code != 401 or not authed:
             return response
@@ -174,7 +190,7 @@ class ApiClient:
         # authorization failure for this resource -- do NOT refresh again.
         retry = self._raw_send(
             method, path, json=json, params=params,
-            idempotency_key=idempotency_key, authed=authed,
+            idempotency_key=idempotency_key, headers=headers, authed=authed,
         )
         if retry.status_code == 401:
             raise AuthRequired()
@@ -213,19 +229,23 @@ class ApiClient:
         json: Any = None,
         params: Mapping[str, Any] | None = None,
         idempotency_key: str | None = None,
+        headers: Mapping[str, str] | None = None,
         authed: bool = True,
     ) -> httpx.Response:
-        headers: dict[str, str] = {}
+        # Caller headers go in FIRST; the bearer + idempotency key this client
+        # manages are set AFTER so a caller can never override them (a spoofed
+        # Authorization header would exfiltrate/replace the session token).
+        send_headers: dict[str, str] = dict(headers or {})
         if authed:
             token = self._bearer()
             if token:
-                headers["Authorization"] = f"Bearer {token}"
+                send_headers["Authorization"] = f"Bearer {token}"
         if idempotency_key:
-            headers["Idempotency-Key"] = idempotency_key
+            send_headers["Idempotency-Key"] = idempotency_key
         url = f"{API_V1_PREFIX}{path}"
         try:
             return self._http.request(
-                method, url, json=json, params=params, headers=headers
+                method, url, json=json, params=params, headers=send_headers
             )
         except httpx.TransportError as exc:
             # httpx.TransportError is the base of ConnectError/ConnectTimeout AND
