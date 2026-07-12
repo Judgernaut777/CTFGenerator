@@ -39,6 +39,7 @@ than pretend, the adapter:
 
 from __future__ import annotations
 
+import hashlib
 import json
 import logging
 import re
@@ -53,6 +54,7 @@ from ctf_generator.domain.execution.runtime import (
     RuntimeCapabilities,
     RuntimeEndpoint,
     RuntimeObservation,
+    RuntimeResourceRef,
 )
 
 _LOG = logging.getLogger("ctf_generator.worker.runtime")
@@ -65,6 +67,31 @@ DEFAULT_NON_ROOT_UID = 65534
 # reap our containers/networks without touching anything else on the host.
 MANAGED_LABEL = "ctfgen.managed"
 INSTANCE_LABEL = "ctfgen.instance"
+# The owning worker name -- a reaper/recovery sweep is scoped to THIS worker's
+# label so a multi-worker host never reaps another worker's live containers.
+WORKER_LABEL = "ctfgen.worker"
+
+# The firewall helper image: a minimal image carrying an ``iptables`` binary,
+# run with ``--net=host --cap-add=NET_ADMIN`` to install the host-block rules in
+# the host network namespace. It is built on demand from the embedded Dockerfile
+# below (the base image must be pullable once). The host-block is a HARD FLOOR:
+# if this control cannot be established, launch REFUSES (never runs with the
+# host reachable). The image ships both iptables backends so the correct one for
+# the host's docker rules (legacy vs nft) is auto-selected at detection time.
+FIREWALL_IMAGE = "ctfgen-netfw:v1"
+_FIREWALL_DOCKERFILE = (
+    "FROM debian:stable-slim\n"
+    "RUN apt-get update "
+    "&& DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends "
+    "iptables "
+    "&& rm -rf /var/lib/apt/lists/*\n"
+)
+# iptables binaries probed, in order, to find the one that manipulates the same
+# ruleset docker uses on this host (a DROP in the wrong backend would not block).
+_FIREWALL_BINARIES = ("iptables-legacy", "iptables-nft", "iptables")
+# A reserved, never-routed probe source used to prove we can add+delete a host
+# INPUT rule before we trust the firewall control (RFC 6598-adjacent test net).
+_FIREWALL_PROBE_SUBNET = "192.0.2.0/32"  # TEST-NET-1, never real traffic
 
 # The outer-layer hardenings a non-rootless host cannot provide. Each may be
 # EXPLICITLY acknowledged (never silently); seccomp is deliberately absent -- it
@@ -139,16 +166,6 @@ class DockerHostProbe:
 
 
 @dataclass(frozen=True)
-class RuntimeResourceRef:
-    """A runtime object the worker must record (and eventually reap) for an
-    instance: ``kind`` is a ``VALID_RUNTIME_RESOURCE_KINDS`` token, ``external_ref``
-    the docker id."""
-
-    kind: str
-    external_ref: str
-
-
-@dataclass(frozen=True)
 class LaunchResult:
     """The concrete adapter's launch return: the Protocol
     :class:`RuntimeObservation` view PLUS the per-instance runtime resources the
@@ -194,7 +211,12 @@ def policy_to_run_flags(
         "--read-only",
         "--tmpfs",
         # A docker --tmpfs mount spec (a container path), not a host temp file.
-        f"/tmp:rw,size={policy.tmpfs_mb}m,mode=1770,noexec,nosuid,nodev",  # noqa: S108
+        # OWNED by the non-root uid/gid the workload runs as: under --read-only
+        # this is the container's ONLY writable path, so a root:root tmpfs would
+        # leave a uid-65534 process with nowhere to write. noexec/nosuid/nodev is
+        # defence in depth against dropping an executable payload here.
+        f"/tmp:rw,size={policy.tmpfs_mb}m,mode=1770,uid={non_root_uid},"  # noqa: S108
+        f"gid={non_root_uid},noexec,nosuid,nodev",
         # Resource envelope. --memory-swap == --memory disables swap (no swap
         # escape past the memory cap). --cpus from milli-cpus. --pids-limit caps
         # fork-bombs.
@@ -269,6 +291,8 @@ class DockerRuntimeBackend:
         run_timeout_seconds: int = 120,
         build_timeout_seconds: int = 600,
         max_image_mb: int = 2048,
+        worker_name: str = "ctfgen",
+        firewall_image: str = FIREWALL_IMAGE,
     ) -> None:
         bad = acknowledged_gaps - ACKNOWLEDGEABLE_GAPS
         if bad:
@@ -283,6 +307,14 @@ class DockerRuntimeBackend:
         self._run_timeout = run_timeout_seconds
         self._build_timeout = build_timeout_seconds
         self._max_image_mb = max_image_mb
+        self._worker_name = worker_name
+        self._firewall_image = firewall_image
+        # Lazily-detected iptables binary that manipulates docker's ruleset on
+        # this host (None once probed and found unavailable). The host-block is a
+        # HARD FLOOR -- never acknowledged away.
+        self._fw_binary: str | None = None
+        self._fw_probed = False
+        self._fw_image_ready = False
 
     # -- subprocess plumbing ---------------------------------------------------
 
@@ -398,6 +430,170 @@ class DockerRuntimeBackend:
             )
         return gaps
 
+    # -- host-block firewall (a HARD FLOOR for isolated networks) ---------------
+    #
+    # A docker ``--internal`` per-instance network still lets a container reach
+    # HOST-bound services: the bridge gateway IS the host, and container->gateway
+    # traffic is delivered to the host's INPUT chain (not FORWARD), which
+    # ``--internal`` does not block. We therefore install an explicit
+    # ``INPUT -s <instance-subnet> -j DROP`` (blocks the container reaching ANY
+    # host IP, gateway included) plus a best-effort ``DOCKER-USER`` forward DROP
+    # (defence in depth for metadata/other-subnet reachability) BEFORE the
+    # container is started -- so there is no window in which hostile code can
+    # reach the host. If this control cannot be established the launch is
+    # REFUSED; the host-block is never "acknowledged away".
+
+    def _ensure_firewall_image(self) -> bool:
+        """Ensure the firewall helper image exists (build it once from the
+        embedded Dockerfile if absent). Returns True iff the image is present."""
+        if self._fw_image_ready:
+            return True
+        present = self._run(
+            ["image", "inspect", "--format", "{{.Id}}", self._firewall_image],
+            check=False,
+        )
+        if present.returncode == 0 and present.stdout.strip():
+            self._fw_image_ready = True
+            return True
+        # Build from stdin so no scratch dir is needed. Network IS required (apt).
+        try:
+            argv = [self._docker, "build", "--tag", self._firewall_image, "-"]
+            proc = subprocess.run(  # noqa: S603 - argv list, no shell, trusted binary
+                argv,
+                input=_FIREWALL_DOCKERFILE,
+                capture_output=True,
+                text=True,
+                timeout=self._build_timeout,
+                check=False,
+            )
+        except (OSError, subprocess.SubprocessError):
+            return False
+        if proc.returncode != 0:
+            _LOG.warning("firewall helper image build failed rc=%s", proc.returncode)
+            return False
+        self._fw_image_ready = True
+        return True
+
+    def _fw_exec(
+        self, binary: str, ip_args: Sequence[str], *, check: bool
+    ) -> subprocess.CompletedProcess[str]:
+        """Run one iptables verb in the HOST network namespace via the helper
+        container (``--net=host --cap-add=NET_ADMIN``)."""
+        return self._run(
+            [
+                "run",
+                "--rm",
+                "--net=host",
+                "--cap-add=NET_ADMIN",
+                self._firewall_image,
+                binary,
+                *ip_args,
+            ],
+            check=check,
+            timeout=60,
+        )
+
+    def _detect_firewall_backend(self) -> str | None:
+        """Find the iptables binary that manipulates docker's ruleset on this
+        host by proving we can ADD then DELETE a host ``INPUT`` DROP rule for a
+        reserved test subnet. Cached; returns None if no backend works (=> the
+        host-block cannot be enforced => launch will refuse)."""
+        if self._fw_probed:
+            return self._fw_binary
+        self._fw_probed = True
+        self._fw_binary = None
+        if not self._ensure_firewall_image():
+            return None
+        probe = ["INPUT", "-s", _FIREWALL_PROBE_SUBNET, "-j", "DROP"]
+        for binary in _FIREWALL_BINARIES:
+            added = self._fw_exec(binary, ["-I", *probe], check=False)
+            if added.returncode != 0:
+                continue
+            # It added -- prove we can also remove it (and clean up the probe).
+            removed = self._fw_exec(binary, ["-D", *probe], check=False)
+            if removed.returncode == 0:
+                self._fw_binary = binary
+                return binary
+            # Could add but not delete: unusable (would leak). Best-effort clean.
+            self._fw_exec(binary, ["-D", *probe], check=False)
+        return None
+
+    def firewall_available(self) -> bool:
+        """Whether the host-block firewall control can be enforced on this host."""
+        return self._detect_firewall_backend() is not None
+
+    def _host_block_rules(self, subnet: str) -> tuple[tuple[str, list[str]], ...]:
+        return (
+            # Critical: container -> any host IP (the gateway IS the host, and its
+            # IP is in-subnet) arrives on the host INPUT chain, which docker's
+            # --internal (a FORWARD control) never blocks. Drop ALL traffic from
+            # the subnet to the host.
+            ("required", ["INPUT", "-s", subnet, "-j", "DROP"]),
+            # Defence in depth: drop forwarded traffic LEAVING the subnet
+            # (metadata / other subnets / internet) while permitting intra-subnet
+            # container-to-container traffic (``! -d subnet``) so legitimate
+            # multi-container instances still talk. Without the ``! -d`` guard a
+            # bridge-nf host would also drop same-instance peer traffic.
+            (
+                "best_effort",
+                ["DOCKER-USER", "-s", subnet, "!", "-d", subnet, "-j", "DROP"],
+            ),
+        )
+
+    def _install_host_block(self, subnet: str) -> None:
+        """Install the host-block DROP rules for ``subnet`` (idempotent via a
+        ``-C`` existence check). Refuses (raises) if the REQUIRED INPUT rule
+        cannot be installed -- the caller must not launch with the host reachable."""
+        binary = self._detect_firewall_backend()
+        if binary is None:
+            raise UnsupportedRuntimeError(
+                "host-block firewall control is unavailable on this host "
+                "(no working iptables backend / NET_ADMIN); refusing to launch an "
+                "isolated container that could reach the host"
+            )
+        for level, rule in self._host_block_rules(subnet):
+            present = self._fw_exec(binary, ["-C", *rule], check=False)
+            if present.returncode == 0:
+                continue
+            added = self._fw_exec(binary, ["-I", *rule], check=False)
+            if added.returncode != 0:
+                if level == "required":
+                    raise UnsupportedRuntimeError(
+                        f"failed to install required host-block INPUT DROP for "
+                        f"{subnet}; refusing to launch (rc={added.returncode})"
+                    )
+                _LOG.warning(
+                    "best-effort host-block rule %s not installed", rule[0]
+                )
+
+    def _remove_host_block(self, subnet: str) -> None:
+        """Remove the host-block DROP rules for ``subnet`` (idempotent: a missing
+        rule is not an error). A leaked rule is fail-SAFE (blocks more, never
+        less) but we remove it so a recycled subnet starts clean."""
+        binary = self._fw_binary or self._detect_firewall_backend()
+        if binary is None:
+            return
+        for _level, rule in self._host_block_rules(subnet):
+            # Delete repeatedly in case a rule was inserted more than once.
+            for _ in range(4):
+                out = self._fw_exec(binary, ["-D", *rule], check=False)
+                if out.returncode != 0:
+                    break
+
+    def _network_subnet(self, network_name: str) -> str | None:
+        out = self._run(
+            [
+                "network",
+                "inspect",
+                "--format",
+                "{{range .IPAM.Config}}{{.Subnet}}{{end}}",
+                network_name,
+            ],
+            check=False,
+        )
+        subnet = out.stdout.strip()
+        return subnet or None
+
     # -- build -----------------------------------------------------------------
 
     def build_image(
@@ -455,40 +651,91 @@ class DockerRuntimeBackend:
 
     # -- network ---------------------------------------------------------------
 
+    def _name_hash(self, instance_id: str) -> str:
+        """A short collision-resistant suffix from the FULL instance_id, so two
+        instances whose slugs collide after truncation still get distinct object
+        names."""
+        return hashlib.sha256(instance_id.encode("utf-8")).hexdigest()[:10]
+
     def _network_name(self, instance_id: str) -> str:
-        return f"ctfgen-net-{_slug(instance_id, maxlen=48)}"
+        return f"ctfgen-net-{_slug(instance_id, maxlen=36)}-{self._name_hash(instance_id)}"
 
     def _container_name(self, instance_id: str) -> str:
-        return f"ctfgen-inst-{_slug(instance_id, maxlen=48)}"
+        return f"ctfgen-inst-{_slug(instance_id, maxlen=36)}-{self._name_hash(instance_id)}"
 
     def _ensure_network(self, request: ContainerRequest) -> tuple[str, str]:
-        """Create the DEDICATED per-instance network (idempotent). Returns
-        ``(network_name, network_id)``. ``none``/``isolated`` -> ``--internal``
-        (no route off the network: no cross-instance path, no host/DB/metadata
-        reachability); ``egress`` -> a dedicated bridge that permits controlled
-        outbound (still its own network, so no cross-instance path)."""
+        """Create the DEDICATED per-instance ``--internal`` network (idempotent)
+        and install the host-block firewall for its subnet. Returns
+        ``(network_name, network_id)``.
+
+        For ``isolated`` the network is ``--internal`` (no route off the network:
+        no cross-instance path, no host/DB/metadata reachability) AND a host-block
+        DROP is installed for its subnet BEFORE the container starts (docker's
+        ``--internal`` alone does NOT block container->host, so this is required
+        to keep the container off the host). On reuse the existing network's
+        ``Internal`` flag and instance label are verified -- a mismatch is
+        recreated so a posture drift cannot silently weaken isolation. ``egress``
+        is refused upstream, so this only ever builds an internal network."""
         name = self._network_name(request.instance_id)
         existing = self._run(
             ["network", "ls", "--filter", f"name=^{name}$", "--format", "{{.ID}}"],
             check=False,
         ).stdout.strip()
-        if existing:
+        if existing and self._network_posture_ok(name, request.instance_id):
+            # Re-assert the host-block (idempotent) in case a prior run leaked it.
+            subnet = self._network_subnet(name)
+            if subnet:
+                self._install_host_block(subnet)
             return name, existing
+        if existing:
+            # Posture drift (wrong Internal flag / label) -> recreate clean.
+            _LOG.warning("recreating network %s: isolation posture mismatch", name)
+            self._remove_network(name)
         args = [
             "network",
             "create",
             "--driver",
             "bridge",
+            "--internal",
             "--label",
             f"{MANAGED_LABEL}=true",
             "--label",
             f"{INSTANCE_LABEL}={request.instance_id}",
+            "--label",
+            f"{WORKER_LABEL}={self._worker_name}",
+            name,
         ]
-        if request.policy.network_mode in ("none", "isolated"):
-            args.append("--internal")
-        args.append(name)
         net_id = self._run(args).stdout.strip()
+        subnet = self._network_subnet(name)
+        if not subnet:
+            self._remove_network(name)
+            raise DockerRuntimeError(
+                f"could not read subnet for network {name}; refusing to launch "
+                "without a host-block"
+            )
+        try:
+            self._install_host_block(subnet)
+        except UnsupportedRuntimeError:
+            # Roll back the network so a refused launch leaks nothing.
+            self._remove_network(name)
+            raise
         return name, net_id
+
+    def _network_posture_ok(self, network_name: str, instance_id: str) -> bool:
+        out = self._run(
+            [
+                "network",
+                "inspect",
+                "--format",
+                "{{.Internal}}|{{index .Labels \"" + INSTANCE_LABEL + "\"}}",
+                network_name,
+            ],
+            check=False,
+        )
+        if out.returncode != 0:
+            return False
+        internal, _, label = out.stdout.strip().partition("|")
+        return internal.lower() == "true" and label == instance_id
 
     # -- launch ----------------------------------------------------------------
 
@@ -501,6 +748,18 @@ class DockerRuntimeBackend:
         a :class:`LaunchResult` (Protocol observation + resources to persist +
         the acknowledged gaps in force). Refuses via :class:`UnsupportedRuntimeError`
         BEFORE creating anything if a required hardening cannot be met."""
+        mode = request.policy.network_mode
+        if mode == "egress":
+            # Egress-restriction (default-deny + destination allowlist +
+            # unconditional metadata/host DROP) is a larger build not landed yet.
+            # A plain NAT bridge would reach the internet, the host, and (on
+            # cloud) the metadata endpoint despite claiming "egress-restricted".
+            # Refuse loudly rather than ship a mode that lies about its posture.
+            raise UnsupportedRuntimeError(
+                "network_mode 'egress' is not implemented -- egress restriction "
+                "(filtering proxy / destination allowlist + metadata+host DROP) "
+                "is unsafe to fake; refusing (see docs/security/runtime-isolation.md)"
+            )
         probe = self.probe()
         acked = self._gate(request.policy, probe)
         # Compute flags up front so a hard-floor refusal happens before any docker
@@ -508,34 +767,50 @@ class DockerRuntimeBackend:
         hardening = policy_to_run_flags(
             request.policy, probe, non_root_uid=self._non_root_uid
         )
+        # The host-block firewall is a HARD FLOOR for an isolated network: if the
+        # host cannot enforce it, refuse BEFORE creating anything (never launch a
+        # container that can reach the host). ``none`` needs no network at all.
+        if mode == "isolated" and not self.firewall_available():
+            raise UnsupportedRuntimeError(
+                "an isolated network requires an enforceable host-block firewall "
+                "but this host has none (no working iptables backend / NET_ADMIN); "
+                "refusing to launch"
+            )
 
-        network_name, network_id = self._ensure_network(request)
+        resources_list: list[RuntimeResourceRef] = []
+        network_name: str | None = None
+        if mode == "none":
+            # docker's built-in 'none' net has no interfaces at all -> the
+            # container cannot reach anything; the bespoke per-instance network is
+            # unused, so it is skipped entirely (no network RuntimeResource).
+            network_ref = "none"
+        else:
+            network_name, network_id = self._ensure_network(request)
+            network_ref = network_name
+            resources_list.append(RuntimeResourceRef("network", network_id))
+
         container_name = self._container_name(request.instance_id)
-
         args: list[str] = [
             "run",
             "-d",
             "--name",
             container_name,
             "--network",
-            network_name if request.policy.network_mode != "none" else "none",
+            network_ref,
             "--label",
             f"{MANAGED_LABEL}=true",
             "--label",
             f"{INSTANCE_LABEL}={request.instance_id}",
+            "--label",
+            f"{WORKER_LABEL}={self._worker_name}",
             "--restart",
             "no",
         ]
         args += hardening
-        # Controlled ingress: only egress-mode instances publish a host port, bound
-        # to loopback; isolated/none instances are reachable only inside their
-        # network (ingress via the reverse proxy is M9).
-        publish = request.policy.network_mode == "egress"
+        # Isolated/none instances are reachable only inside their network (ingress
+        # via the reverse proxy is M9); they never publish a host port.
         for port in request.exposed_ports:
-            if publish:
-                args += ["-p", f"127.0.0.1::{port}"]
-            else:
-                args += ["--expose", str(port)]
+            args += ["--expose", str(port)]
         for key, value in request.labels:
             args += ["--label", f"{key}={value}"]
         args.append(request.image_ref)
@@ -545,16 +820,17 @@ class DockerRuntimeBackend:
         try:
             container_id = self._run(args).stdout.strip()
         except DockerCommandError:
-            # Roll back the network we just created so a failed launch leaks
-            # nothing.
-            self._remove_network(network_name)
+            # Roll back the network + host-block we just created so a failed launch
+            # leaks nothing.
+            if network_name is not None:
+                self._remove_network(network_name)
             raise
 
         resources = (
             RuntimeResourceRef("container", container_id),
-            RuntimeResourceRef("network", network_id),
+            *resources_list,
         )
-        endpoints = self._endpoints(request, container_id, network_name, publish)
+        endpoints = self._endpoints(request, container_id, network_name, publish=False)
         observation = self.observe(request.instance_id, container_id)
         _LOG.info(
             "launched instance=%s container=%s network=%s gaps=%s",
@@ -574,33 +850,20 @@ class DockerRuntimeBackend:
         self,
         request: ContainerRequest,
         container_id: str,
-        network_name: str,
+        network_name: str | None,
         publish: bool,
     ) -> tuple[RuntimeEndpoint, ...]:
+        # publish is always False now (no host-port publishing; ingress is M9's
+        # reverse proxy). A ``none``-network container has no reachable address.
         eps: list[RuntimeEndpoint] = []
-        if publish:
-            for port in request.exposed_ports:
-                mapping = self._run(
-                    ["port", container_id, str(port)], check=False
-                ).stdout.strip()
-                # e.g. "127.0.0.1:49153"
-                if ":" in mapping:
-                    host, host_port = mapping.rsplit(":", 1)
-                    with _suppress_value():
-                        eps.append(
-                            RuntimeEndpoint(
-                                container_port=port,
-                                host=host or "127.0.0.1",
-                                host_port=int(host_port),
-                            )
-                        )
-        else:
-            ip = self._container_ip(container_id, network_name)
-            for port in request.exposed_ports:
-                if ip:
-                    eps.append(
-                        RuntimeEndpoint(container_port=port, host=ip, host_port=port)
-                    )
+        if network_name is None:
+            return ()
+        ip = self._container_ip(container_id, network_name)
+        for port in request.exposed_ports:
+            if ip:
+                eps.append(
+                    RuntimeEndpoint(container_port=port, host=ip, host_port=port)
+                )
         return tuple(eps)
 
     def _container_ip(self, container_id: str, network_name: str) -> str | None:
@@ -630,14 +893,6 @@ class DockerRuntimeBackend:
             check=False,
             timeout=timeout + 30,
         )
-
-    def reset(
-        self, request: ContainerRequest, container_id: str, *, command: Sequence[str] | None = None
-    ) -> LaunchResult:
-        """Destroy the current container/network and relaunch fresh (a reset bumps
-        the instance generation upstream; the runtime side is a clean rebuild)."""
-        self.remove(request.instance_id, container_id)
-        return self.launch(request, command=command)
 
     def observe(
         self, instance_id: str, container_id: str | None
@@ -677,9 +932,10 @@ class DockerRuntimeBackend:
         return out.stdout + out.stderr
 
     def remove(self, instance_id: str, container_id: str | None) -> None:
-        """FORCE-remove the container, then its per-instance network and any
-        anonymous volumes. Idempotent: safe to call twice, safe if already gone --
-        so a re-run after a partial failure converges to clean."""
+        """FORCE-remove the container, then its per-instance network (and its
+        host-block firewall rules) and any anonymous volumes. Idempotent: safe to
+        call twice, safe if already gone -- so a re-run after a partial failure
+        converges to clean."""
         if container_id:
             self._run(["rm", "--force", "--volumes", container_id], check=False)
         # Also sweep by label in case the container id was lost but objects leaked.
@@ -690,6 +946,61 @@ class DockerRuntimeBackend:
         """Alias for :meth:`remove` (the design's ``destroy`` verb)."""
         self.remove(instance_id, container_id)
 
+    def find_container(self, instance_id: str) -> str | None:
+        """Return the id of THIS worker's container for ``instance_id`` (scoped by
+        the worker label so a multi-worker host never returns a peer's container),
+        or None. Keeps the ``docker ps`` verb inside the backend."""
+        out = self._run(
+            [
+                "ps",
+                "-aq",
+                "--filter",
+                f"label={INSTANCE_LABEL}={instance_id}",
+                "--filter",
+                f"label={WORKER_LABEL}={self._worker_name}",
+            ],
+            check=False,
+        ).stdout.split()
+        return out[0] if out else None
+
+    def reap_managed(self, worker: str | None = None) -> int:
+        """Force-remove every ctfgen-managed container owned by ``worker``
+        (defaults to THIS backend's worker), and their per-instance networks +
+        host-blocks. Scoped by the worker label so a crash-recovery sweep on a
+        multi-worker host never touches another worker's live containers. Returns
+        the count reaped."""
+        owner = worker or self._worker_name
+        ids = self._run(
+            [
+                "ps",
+                "-aq",
+                "--filter",
+                f"label={MANAGED_LABEL}=true",
+                "--filter",
+                f"label={WORKER_LABEL}={owner}",
+            ],
+            check=False,
+        ).stdout.split()
+        for cid in ids:
+            self._run(["rm", "--force", "--volumes", cid], check=False)
+        # Sweep this worker's leaked per-instance networks (and their host-blocks).
+        nets = self._run(
+            [
+                "network",
+                "ls",
+                "--filter",
+                f"label={MANAGED_LABEL}=true",
+                "--filter",
+                f"label={WORKER_LABEL}={owner}",
+                "--format",
+                "{{.Name}}",
+            ],
+            check=False,
+        ).stdout.split()
+        for name in nets:
+            self._remove_network(name)
+        return len(ids)
+
     def _remove_by_label(self, instance_id: str) -> None:
         ids = self._run(
             [
@@ -697,6 +1008,8 @@ class DockerRuntimeBackend:
                 "-aq",
                 "--filter",
                 f"label={INSTANCE_LABEL}={instance_id}",
+                "--filter",
+                f"label={WORKER_LABEL}={self._worker_name}",
             ],
             check=False,
         ).stdout.split()
@@ -704,6 +1017,11 @@ class DockerRuntimeBackend:
             self._run(["rm", "--force", "--volumes", cid], check=False)
 
     def _remove_network(self, network_name: str) -> None:
+        # Tear down the host-block for this network's subnet BEFORE removing the
+        # network (once the network is gone its subnet is unknown). Idempotent.
+        subnet = self._network_subnet(network_name)
+        if subnet:
+            self._remove_host_block(subnet)
         self._run(["network", "rm", network_name], check=False)
 
 
@@ -727,22 +1045,18 @@ def _userns_active(info: dict) -> bool:
 
 def _map_phase(running: str, status: str, health: str) -> str:
     if running.lower() == "true":
-        if health and health.lower() == "unhealthy":
+        h = health.lower()
+        if h == "unhealthy":
             return "unhealthy"
+        # When the image declares a HEALTHCHECK, a running-but-not-yet-healthy
+        # container ('starting' or an empty status before the first probe) is
+        # still coming up: report 'starting', not 'running'. Only a genuine
+        # 'healthy' (or an image with NO healthcheck at all) is 'running'.
+        if h in ("starting", ""):
+            return "running" if not health else "starting"
         return "running"
     if status.lower() in ("created", "restarting"):
         return "starting"
     if status.lower() == "exited":
         return "exited"
     return "unknown"
-
-
-class _suppress_value:
-    """Swallow a ValueError from constructing a RuntimeEndpoint with a bad port
-    (a transient inspect race yields no useful endpoint rather than a crash)."""
-
-    def __enter__(self) -> None:
-        return None
-
-    def __exit__(self, exc_type, exc, tb) -> bool:
-        return exc_type is not None and issubclass(exc_type, ValueError)
