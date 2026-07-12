@@ -89,6 +89,10 @@ router = APIRouter()
 
 _NOT_FOUND = "Competition not found"
 _PUBLICATION_NOT_FOUND = "Publication not found"
+# The ``version_no`` column is a 32-bit INTEGER; a client-tampered select value
+# above this would raise a DB DataError (a 500). Reject out-of-range at parse
+# time so an out-of-range selection is a field error, never a 500.
+_INT32_MAX = 2147483647
 
 _COMPETITION_FIELDS = (
     "competition_id",
@@ -310,7 +314,7 @@ def _parse_publication_target(
     except ValueError:
         errors["publication_target"] = "Choose a challenge version."
         return None
-    if version_no < 1:
+    if version_no < 1 or version_no > _INT32_MAX:
         errors["publication_target"] = "Choose a challenge version."
         return None
     return slug, version_no
@@ -727,6 +731,7 @@ async def publication_attach(
             values=values, errors=errors, status_code=400,
         )
     slug, version_no = parsed
+    status_code = 200
     try:
         pub_service.attach(
             ChallengePublication(
@@ -737,15 +742,18 @@ async def publication_attach(
         )
     except LookupError:
         errors["publication_target"] = "That challenge version was not found."
+        status_code = 404
     except ValueError:
         errors["publication_target"] = "That version is not published."
+        status_code = 422
     except IntegrityError:
         errors["publication_target"] = "That version is already attached."
+        status_code = 409
     if errors:
         return _render_publications(
             request, renderer, principal, competition_id,
             pub_service, def_service, ver_service,
-            values=values, errors=errors, status_code=409,
+            values=values, errors=errors, status_code=status_code,
         )
     return _redirect(request, "web_publications", competition_id=competition_id)
 
@@ -771,7 +779,9 @@ async def publication_detach(
         version_no = int(raw_version)
     except ValueError:
         raise LookupError(_PUBLICATION_NOT_FOUND) from None
-    if not slug:
+    # Out-of-range (INT32) or missing slug is a clean not-found, never a DB
+    # DataError 500.
+    if not slug or version_no < 1 or version_no > _INT32_MAX:
         raise LookupError(_PUBLICATION_NOT_FOUND)
     pub_service.detach(competition_id, slug, version_no)
     return _redirect(request, "web_publications", competition_id=competition_id)
