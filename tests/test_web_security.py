@@ -117,6 +117,48 @@ class WebSecurityHeadersTests(unittest.TestCase):
 
 
 @unittest.skipUnless(_ENABLED, _SKIP_REASON)
+class WebLoginCsrfTests(unittest.TestCase):
+    """POST /app/login is protected by a pre-session double-submit login-CSRF token
+    (closing login-CSRF / session fixation), verified BEFORE authentication."""
+
+    def _post(self, client, *, email, password, token):
+        data = {"email": email, "password": password}
+        if token is not None:
+            data["login_csrf_token"] = token
+        return client.post("/app/login", data=data, follow_redirects=False)
+
+    def test_login_without_csrf_token_is_403_and_no_session(self) -> None:
+        with ws.web_client() as (client, _db, _svc):
+            # Valid credentials but NO login-CSRF token -> 403, and crucially no
+            # session cookie is issued (authentication never ran).
+            r = self._post(client, email=ws.ALICE, password=ws.PASSWORD, token=None)
+            self.assertEqual(r.status_code, 403, r.text)
+            self.assertIsNone(ws.session_cookie(client))
+
+    def test_login_with_wrong_csrf_token_is_403_and_no_session(self) -> None:
+        with ws.web_client() as (client, _db, _svc):
+            # Prime the login-CSRF cookie via a GET, then submit a MISMATCHED field.
+            client.get("/app/login")
+            r = self._post(
+                client,
+                email=ws.ALICE,
+                password=ws.PASSWORD,
+                token="not-the-token",  # noqa: S106 - a forged CSRF token, not a password
+            )
+            self.assertEqual(r.status_code, 403, r.text)
+            self.assertIsNone(ws.session_cookie(client))
+
+    def test_login_with_matching_csrf_token_proceeds(self) -> None:
+        with ws.web_client() as (client, _db, _svc):
+            # Matching cookie+field pair -> authentication proceeds: good creds set
+            # the session cookie and redirect to the dashboard.
+            ok = ws.login(client, ws.ALICE)
+            self.assertEqual(ok.status_code, 303, ok.text)
+            self.assertTrue(ok.headers["location"].endswith("/app/"))
+            self.assertTrue(ws.session_cookie(client))
+
+
+@unittest.skipUnless(_ENABLED, _SKIP_REASON)
 class WebInlineStyleTests(unittest.TestCase):
     """The strict CSP admits no style ATTRIBUTES (only the nonce'd <style> ELEMENT),
     so no rendered page may carry a ``style="`` attribute; login/error use classes."""

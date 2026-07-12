@@ -17,11 +17,18 @@ from __future__ import annotations
 
 import hashlib
 import hmac
+import secrets
 
 from fastapi import Request
+from starlette.responses import Response
 
 from .formdata import read_form
-from .settings import CSRF_FIELD_NAME, WebSettings
+from .settings import (
+    CSRF_FIELD_NAME,
+    LOGIN_CSRF_COOKIE_NAME,
+    LOGIN_CSRF_FIELD_NAME,
+    WebSettings,
+)
 
 
 class WebCsrfError(Exception):
@@ -67,3 +74,70 @@ async def require_csrf(request: Request) -> None:
     expected = issue_csrf_token(session_token, settings.csrf_secret)
     if not hmac.compare_digest(submitted, expected):
         raise WebCsrfError("CSRF token mismatch")
+
+
+# -- pre-session (login) CSRF ----------------------------------------------
+#
+# The login POST has no session yet, so the session-bound scheme above cannot
+# protect it. Without protection an attacker can force a victim's browser to log
+# in as the attacker (login-CSRF -> session fixation). The standard guard is a
+# plain double-submit: GET /login mints a random token, sets it as an httpOnly
+# cookie AND renders it into a hidden field; POST /login requires the two to match
+# (constant-time) BEFORE authenticating. Same-origin is required to read the
+# rendered field, which a cross-site attacker cannot do.
+
+
+def issue_login_csrf_token() -> str:
+    """A fresh random login-CSRF token (echoed into the cookie and the form)."""
+    return secrets.token_urlsafe(32)
+
+
+def current_login_csrf_token(request: Request) -> str:
+    """The login-CSRF token already carried by the request cookie (``""`` if none).
+
+    Used to re-render the login form after a failed attempt WITHOUT rotating the
+    cookie, so the auth-failure response emits no ``Set-Cookie`` yet the form's
+    hidden field still matches the existing cookie for the retry."""
+    return request.cookies.get(LOGIN_CSRF_COOKIE_NAME, "")
+
+
+def set_login_csrf_cookie(
+    response: Response, token: str, settings: WebSettings
+) -> None:
+    """Set the login-CSRF cookie (httpOnly -- the value is rendered into the form
+    server-side, so JS never needs to read it; SameSite=Lax + Secure + scoped
+    Path)."""
+    response.set_cookie(
+        key=LOGIN_CSRF_COOKIE_NAME,
+        value=token,
+        httponly=True,
+        secure=settings.cookie_secure,
+        samesite="lax",
+        path=settings.mount_path or "/",
+    )
+
+
+def clear_login_csrf_cookie(response: Response, settings: WebSettings) -> None:
+    """Delete the login-CSRF cookie (after a successful login -- it is single-use)."""
+    response.delete_cookie(
+        key=LOGIN_CSRF_COOKIE_NAME,
+        httponly=True,
+        secure=settings.cookie_secure,
+        samesite="lax",
+        path=settings.mount_path or "/",
+    )
+
+
+async def require_login_csrf(request: Request) -> None:
+    """FastAPI dependency for POST /login: verify the double-submit login-CSRF token
+    (cookie == hidden field, constant-time) BEFORE any authentication runs. Raises
+    :class:`WebCsrfError` (403) on a missing cookie, missing field, or mismatch."""
+    cookie = request.cookies.get(LOGIN_CSRF_COOKIE_NAME)
+    if not cookie:
+        raise WebCsrfError("missing login CSRF cookie")
+    form = await read_form(request)
+    submitted = form.get(LOGIN_CSRF_FIELD_NAME)
+    if not submitted:
+        raise WebCsrfError("missing login CSRF token")
+    if not hmac.compare_digest(submitted, cookie):
+        raise WebCsrfError("login CSRF token mismatch")

@@ -5,6 +5,7 @@
   <h1>Sign in</h1>
   {% if error %}<div class="error-banner">{{ error }}</div>{% endif %}
   <form method="post" action="{{ mount_path }}/login">
+    <input type="hidden" name="login_csrf_token" value="{{ login_csrf_token }}">
     <p>
       <label for="email">Email</label><br>
       <input id="email" name="email" type="email" autocomplete="username"
