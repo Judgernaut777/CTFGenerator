@@ -4,6 +4,9 @@
 <div class="card">
   <h1>Dashboard</h1>
   <p class="muted">Signed in as {{ principal_subject }}{% if is_system_admin %} (system admin){% endif %}.</p>
+  {% if can_create %}
+  <p><a href="{{ mount_path }}/competitions/new">+ New competition</a></p>
+  {% endif %}
 </div>
 <div class="card">
   <h2>Your competitions</h2>
