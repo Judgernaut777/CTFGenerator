@@ -48,6 +48,68 @@ mapper → repository → Alembic migration → Docker-gated Postgres tests). St
 | `User`, `Team`, `Membership` (§2) | `0003_identity` | **Implemented** (Epic 1) |
 | `ChallengeDefinition`, `ChallengeVersion`, `ChallengeBuild`, `competition_challenges` (§4–5) | `0004_challenges` | **Implemented** (Epic 2) |
 | `Submission`, `Solve`, `ScoreEvent` (§6) | `0005_ledger` | **Implemented** (Epic 3) |
+| `Job`, `JobTransition` (M7 queue, ADR-003) | `0006_jobs` | **Implemented** (M7) |
+| `Worker`, `WorkerCredential` (M7 trust) | `0007_workers` | **Implemented** (M7) |
+| `score_projection_outbox`, `scoreboard_projections` (M7, §7's cache realized) | `0008_score_projection` | **Implemented** (M7) |
+
+Decisions made while implementing M7 (queue, worker trust, submission
+transaction, gap-safe projection):
+
+- **Deferred issue #1 (seq allocation vs commit order) — RESOLVED by the
+  `0008` transactional outbox.** An `AFTER INSERT` trigger on `score_events`
+  (`score_events_enqueue_projection`, migration-owned) writes one
+  `score_projection_outbox` row *in the same transaction* as every event, so
+  the row becomes visible at exactly the instant the event commits — however
+  many higher seqs committed first. The projector refolds the full committed
+  per-competition event set and deletes outbox rows only in the transaction
+  that folded them, so **a committed event can never be skipped, by
+  construction**; aborted appends burn a seq but roll back their outbox row
+  too, leaving inert gaps. Bare `seq > cursor` consumption and
+  xmin-low-water-mark cursors remain **forbidden** (seq order is independent
+  of xid order: T1/xid-100 can commit seq 7 while T2/xid-101 still holds
+  seq 6; the cursor advances to 7 and 6 is lost on commit). The naive LWM
+  `min(visible pending seq) - 1` is additionally *non-monotonic* under that
+  exact stall, so lag numbers (`ProjectionLag`) are metrics only, never a
+  cursor. `scoreboard_projections` is §7's `scoreboard_cache` realized:
+  rebuildable (`ScoreProjector.rebuild()` re-enqueues from the ledger and
+  refolds), stamped with `as_of_seq`, written only via a monotonic-guarded
+  UPSERT, never a source of truth. The trigger applies to every writer of
+  `score_events` automatically — a future writer cannot forget the outbox.
+  Since autogenerate cannot see triggers, the integration suite positively
+  asserts append→outbox atomicity.
+- **Deferred issue #2 (`solve.solved_at == accepted_submission.submitted_at`)
+  — RESOLVED by construction in `SubmissionProcessingService`.** The service
+  builds the `Solve` from the accepted submission (`solved_at =
+  submission.submitted_at`, `submission_id = submission.submission_id`)
+  inside the same `Database.session_scope()` transaction that inserted the
+  submission and appends the single `solve` ScoreEvent there too — one
+  commit, no partial state, stronger than any cross-table CHECK Postgres
+  could express.
+- **Concurrent submission processing is serialized per competition** by a
+  `pg_advisory_xact_lock(hashtextextended(competition_uuid_text, 0))` taken
+  as the first write-side statement; the post-lock solve-existence re-check
+  is authoritative under READ COMMITTED (asserted by the integration suite),
+  and the `uq_solves_*` UNIQUE + `solve_requires_correct_submission` trigger
+  remain pure backstops. All ledger writes must go through the application
+  service (or take the same lock); the projector shares the same key
+  derivation, which only adds harmless serialization.
+- **The job queue never uses an allocation-order cursor**: claiming is a
+  predicate over `(status='queued', available_at <= now, capabilities)` with
+  `FOR UPDATE SKIP LOCKED`, so commit-order gaps cannot skip work. Fencing
+  `lease_token` per claim makes duplicate delivery/zombie workers harmless
+  (stale tokens are rejected, mutating nothing). `failed` = permanent error;
+  `dead_letter` = retryable budget exhausted (operator `retry_dead_letter`
+  is the one exit, resetting the budget). The `job_transition_guard` trigger
+  mirrors `domain.work.models.LEGAL_JOB_TRANSITIONS` byte-equivalently (an
+  integration test asserts DB accept/reject for every (from,to) pair).
+- **Worker trust is one 3-state axis + two orthogonal overlays** (drain,
+  quarantine); dispatch eligibility is the conjunction. Credentials are
+  sha256-at-rest scoped bearer tokens (`ctfw1.` prefix vs 64-hex CHECK makes
+  plaintext-at-rest structurally impossible); a partial UNIQUE enforces one
+  live credential per worker so rotation is race-proof;
+  `worker_credentials_freeze()` (owned by `0007`) permits exactly the
+  `revoked_at NULL→value` stamp while `reject_mutation()` (owned by `0004`,
+  reused by name) blocks DELETE/TRUNCATE.
 
 Decisions made while implementing §6 (the ledger), consistent with this design:
 
@@ -77,6 +139,9 @@ Decisions made while implementing §6 (the ledger), consistent with this design:
     rows in `seq` order with no gaps. If a future milestone introduces concurrent
     ledger writers, the cursor consumer must switch to a gap-tolerant low-water
     mark (or an outbox), not a bare `seq > cursor`.
+    **RESOLVED in M7** by the `0008_score_projection` transactional outbox —
+    see the M7 decisions block above. Bare `seq > cursor` consumption remains
+    forbidden for any component other than the outbox-driven projector.
 - **Optional provenance ids are validated non-empty.** `ScoreEvent.submission_id`
   / `solve_id` are either absent (`None`) or a non-empty id — the domain rejects
   `""` at construction, so a malformed provenance link fails as a clean domain
