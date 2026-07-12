@@ -135,6 +135,10 @@ def _mapping_app() -> FastAPI:
     def _validate(body: Body):
         return {"ok": body.n}
 
+    @app.get("/boom")
+    def _boom():
+        raise RuntimeError("secret-internal-detail-should-not-leak")
+
     return app
 
 
@@ -168,13 +172,42 @@ class ExceptionMappingTests(unittest.TestCase):
     def test_request_validation_maps_to_422_envelope_with_details(self) -> None:
         r = self.client.post("/validate", json={"n": "not-an-int"})
         self.assertEqual(r.status_code, 422)
-        self.assertEqual(r.json()["error"]["code"], "validation_error")
+        self.assertEqual(r.json()["error"]["code"], "validation_failed")
         self.assertTrue(r.json()["error"]["details"])
 
     def test_every_error_response_carries_request_id_header(self) -> None:
         r = self.client.get("/lookup", headers={"X-Request-ID": "req_custom"})
         self.assertEqual(r.headers.get("X-Request-ID"), "req_custom")
         self.assertEqual(r.json()["error"]["request_id"], "req_custom")
+
+    def test_unknown_route_is_404_envelope(self) -> None:
+        r = self.client.get("/no-such-route")
+        self.assertEqual(r.status_code, 404)
+        self.assertEqual(r.json()["error"]["code"], "not_found")
+        self.assertEqual(r.json()["schema"], ERROR_SCHEMA)
+        self.assertIn("request_id", r.json()["error"])
+
+    def test_wrong_method_is_405_method_not_allowed_envelope(self) -> None:
+        # /lookup exists only as GET; a POST to it is a framework 405.
+        r = self.client.post("/lookup")
+        self.assertEqual(r.status_code, 405)
+        self.assertEqual(r.json()["error"]["code"], "method_not_allowed")
+        self.assertEqual(r.json()["schema"], ERROR_SCHEMA)
+
+    def test_unexpected_500_is_opaque_and_correlated(self) -> None:
+        # An unhandled exception propagates past RequestIDMiddleware (whose
+        # contextvar is already reset in `finally`) to the outermost handler; the
+        # request id must still be sourced from request.state and appear in BOTH
+        # the body and the X-Request-ID header, with no internals leaked.
+        r = self.client.get("/boom", headers={"X-Request-ID": "req_boom"})
+        self.assertEqual(r.status_code, 500)
+        body = r.json()
+        self.assertEqual(body["error"]["code"], "internal")
+        self.assertEqual(body["schema"], ERROR_SCHEMA)
+        self.assertNotIn("secret-internal-detail-should-not-leak", r.text)
+        self.assertEqual(body["error"]["request_id"], "req_boom")
+        self.assertNotEqual(body["error"]["request_id"], "-")
+        self.assertEqual(r.headers.get("X-Request-ID"), "req_boom")
 
 
 @unittest.skipIf(_SKIP, _REASON)
@@ -233,6 +266,32 @@ class PaginationTests(unittest.TestCase):
     def test_next_cursor_none_on_final_page(self) -> None:
         page = paginate(["a", "b"], key=lambda x: x, limit=50, cursor=None)
         self.assertIsNone(page.next_cursor)
+
+    def test_boundary_item_deletion_does_not_skip_tail(self) -> None:
+        # Regression: resuming by strict "sorts-after" (not exact-match of the
+        # cursor's key) survives deletion of the boundary item between pages.
+        items = [f"c{i:02d}" for i in range(5)]  # c00..c04
+        page1 = paginate(items, key=lambda x: x, limit=2, cursor=None)
+        self.assertEqual(page1.items, ["c00", "c01"])
+        self.assertIsNotNone(page1.next_cursor)
+        # The boundary item (c01, encoded in the cursor) is deleted before page 2.
+        remaining = ["c00", "c02", "c03", "c04"]
+        page2 = paginate(
+            remaining, key=lambda x: x, limit=2, cursor=page1.next_cursor
+        )
+        self.assertEqual(page2.items, ["c02", "c03"])  # tail NOT skipped
+
+    def test_paginate_walks_all_items_once_int_keys(self) -> None:
+        items = list(range(1, 6))
+        seen: list[int] = []
+        cursor = None
+        for _ in range(10):
+            page = paginate(items, key=lambda x: x, limit=2, cursor=cursor)
+            seen.extend(page.items)
+            cursor = page.next_cursor
+            if cursor is None:
+                break
+        self.assertEqual(seen, items)
 
 
 @unittest.skipIf(_SKIP, _REASON)
@@ -328,6 +387,85 @@ class RateLimitTests(unittest.TestCase):
         self.assertEqual(r.status_code, 429)
         self.assertEqual(r.json()["error"]["code"], "rate_limited")
         self.assertIn("Retry-After", r.headers)
+
+
+class _BoomDatabase:
+    """A Database stand-in whose unit-of-work raises, to force a 500 through the
+    real app+middleware stack without needing Postgres."""
+
+    def session_scope(self):
+        raise RuntimeError("db-internal-detail-should-not-leak")
+
+
+@unittest.skipIf(_SKIP, _REASON)
+class AppLevelErrorTests(unittest.TestCase):
+    def _client(self) -> TestClient:
+        auth = StubAuthenticator({"t": principal_for("a", {"admin"})})
+        app = create_app(
+            ApiSettings(), database=_BoomDatabase(), authenticator=auth
+        )
+        return TestClient(app, raise_server_exceptions=False)
+
+    def test_service_failure_is_opaque_500_with_real_request_id(self) -> None:
+        client = self._client()
+        r = client.get(
+            "/api/v1/competitions",
+            headers={"Authorization": "Bearer t", "X-Request-ID": "req_svc"},
+        )
+        self.assertEqual(r.status_code, 500)
+        body = r.json()
+        self.assertEqual(body["error"]["code"], "internal")
+        self.assertNotIn("db-internal-detail-should-not-leak", r.text)
+        self.assertEqual(body["error"]["request_id"], "req_svc")
+        self.assertNotEqual(body["error"]["request_id"], "-")
+        self.assertEqual(r.headers.get("X-Request-ID"), "req_svc")
+
+    def test_non_json_body_maps_to_415(self) -> None:
+        # A malformed JSON body on a real route (module-level body model) is an
+        # unsupported media type, not a field-level 422. Body parsing fails before
+        # the (boom) database is touched.
+        client = self._client()
+        r = client.post(
+            "/api/v1/competitions",
+            headers={"Authorization": "Bearer t", "content-type": "application/json"},
+            content="this is not valid json",
+        )
+        self.assertEqual(r.status_code, 415)
+        self.assertEqual(r.json()["error"]["code"], "unsupported_media_type")
+
+    def test_semantic_validation_body_maps_to_422(self) -> None:
+        # A well-formed JSON body that violates the DTO (end before start) is a
+        # 422 validation_failed, distinct from the 415 above.
+        client = self._client()
+        r = client.post(
+            "/api/v1/competitions",
+            headers={"Authorization": "Bearer t"},
+            json={
+                "competition_id": "x",
+                "name": "x",
+                "start_time": "2026-06-03T09:00:00Z",
+                "end_time": "2026-06-01T09:00:00Z",
+            },
+        )
+        self.assertEqual(r.status_code, 422)
+        self.assertEqual(r.json()["error"]["code"], "validation_failed")
+
+    def test_malformed_authorization_scheme_is_401(self) -> None:
+        client = self._client()
+        r = client.get(
+            "/api/v1/competitions/x", headers={"Authorization": "Basic Zm9v"}
+        )
+        self.assertEqual(r.status_code, 401)
+        self.assertEqual(r.json()["error"]["code"], "unauthorized")
+
+    def test_empty_bearer_token_is_401(self) -> None:
+        client = self._client()
+        for value in ("Bearer ", "Bearer    "):
+            r = client.get(
+                "/api/v1/competitions/x", headers={"Authorization": value}
+            )
+            self.assertEqual(r.status_code, 401, value)
+            self.assertEqual(r.json()["error"]["code"], "unauthorized")
 
 
 if __name__ == "__main__":  # pragma: no cover

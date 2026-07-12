@@ -199,7 +199,7 @@ class CompetitionsApiIntegrationTests(unittest.TestCase):
             bad["end_time"] = "2026-05-01T09:00:00Z"  # before start_time
             r = client.post("/api/v1/competitions", headers=_auth(), json=bad)
             self.assertEqual(r.status_code, 422, r.text)
-            self.assertEqual(r.json()["error"]["code"], "validation_error")
+            self.assertEqual(r.json()["error"]["code"], "validation_failed")
             self.assertTrue(r.json()["error"]["details"])
 
     def test_unauthenticated_is_401(self) -> None:
