@@ -182,6 +182,12 @@ class SqlAlchemyInstanceRepository:
     ) -> Instance:
         row = self._locked_row(instance_id)
         from_state = row.state
+        # A self-transition is a no-op under the lock: no state write, no audit
+        # event (re-applying the same transition is idempotent and never errors,
+        # so two racing reconciler passes cannot append a duplicate event). The
+        # store's guard makes the same distinction (NEW.state = OLD.state).
+        if from_state == to_state:
+            return self._to_domain(row)
         row.state = to_state
         row.updated_at = to_utc(now)
         # The guard trigger fires on flush: an illegal move raises
@@ -215,6 +221,49 @@ class SqlAlchemyInstanceRepository:
 
     def bump_generation(self, instance_id: str, now: datetime) -> Instance:
         row = self._locked_row(instance_id)
+        row.generation = row.generation + 1
+        row.updated_at = to_utc(now)
+        self._session.flush()
+        return self._to_domain(row)
+
+    def fence_stale_worker(
+        self,
+        instance_id: str,
+        *,
+        expected_worker: str,
+        expected_generation: int,
+        now: datetime,
+    ) -> Instance | None:
+        """Atomically evacuate an instance off a dead worker: under a row lock,
+        clear the assignment and bump the fencing generation -- but ONLY if the
+        instance is STILL assigned to ``expected_worker`` at ``expected_generation``
+        (the value the reconciler pass observed). Returns the updated instance, or
+        ``None`` when a rival pass / operator action already converged (assignment
+        cleared or generation advanced), so two concurrent passes produce at most
+        one bump + one launch."""
+        row = self._locked_row(instance_id)
+        current_worker = _resolve.worker_name_optional(
+            self._session, row.assigned_worker_id
+        )
+        if current_worker != expected_worker or row.generation != expected_generation:
+            return None
+        row.assigned_worker_id = None
+        row.generation = row.generation + 1
+        row.updated_at = to_utc(now)
+        self._session.flush()
+        return self._to_domain(row)
+
+    def fence_missing_container(
+        self, instance_id: str, *, expected_generation: int, now: datetime
+    ) -> Instance | None:
+        """Atomically bump the fencing generation for a missing-container
+        recovery: under a row lock, increment the generation ONLY if it still
+        equals ``expected_generation`` (fencing the dead container's old-gen
+        resources). Returns the updated instance, or ``None`` when a rival pass
+        already bumped -- so concurrent passes mint exactly one new generation."""
+        row = self._locked_row(instance_id)
+        if row.generation != expected_generation:
+            return None
         row.generation = row.generation + 1
         row.updated_at = to_utc(now)
         self._session.flush()
@@ -325,15 +374,6 @@ class SqlAlchemyInstanceRepository:
             select(RuntimeResourceRow)
             .where(RuntimeResourceRow.instance_id == _as_uuid(instance_id))
             .order_by(RuntimeResourceRow.kind, RuntimeResourceRow.external_ref)
-        ).all()
-        return [self._resource_to_domain(row) for row in rows]
-
-    def list_active_resources(self, limit: int = 500) -> list[RuntimeResource]:
-        rows = self._session.scalars(
-            select(RuntimeResourceRow)
-            .where(RuntimeResourceRow.state == "active")
-            .order_by(RuntimeResourceRow.created_at.asc())
-            .limit(limit)
         ).all()
         return [self._resource_to_domain(row) for row in rows]
 

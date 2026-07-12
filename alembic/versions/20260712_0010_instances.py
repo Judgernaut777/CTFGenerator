@@ -96,12 +96,12 @@ BEGIN
     RETURN NEW;
   END IF;
   IF (OLD.state = 'requested'
-        AND NEW.state IN ('queued', 'failed', 'quarantined'))
+        AND NEW.state IN ('queued', 'failed', 'quarantined', 'stopping'))
      OR (OLD.state = 'queued'
         AND NEW.state IN ('building', 'starting', 'failed', 'quarantined',
                           'stopping'))
      OR (OLD.state = 'building'
-        AND NEW.state IN ('ready', 'failed', 'quarantined'))
+        AND NEW.state IN ('ready', 'failed', 'quarantined', 'stopping'))
      OR (OLD.state = 'ready'
         AND NEW.state IN ('starting', 'failed', 'quarantined', 'stopping'))
      OR (OLD.state = 'starting'
