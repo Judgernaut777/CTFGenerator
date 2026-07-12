@@ -41,6 +41,12 @@ postgres = ["psycopg[binary]>=3.1"]
 # (see `postgres`). Integration tests are Docker-gated and skip when this extra
 # is not installed, so the stdlib-only unit suite stays green without it.
 db = ["sqlalchemy>=2.0", "alembic>=1.13", "psycopg[binary]>=3.1"]
+# M9 production HTTP API (interfaces/api): FastAPI + Pydantic v2 served by
+# uvicorn. httpx backs Starlette's TestClient. Kept as an opt-in extra so the
+# stdlib-only unit gate stays dependency-free; the API tests SKIP cleanly when
+# this extra is absent, exactly like the `db` integration suites. The HTTP layer
+# is a thin adapter over the application services and requires `db` at runtime.
+api = ["fastapi>=0.110", "uvicorn[standard]>=0.29", "pydantic>=2", "httpx>=0.27"]
 # The live dashboard (dashboard_server.py) is stdlib-only (http.server/hmac/
 # hashlib/secrets/pbkdf2); this extra is the opt-in gate / future home for
 # production niceties (e.g. a real WSGI server), not a package dependency.
@@ -85,6 +91,11 @@ ignore = ["E501"] # line length is enforced by the formatter, not the linter
 
 [tool.ruff.lint.per-file-ignores]
 "tests/**" = ["S101"] # asserts are expected in tests
+# The HTTP interface uses FastAPI's dependency-injection idiom, where
+# `Depends(...)` / `Query(...)` are *intentionally* evaluated in argument
+# defaults -- that is how the framework declares dependencies. B008 flags exactly
+# that pattern, so it is a false positive for this package only.
+"src/ctf_generator/interfaces/api/**" = ["B008"]
 "src/ctf_generator/templates/**" = ["S"] # renderers emit deliberately vulnerable code
 # M8 slice-2 runtime tests DRIVE the docker CLI directly (that is the point of a
 # real-container isolation test): S603/S607 (subprocess + partial `docker` path)
