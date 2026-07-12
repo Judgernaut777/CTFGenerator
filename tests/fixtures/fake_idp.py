@@ -155,9 +155,18 @@ class FakeIdp:
 
     @staticmethod
     def tamper(token: str) -> str:
-        """Flip the last signature character so the signature no longer verifies."""
-        last = token[-1]
-        return token[:-1] + ("A" if last != "A" else "B")
+        """Reliably invalidate the RSA signature. Flipping the LAST base64url
+        character can land on base64 PADDING bits (~22-25% of keypairs), leaving
+        the decoded signature bytes unchanged so PyJWT still verifies (a flaky
+        test). Instead, decode the signature to BYTES, flip a bit in a MIDDLE
+        byte, and re-encode -- this always changes the RSA signature bytes, so
+        verification always fails."""
+        header_b64, payload_b64, sig_b64 = token.split(".")
+        sig = base64.urlsafe_b64decode(sig_b64 + "=" * (-len(sig_b64) % 4))
+        if sig:
+            mid = len(sig) // 2
+            sig = sig[:mid] + bytes([sig[mid] ^ 0x01]) + sig[mid + 1 :]
+        return f"{header_b64}.{payload_b64}.{_b64url(sig)}"
 
     # -- authorization-request handling (simulates the browser round trip) ---
 
