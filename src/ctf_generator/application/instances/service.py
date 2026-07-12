@@ -197,21 +197,49 @@ class InstanceLifecycleService:
         return instance
 
     def request_reset(
-        self, instance_id: str, new_expires_at: datetime, now: datetime
+        self,
+        instance_id: str,
+        new_expires_at: datetime,
+        now: datetime,
+        *,
+        requirements: WorkerRequirements | None = None,
+        pooled_items: tuple[ReservationItem, ...] = (),
     ) -> Instance:
-        """Bump the fencing generation (so stale observations are ignored), keep
-        the capacity hold alive for the new lifetime, and enqueue the reset job
-        keyed on the NEW generation."""
+        """Bump the fencing generation (so stale observations are ignored),
+        re-establish the capacity hold for the new lifetime, and enqueue the
+        relaunch keyed on the NEW generation.
+
+        The corrective action is the SAME ``launch`` the reconciler's
+        missing-container path would enqueue (keyed ``(instance, new_generation)``)
+        so a reset and a concurrent reconciler pass collapse idempotently onto one
+        job instead of racing a ``reset`` job against a ``launch`` job.
+        """
         with self._database.session_scope() as session:
             instance = self._repo(session).bump_generation(instance_id, now)
-        # Keep the hold alive for the reset lifetime (renew if held; a released
-        # hold is re-established by the relaunch path).
+        # Keep or re-establish the hold BEFORE the relaunch, so a reset of a
+        # stopped / expiry-swept instance never relaunches with no quota
+        # accounting. renew keeps a still-*held* reservation; a *released* header
+        # is re-held in place; the LookupError is handled, never swallowed.
         try:
             self._scheduling.renew(instance_id, new_expires_at, now)
         except LookupError:
-            pass
+            reservation = self._scheduling.get_reservation(instance_id)
+            if reservation is not None:
+                # A released header exists -> re-hold it on the original placement.
+                self._scheduling.reactivate(instance_id, new_expires_at, now)
+            elif requirements is not None:
+                # No reservation ever existed -> place + reserve afresh.
+                self._scheduling.select_and_reserve(
+                    requirements=requirements,
+                    reservation_id=instance_id,
+                    pooled_items=pooled_items,
+                    expires_at=new_expires_at,
+                    now=now,
+                )
+            # else: the instance was never reserved and the caller supplied no
+            # placement inputs -> there is no hold to account for.
         self._jobs.enqueue_idempotent(
-            build_corrective_job(instance, instance.generation, "reset", now), now
+            build_corrective_job(instance, instance.generation, "launch", now), now
         )
         return instance
 
@@ -223,21 +251,31 @@ class InstanceLifecycleService:
             return self._repo(session).set_desired_state(instance_id, "deleted", now)
 
     def expire(self, instance_id: str, now: datetime) -> Instance:
-        """TTL expiry: move the instance to ``expired`` (when legal), release the
-        capacity hold, and enqueue the expire job (idempotent)."""
+        """TTL expiry: move the instance to ``expired`` and, ONLY when that
+        transition actually happens, release the capacity hold and enqueue the
+        expire job (idempotent). Already-``expired`` is an idempotent no-op (the
+        hold was released on the first expiry). A state from which ``expired`` is
+        illegal is surfaced (``ValueError``) rather than silently releasing the
+        hold and enqueuing a corrective for a transition that never occurred."""
         with self._database.session_scope() as session:
             repo = self._repo(session)
             current = repo.get(instance_id)
             if current is None:
                 raise LookupError(f"instance not found: {instance_id!r}")
-            if current.state != "expired" and current.can_transition_to("expired"):
-                current = repo.transition(
-                    instance_id,
-                    "expired",
-                    reason="ttl expired",
-                    actor="system",
-                    now=now,
+            if current.state == "expired":
+                return current
+            if not current.can_transition_to("expired"):
+                raise ValueError(
+                    f"cannot expire instance {instance_id!r} in state "
+                    f"{current.state!r} ('expired' is not a legal transition)"
                 )
+            current = repo.transition(
+                instance_id,
+                "expired",
+                reason="ttl expired",
+                actor="system",
+                now=now,
+            )
         self._scheduling.release(instance_id, now)
         self._jobs.enqueue_idempotent(
             build_corrective_job(current, current.generation, "expire", now), now

@@ -1134,11 +1134,14 @@ def instance_credential_to_orm(
             instance_id=_as_uuid(credential.instance_id),
             name=credential.name,
             secret_ref=credential.secret_ref,
-            scopes=sorted(set(credential.scopes)),
+            # Preserve the caller's scope tuple verbatim so the credential
+            # round-trips (rewriting as sorted(set(...)) dropped duplicates and
+            # reordered, so domain value != stored value).
+            scopes=list(credential.scopes),
             expires_at=to_utc(credential.expires_at),
         )
     existing.secret_ref = credential.secret_ref
-    existing.scopes = sorted(set(credential.scopes))
+    existing.scopes = list(credential.scopes)
     existing.expires_at = to_utc(credential.expires_at)
     return existing
 

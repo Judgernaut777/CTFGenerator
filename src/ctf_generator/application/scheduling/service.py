@@ -245,6 +245,17 @@ class SchedulingService:
                 reservation_id, expires_at, now
             )
 
+    def reactivate(
+        self, reservation_id: str, expires_at: datetime, now: datetime
+    ) -> QuotaReservation:
+        """Public re-hold of a *released* reservation in place (same worker, same
+        original items). Used by the instance lifecycle when a reset lands on an
+        instance whose hold was already released (e.g. by the expiry sweep), so a
+        relaunch re-establishes capacity accounting instead of running unaccounted.
+        ``LookupError`` if no reservation exists; ``QuotaExceededError`` if the
+        original placement can no longer re-admit the hold."""
+        return self._reactivate(reservation_id, expires_at, now)
+
     def renew(
         self, reservation_id: str, new_expires_at: datetime, now: datetime
     ) -> None:
