@@ -46,8 +46,32 @@ mapper → repository → Alembic migration → Docker-gated Postgres tests). St
 |---|---|---|
 | `Competition` (§3) | `0002_competitions` | **Implemented** |
 | `User`, `Team`, `Membership` (§2) | `0003_identity` | **Implemented** (Epic 1) |
-| `ChallengeDefinition`, `ChallengeVersion`, `ChallengeBuild` (§4) | — | Pending (Epic 2) |
-| `Submission`, `Solve`, `ScoreEvent` (§5) | — | Pending (Epic 3) |
+| `ChallengeDefinition`, `ChallengeVersion`, `ChallengeBuild`, `competition_challenges` (§4–5) | `0004_challenges` | **Implemented** (Epic 2) |
+| `Submission`, `Solve`, `ScoreEvent` (§6) | — | Pending (Epic 3) |
+
+Decisions made while implementing §4–5 (Challenge authoring), consistent with
+this design except for one deliberate, documented deviation:
+
+- **DEVIATION — version state/timestamp CHECK.** §4 specifies
+  `CHECK ((state = 'published') = (published_at IS NOT NULL))`. Implemented
+  instead as `CHECK ((state = 'draft') = (published_at IS NULL))`. Rationale: the
+  literal spec plus the `freeze_published_version` trigger (§8) make
+  `published → archived` *impossible* — archiving would have to null
+  `published_at`, but the trigger forbids changing it once published — and it
+  would also discard publish provenance. The implemented invariant stamps
+  `published_at` when a version leaves `draft` and **retains** it through
+  `archived`, so a version carries a publish timestamp iff it is not a draft.
+  The domain `ChallengeVersion` enforces the same rule.
+- **`spec_sha256` is the authoritative content identity; `spec_json` is a
+  queryable `jsonb` copy** that round-trips at the dict level (key order is not
+  preserved), never recomputed into a hash.
+- **State transitions are explicit repository methods** (`publish`, `archive`),
+  not a generic content `update`; the `freeze_published_version` and
+  `reject_mutation` triggers are the DB backstops (§8).
+- **`reject_mutation()` (generic append-only guard) is created by
+  `0004_challenges`** and reused by the Epic 3 append-only ledgers via
+  `CREATE OR REPLACE`; Epic 3 drops only its own triggers, leaving the shared
+  function owned by `0004`.
 
 Decisions made while implementing §2 (Identity), consistent with this design:
 
@@ -309,7 +333,7 @@ layer; the DB stores it as `text` (the registry is code, not a table).
 - **PK**: `id`.
 - **FK**: `definition_id → challenge_definitions(id)` `ON DELETE RESTRICT`.
 - **Unique**: `UNIQUE (definition_id, version_no)`; and `UNIQUE (definition_id, spec_sha256)` so re-generating the identical spec does not create a duplicate version row (dedup by content, upholds determinism).
-- **CHECK**: `CHECK ((state = 'published') = (published_at IS NOT NULL))` — a version is published iff it has a publish timestamp.
+- **CHECK**: originally specified `CHECK ((state = 'published') = (published_at IS NOT NULL))`. **Implemented instead** as `CHECK ((state = 'draft') = (published_at IS NULL))` so `published → archived` is possible and publish provenance is retained — see the deviation note under "Implementation status" above. `published_at` is set once the version leaves `draft` and kept through `archived`.
 - **Immutability**: once `state = 'published'`, the content columns (`spec_sha256`, `spec_json`, `seed`, `family_version`, `mode`, `cve_*`, `spec_version`, `version_no`, `definition_id`) are frozen. `draft` rows are freely mutable. Only two forward transitions of `state` are allowed: `draft → published` and `published → archived`. Enforced by a trigger (§8).
 - **Indexes**: `INDEX (definition_id, state)`; `INDEX (spec_sha256)`.
 
@@ -530,6 +554,18 @@ The `UNIQUE (definition_id, spec_sha256)` and content-addressed
 `challenge_builds.build_sha256` PK provide the *content-identity* half of
 immutability (identical content can’t fork into two rows); the triggers provide
 the *no-mutation* half.
+
+**As implemented (`0004_challenges`), refining the sketch above:**
+
+- The freeze also lists **`published_at`** among the frozen columns — this is the
+  load-bearing detail behind the state/timestamp deviation (§4): `published_at`
+  is stamped once and never changes, so `published → archived` keeps it.
+- The freeze guards **`OLD.state IN ('published','archived')`**, not just
+  `'published'` — otherwise an archived row would be fully mutable and could be
+  moved back to `draft`/`published`. `'archived'` is enforced **terminal**.
+- The insert-only ledgers also get a **`BEFORE TRUNCATE … FOR EACH STATEMENT`**
+  trigger, because `FOR EACH ROW` triggers do not fire on `TRUNCATE` (so the
+  append-only/insert-only guarantee would otherwise be bypassable).
 
 ---
 
