@@ -55,6 +55,7 @@ from fastapi.responses import JSONResponse
 from sqlalchemy.exc import IntegrityError
 from starlette.exceptions import HTTPException as StarletteHTTPException
 
+from ctf_generator.application.auth import InvalidCredentialsError
 from ctf_generator.application.catalog.competition_service import (
     CompetitionWindowError,
 )
@@ -233,6 +234,15 @@ async def _handle_competition_window_error(
     )
 
 
+async def _handle_invalid_credentials(
+    request: Request, exc: InvalidCredentialsError
+) -> JSONResponse:
+    # A failed login / session resolution (wrong password, unknown email,
+    # expired/revoked session). Deliberately undifferentiated + generic -- the
+    # caller learns nothing about which check failed, and no token is echoed.
+    return _response(request, 401, "unauthorized", "invalid credentials")
+
+
 async def _handle_lookup_error(request: Request, exc: LookupError) -> JSONResponse:
     return _response(request, 404, "not_found", str(exc) or "resource not found")
 
@@ -367,6 +377,7 @@ def register_exception_handlers(app: FastAPI) -> None:
     # explicitly so it stays a 404 (its own MRO entry wins over the
     # SubmissionProcessingError base handler); the two flag errors get their
     # specific status; the base catches the rest (e.g. draft-not-submittable).
+    app.add_exception_handler(InvalidCredentialsError, _handle_invalid_credentials)
     app.add_exception_handler(ChallengeNotAttachedError, _handle_lookup_error)
     app.add_exception_handler(FlagRejectedError, _handle_flag_rejected)
     app.add_exception_handler(FlagUnavailableError, _handle_flag_unavailable)

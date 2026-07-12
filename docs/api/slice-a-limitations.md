@@ -130,3 +130,41 @@ gaps.
   lists no longer truncate: an earlier 500-row ceiling made instances beyond the
   500 oldest unreachable (`next_cursor` went null while more rows existed); that
   cap is removed, so the cursor now walks every instance.
+
+## M10 slice a (authentication) — landed, and what remains
+
+Slice a of the auth milestone (ADR-007) replaces the M9 `StubAuthenticator` seam
+with **real local-password authentication + opaque server-side sessions**. What
+this closed and what it explicitly did **not**:
+
+- **The authenticator is real — DONE (M10a).** `DbAuthenticator` (the module-level
+  production default) resolves a Bearer *session* token to a `Principal` from
+  real data: it hashes the token, looks up a live (not expired, not revoked)
+  `sessions` row, and builds the flat-permission principal from the user's system
+  roles (`user_system_roles`) + competition memberships. `StubAuthenticator`
+  survives only behind the explicit `CTFGEN_API_INSECURE_STUB_AUTH=1` dev flag.
+  `/auth/login`, `/auth/refresh`, `/auth/logout`, `/auth/me` ship.
+
+- **Authorization is still the coarse flat role→permission matrix — DEFERRED to
+  M10b.** The `Principal` now also carries `system_roles` and a `memberships`
+  mapping (`competition_id → (role, team_name)`), populated best-effort. But
+  `require_permission` still resolves over the **flat union** of all the caller's
+  roles (unchanged `ROLE_PERMISSIONS`): a user who is `organizer` in competition A
+  can still exercise `competition:write` against competition B. Per-competition
+  role scoping + cross-resource tenancy enforcement (IDOR-class, the bullet
+  above) is **M10 slice b**, which consumes `Principal.memberships` — no wire
+  change.
+
+- **Submission tenancy still reads `Principal.team` (single best-effort team) —
+  hardened in M10b.** `DbAuthenticator` populates `Principal.team` from the
+  caller's first team-placed membership. Full per-competition team scoping lands
+  with M10b tenancy.
+
+- **Federated identity (OIDC/SSO) — DEFERRED to M10c.** Only local password
+  credentials exist this slice. SAML is a permanent non-goal (REQ-PLAT-012); OIDC
+  is a later slice. The `Authenticator` protocol is the seam it will plug into.
+
+- **Password policy is a length floor only — future hardening.** `AuthService`
+  enforces a minimum length; composition rules, breach-list checks, lockout /
+  throttling beyond the shared rate-limit middleware, and password-reset flows are
+  out of scope for slice a.
