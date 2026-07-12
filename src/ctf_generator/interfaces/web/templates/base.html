@@ -59,6 +59,12 @@
   dl.kv { display: grid; grid-template-columns: max-content 1fr; gap: 0.35rem 1rem; margin: 0; }
   dl.kv dt { font-weight: 600; opacity: 0.75; }
   dl.kv dd { margin: 0; }
+  /* Page-specific layout helpers (kept here so the nonce'd policy covers them --
+     the CSP admits no style ATTRIBUTES, only this nonce'd <style> ELEMENT). */
+  .card-narrow { max-width: 380px; margin: 3rem auto; }
+  .card-centered { max-width: 480px; margin: 3rem auto; text-align: center; }
+  .field-full { width: 100%; padding: 0.5rem; }
+  .btn { padding: 0.55rem 1rem; }
 </style>
 {% if principal_subject %}
 <header class="app-bar">

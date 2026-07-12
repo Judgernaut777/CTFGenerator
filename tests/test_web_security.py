@@ -117,6 +117,38 @@ class WebSecurityHeadersTests(unittest.TestCase):
 
 
 @unittest.skipUnless(_ENABLED, _SKIP_REASON)
+class WebInlineStyleTests(unittest.TestCase):
+    """The strict CSP admits no style ATTRIBUTES (only the nonce'd <style> ELEMENT),
+    so no rendered page may carry a ``style="`` attribute; login/error use classes."""
+
+    def test_no_rendered_page_carries_a_style_attribute(self) -> None:
+        with ws.web_client() as (client, _db, _svc):
+            # Login + error pages BEFORE authenticating.
+            login_page = client.get("/app/login")
+            self.assertEqual(login_page.status_code, 200, login_page.text)
+            self.assertNotIn('style="', login_page.text)
+            # The login markup uses the classes defined in the nonce'd <style> block.
+            self.assertIn('class="card card-narrow"', login_page.text)
+            self.assertIn('class="field-full"', login_page.text)
+            self.assertIn('class="btn"', login_page.text)
+
+            ws.login(client, ws.ALICE)
+            error_page = client.get("/app/competitions/does-not-exist")
+            self.assertEqual(error_page.status_code, 404, error_page.text)
+            self.assertNotIn('style="', error_page.text)
+            self.assertIn('class="card card-centered"', error_page.text)
+
+            for path in (
+                "/app/",
+                "/app/competitions",
+                f"/app/competitions/{ws.COMP_A}",
+            ):
+                page = client.get(path)
+                self.assertEqual(page.status_code, 200, page.text)
+                self.assertNotIn('style="', page.text)
+
+
+@unittest.skipUnless(_ENABLED, _SKIP_REASON)
 class WebCookieAttributeTests(unittest.TestCase):
     def test_session_cookie_is_httponly_secure_samesite(self) -> None:
         with ws.web_client() as (client, _db, _svc):
