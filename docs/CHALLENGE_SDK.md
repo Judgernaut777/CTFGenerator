@@ -63,6 +63,67 @@ default spec (offline, in-memory, no Docker) and checks:
 call it in your family's own test suite. `lint_renderer_module(module)` adds the
 AST circular-import check for renderer-module plugins.
 
+## Scaffold and test a family
+
+`ctfgen new-family` writes a **minimal, lint-clean, immediately generatable**
+starting point so you begin from a working family, not a blank file:
+
+```console
+$ ctfgen new-family my_family --category web --dest ./my_family
+Scaffolded family 'my_family' into my_family:
+  my_family/my_family.py
+  my_family/test_my_family.py
+  my_family/ENTRY_POINT.md
+```
+
+Flags: `--category <c>` (required), `--dest DIR` (default `./<name>/`),
+`--modes red,blue,purple` (default `red`), `--force` (overwrite existing files).
+The `name` must be a Python identifier — a bad name (path separator, `..`,
+non-identifier, keyword), a bad category, or an unknown mode is a clean nonzero
+exit that writes nothing; existing files are never overwritten without `--force`.
+
+Three files are written:
+
+| File | What it is |
+| --- | --- |
+| `my_family.py` | The renderer module: the interface constants (`FAMILY_NAME`/`CATEGORY`/`MODES`/`DIFFICULTIES`/`CVE_DRIVEN`/`LLM_BRIEF`/`COMPOSE_MARKERS`/`SCORING_HINTS`/`REQUIRED_FILES`) + a minimal deterministic `render`. It does **not** import `ctf_generator.families`. |
+| `test_my_family.py` | A runnable author test using `ctf_generator.testing`. |
+| `ENTRY_POINT.md` | The `[project.entry-points."ctf_generator.families"]` snippet. |
+
+**1. Edit `render`.** Emit each file your `REQUIRED_FILES` declares. Derive every
+per-instance value from `rng` (never the clock or global state) so the family
+stays deterministic. `challenge.yaml` is injected by the generator.
+
+**2. Test with the supported facade.** The scaffolded `test_my_family.py` uses
+`ctf_generator.testing` — the **supported author-testing surface**, a thin facade
+over `sdk.lint` + the generator + `build` (it never re-implements a check):
+
+```python
+from ctf_generator import sdk, testing
+import my_family as family_module
+
+fam = sdk.family_from_module(family_module)
+
+testing.assert_family_ok(fam)                  # structural lint (== sdk.assert_family_ok)
+testing.assert_deterministic(fam)              # renders twice, asserts byte-identical
+testing.assert_no_private_leak(fam)            # sdk.lint PRIVATE_CONTENT_IN_PUBLIC invariant
+path = testing.build_family_in(fam, "/tmp/out")  # real generator.create_challenge -> validate it
+testing.assert_rebuild_is_byte_identical(fam)  # golden-manifest determinism, on disk
+```
+
+```console
+$ cd my_family && python -m pytest test_my_family.py     # or: python -m unittest
+```
+
+`assert_deterministic` renders through the *same* RNG derivation the generator
+uses (`random.Random(generator.seed_to_int(spec.seed))`), so a pass means a
+byte-identical real build. `build_family_in` publishes through the hardened,
+path-safe `build.write_build`, so you can `ctfgen validate <path>` the result.
+
+**3. Register it.** Declare the entry point from `ENTRY_POINT.md` (next section).
+Once your package is installed, `ctfgen` discovers, **lints**, and registers the
+family automatically at CLI startup via `bootstrap_family_plugins`.
+
 ## Distributing an external family (entry points)
 
 Ship your family in a package that declares a `ctf_generator.families` entry
