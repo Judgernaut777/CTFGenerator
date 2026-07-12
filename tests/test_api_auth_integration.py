@@ -37,6 +37,7 @@ try:
     )
     from ctf_generator.interfaces.api.app import create_app
     from ctf_generator.interfaces.api.db_authenticator import DbAuthenticator
+    from ctf_generator.interfaces.api.middleware import TokenBucketLimiter
     from ctf_generator.interfaces.api.settings import ApiSettings
 
     _IMPORT_ERROR: str | None = None
@@ -76,7 +77,7 @@ class _SpyHasher:
 
 
 @contextmanager
-def _app(hasher=None, *, seed=True):
+def _app(hasher=None, *, seed=True, rate_limiter=None):
     base = make_url(_TEST_URL)
     name = f"ctfgen_apiauth_it_{uuid.uuid4().hex[:12]}"
     admin = sa.create_engine(
@@ -105,6 +106,7 @@ def _app(hasher=None, *, seed=True):
                 database=db,
                 auth_service=service,
                 authenticator=DbAuthenticator(service),
+                rate_limiter=rate_limiter,
             )
             yield TestClient(app), service
         finally:
@@ -206,6 +208,41 @@ class AuthApiIntegrationTests(unittest.TestCase):
         with _app() as (client, _service):
             self.assertEqual(client.get("/api/v1/auth/me").status_code, 401)
 
+    def test_login_limiter_not_bypassable_by_varying_auth_header(self) -> None:
+        # Reproduce-and-close: a pre-auth attacker cannot reset the login brute-
+        # force bucket by rotating a caller-supplied Authorization header. With a
+        # tiny-burst limiter, wrong-password POSTs from the SAME client each
+        # carrying a DIFFERENT bearer are STILL throttled -- the limiter keys on
+        # the client IP, not the (unverified) header.
+        limiter = TokenBucketLimiter(rate=0.0001, burst=2)
+        with _app(rate_limiter=limiter) as (client, _service):
+            statuses = [
+                client.post(
+                    "/api/v1/auth/login",
+                    json={"email": _EMAIL, "password": "wrong"},  # noqa: S106
+                    headers={"Authorization": f"Bearer nonce-{i}"},
+                ).status_code
+                for i in range(8)
+            ]
+        # The burst (2) is consumed, then every further attempt is 429 despite a
+        # fresh header each time -- the pre-fix code returned all 401s.
+        self.assertIn(429, statuses, statuses)
+        self.assertEqual(statuses[-1], 429, statuses)
+
+    def test_login_limiter_throttles_with_no_auth_header(self) -> None:
+        # The existing no-header path is still throttled (same IP bucket).
+        limiter = TokenBucketLimiter(rate=0.0001, burst=2)
+        with _app(rate_limiter=limiter) as (client, _service):
+            statuses = [
+                client.post(
+                    "/api/v1/auth/login",
+                    json={"email": _EMAIL, "password": "wrong"},  # noqa: S106
+                ).status_code
+                for _ in range(8)
+            ]
+        self.assertIn(429, statuses, statuses)
+        self.assertEqual(statuses[-1], 429, statuses)
+
     def test_token_password_and_hash_never_logged(self) -> None:
         # REQ-INV-011: drive login + refresh with a root log capture and assert
         # the raw token, the password, and the token's sha256 hash never appear.
@@ -239,7 +276,6 @@ class AuthApiIntegrationTests(unittest.TestCase):
         self.assertNotIn(refreshed, blob)
         self.assertNotIn(_PASSWORD, blob)
         self.assertNotIn(hashlib.sha256(token.encode()).hexdigest(), blob)
-
 
 if __name__ == "__main__":  # pragma: no cover
     unittest.main()

@@ -1,11 +1,16 @@
 """Rate limiting middleware with a pluggable limiter.
 
-Slice a ships an in-memory token-bucket limiter keyed by the caller's bearer
-token (a cheap principal proxy) or, absent one, the client IP. On exhaustion it
-returns a ``429`` in the ``ctfgen.error`` envelope with a ``Retry-After`` header --
-it builds the response directly rather than raising, so the limit is enforced
-even before routing/auth run. (Principal-accurate, distributed limiting refines in
-M10; the ``RateLimiter`` seam lets a Redis/token-bucket backend drop in.)
+Slice a ships an in-memory token-bucket limiter keyed by the caller's network
+identity (client IP). The middleware runs BEFORE authentication, so it cannot
+key on the (unverified) Authorization header: a pre-auth attacker could rotate a
+caller-supplied header per request and mint a fresh bucket every time, defeating
+the login brute-force limit. The client IP is the only identity the caller
+cannot rotate pre-auth. On exhaustion it returns a ``429`` in the
+``ctfgen.error`` envelope with a ``Retry-After`` header -- it builds the response
+directly rather than raising, so the limit is enforced even before routing/auth
+run. (Principal-accurate, distributed limiting refines later; the ``RateLimiter``
+seam lets a Redis/token-bucket backend drop in. Per-authenticated-principal
+limiting, if ever wanted, is a separate POST-auth concern -- not this middleware.)
 """
 
 from __future__ import annotations
@@ -55,25 +60,44 @@ class TokenBucketLimiter:
             return False, retry_after
 
 
-def _client_key(request: Request) -> str:
-    auth = request.headers.get("authorization", "")
-    if auth:
-        # Key on the token WITHOUT storing/logging it: a short opaque hash bucket
-        # keeps callers separated without persisting the credential.
-        return f"tok:{hash(auth) & 0xFFFFFFFF:08x}"
+def _client_key(request: Request, *, trust_forwarded_for: bool = False) -> str:
+    """Return a rate-limit bucket key from the caller's network identity.
+
+    Keys on the client's peer address (``request.client.host``) -- a stable
+    identity the caller cannot rotate pre-auth. The Authorization header is
+    NEVER used: the middleware runs before auth and cannot validate a token, so
+    keying on it would let an attacker mint a fresh bucket per request.
+
+    ``trust_forwarded_for`` (OFF by default) opts into reading the LEFTMOST
+    ``X-Forwarded-For`` address for reverse-proxy deployments. Only enable it
+    when a trusted proxy sets that header -- otherwise a caller could spoof it to
+    rotate keys, re-introducing the bypass. Caveat: behind a trusted proxy with
+    the toggle OFF, every client shares the proxy's IP bucket (over-throttle);
+    flip it ON only once a trusted proxy owns X-Forwarded-For (an M18 deployment
+    concern)."""
+    if trust_forwarded_for:
+        forwarded = request.headers.get("x-forwarded-for", "")
+        if forwarded:
+            first = forwarded.split(",", 1)[0].strip()
+            if first:
+                return f"ip:{first}"
     client = request.client
     return f"ip:{client.host}" if client else "ip:unknown"
 
 
 class RateLimitMiddleware(BaseHTTPMiddleware):
-    def __init__(self, app, limiter: RateLimiter | None) -> None:
+    def __init__(
+        self, app, limiter: RateLimiter | None, *, trust_forwarded_for: bool = False
+    ) -> None:
         super().__init__(app)
         self._limiter = limiter
+        self._trust_forwarded_for = trust_forwarded_for
 
     async def dispatch(self, request: Request, call_next) -> Response:
         if self._limiter is None:
             return await call_next(request)
-        allowed, retry_after = self._limiter.check(_client_key(request))
+        key = _client_key(request, trust_forwarded_for=self._trust_forwarded_for)
+        allowed, retry_after = self._limiter.check(key)
         if allowed:
             return await call_next(request)
         request_id = current_request_id()
