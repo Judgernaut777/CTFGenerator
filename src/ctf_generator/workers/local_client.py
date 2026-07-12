@@ -18,12 +18,16 @@ from __future__ import annotations
 
 from datetime import datetime, timedelta
 
+from ctf_generator.application.execution.worker_instance_service import (
+    WorkerInstanceService,
+)
 from ctf_generator.application.execution.worker_job_service import WorkerJobService
 from ctf_generator.application.instances.service import InstanceLifecycleService
 from ctf_generator.application.scheduling.service import SchedulingService
 from ctf_generator.domain.instances.models import (
     HealthObservation,
     Instance,
+    InstanceEndpoint,
     RuntimeResource,
 )
 from ctf_generator.domain.scheduling.models import (
@@ -35,21 +39,32 @@ from ctf_generator.domain.work.models import JobLease
 
 
 class LocalControlPlaneClient:
-    """In-process ``WorkerControlPlaneClient`` over local application services."""
+    """In-process ``WorkerControlPlaneClient`` over local application services.
+
+    Fact reports and observed-lifecycle transitions are routed through the
+    authenticated, ownership-checked :class:`WorkerInstanceService` (never the
+    ungated :class:`InstanceLifecycleService` methods directly), so the single-host
+    path enforces the same worker-owns-instance trust boundary the networked M9
+    HTTP transport will.
+    """
 
     def __init__(
         self,
         *,
         jobs: WorkerJobService,
+        instances: WorkerInstanceService,
         lifecycle: InstanceLifecycleService,
         scheduling: SchedulingService,
         token: str,
+        architecture: str,
         reservation_ttl_hours: int = 2,
     ) -> None:
         self._jobs = jobs
+        self._instances = instances
         self._lifecycle = lifecycle
         self._scheduling = scheduling
         self._token = token
+        self._architecture = architecture
         self._reservation_ttl_hours = reservation_ttl_hours
 
     # -- credential ------------------------------------------------------------
@@ -101,12 +116,13 @@ class LocalControlPlaneClient:
         """Re-place + re-reserve an unassigned instance (the slice-2 launch
         contract). Reuses ``SchedulingService`` keyed on ``instance_id`` (so the
         hold is idempotent) and records the fresh assignment before the worker
-        starts a container."""
+        starts a container. ``architecture`` is derived from THIS worker's own
+        runtime probe (never hardcoded), so an arm64 fleet places on arm64."""
         instance = self._lifecycle.get(instance_id)
         if instance is None:
             raise LookupError(f"instance not found: {instance_id!r}")
         requirements = WorkerRequirements(
-            architecture="x86_64",
+            architecture=self._architecture,
             required_capabilities=frozenset({"launch_instance"}),
         )
         expires_at = now + timedelta(hours=self._reservation_ttl_hours)
@@ -121,15 +137,18 @@ class LocalControlPlaneClient:
         )
         return self._lifecycle.set_assignment(instance_id, worker_name, now)
 
-    def report_health(self, observation: HealthObservation) -> None:
-        self._lifecycle.record_observation(observation)
+    def report_health(self, observation: HealthObservation, now: datetime) -> None:
+        self._instances.report_health(self._token, observation, now)
 
-    def report_runtime_resource(self, resource: RuntimeResource) -> None:
-        self._lifecycle.record_runtime_resource(resource)
+    def report_runtime_resource(self, resource: RuntimeResource, now: datetime) -> None:
+        self._instances.report_runtime_resource(self._token, resource, now)
+
+    def report_endpoint(self, endpoint: InstanceEndpoint, now: datetime) -> None:
+        self._instances.report_endpoint(self._token, endpoint, now)
 
     def transition_instance(
         self, instance_id: str, to_state: str, *, reason: str, now: datetime
     ) -> None:
-        self._lifecycle.apply_transition(
-            instance_id, to_state, reason=reason, actor="worker", now=now
+        self._instances.transition_instance(
+            self._token, instance_id, to_state, reason=reason, now=now
         )
