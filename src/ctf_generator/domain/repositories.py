@@ -293,6 +293,14 @@ class ChallengePublicationRepository(Protocol):
         ``(competition_id, definition_slug, version_no)``. Raises if missing."""
         ...
 
+    def remove(
+        self, competition_id: str, definition_slug: str, version_no: int
+    ) -> bool:
+        """Detach a version from a competition. Returns ``True`` if a row was
+        removed, ``False`` if the attachment did not exist; raises
+        :class:`LookupError` if the competition or version are unknown."""
+        ...
+
 
 class LedgerSubmissionRepository(Protocol):
     """Append-only store of answer attempts, keyed by ``submission_id``.
@@ -788,6 +796,18 @@ class InstanceRepository(Protocol):
     def list_reconcilable(self, limit: int = 500) -> list[Instance]:
         """Every non-archived instance -- the reconciler's desired-vs-observed
         scan input."""
+        ...
+
+    def list_all(self, limit: int = 500) -> list[Instance]:
+        """Every instance (including archived), stable-sorted by ``(created_at,
+        id)`` for the operator list view."""
+        ...
+
+    def list_for_competition(
+        self, competition_id: str, limit: int = 500
+    ) -> list[Instance]:
+        """Every instance of one competition, stable-sorted like ``list_all``;
+        raises :class:`LookupError` on an unknown competition."""
         ...
 
     def transition(

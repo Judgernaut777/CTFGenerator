@@ -26,6 +26,7 @@ from .challenge_service import (
     ChallengeVersionService,
 )
 from .competition_service import CompetitionService
+from .publication_service import PublicationService
 from .team_service import TeamService
 
 __all__ = [
@@ -33,4 +34,5 @@ __all__ = [
     "TeamService",
     "ChallengeDefinitionService",
     "ChallengeVersionService",
+    "PublicationService",
 ]
