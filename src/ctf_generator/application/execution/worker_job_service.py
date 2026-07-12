@@ -8,10 +8,14 @@ heartbeat check, so it must never be reachable with a request-supplied
 1. authenticates the presented bearer credential (constant-time; a bad, expired,
    revoked, non-trusted, or quarantined worker fails identically as
    :class:`WorkerAuthenticationError` -- the caller learns nothing about which);
-2. enforces dispatch eligibility -- a *draining* worker may finish its in-flight
-   leases but may not ``claim`` new work (this is what finally makes
-   ``Worker.drain_requested_at`` live), and a worker whose liveness heartbeat is
-   stale is refused until it re-pings;
+2. enforces dispatch eligibility for *new* work -- ``claim`` alone requires a
+   fresh, non-draining, live worker (a *draining* worker may finish its in-flight
+   leases but may not ``claim``, which is what finally makes
+   ``Worker.drain_requested_at`` live; a heartbeat-stale worker is refused until
+   it re-pings). ``start`` / ``heartbeat`` / ``complete`` / ``fail`` are NOT
+   liveness-gated: they are fenced by the ``lease_token``, so a worker reporting
+   a real outcome for a lease it holds is always accepted -- refusing it on
+   heartbeat age would reap the lease and double-execute the job;
 3. requires the per-verb scope (``jobs:claim`` / ``jobs:heartbeat`` /
    ``jobs:complete``); and
 4. derives ``worker_id`` -- and, for ``claim``, the capability set -- EXCLUSIVELY
@@ -147,9 +151,11 @@ class WorkerJobService:
         self, token: str, job_id: str, lease_token: str, now: datetime
     ) -> None:
         """``claimed`` -> ``running``. Permitted while draining (finish leases);
-        fenced by ``lease_token`` in the queue."""
+        fenced by ``lease_token`` in the queue. NOT liveness-gated: a worker that
+        holds the lease is reporting real progress on work it owns, so it must be
+        accepted regardless of heartbeat age (only ``claim`` requires freshness)."""
         self._authorize(
-            token, now, scope="jobs:heartbeat", forbid_drain=False, check_liveness=True
+            token, now, scope="jobs:heartbeat", forbid_drain=False, check_liveness=False
         )
         with self._database.session_scope() as session:
             self._queue_factory(session).start(job_id, lease_token, now)
@@ -163,9 +169,9 @@ class WorkerJobService:
         now: datetime,
     ) -> bool:
         """Extend a lease; returns True iff cancellation was requested. Permitted
-        while draining."""
+        while draining. NOT liveness-gated (lease-fenced; see ``start``)."""
         self._authorize(
-            token, now, scope="jobs:heartbeat", forbid_drain=False, check_liveness=True
+            token, now, scope="jobs:heartbeat", forbid_drain=False, check_liveness=False
         )
         with self._database.session_scope() as session:
             return self._queue_factory(session).heartbeat(
@@ -183,9 +189,11 @@ class WorkerJobService:
         now: datetime,
     ) -> None:
         """``running`` -> ``succeeded``. Permitted while draining (finish
-        leases). Results carry references/hashes only, never secrets."""
+        leases). Results carry references/hashes only, never secrets. NOT
+        liveness-gated: refusing a real outcome for a held lease because the
+        worker's heartbeat aged would reap the lease and double-execute the job."""
         self._authorize(
-            token, now, scope="jobs:complete", forbid_drain=False, check_liveness=True
+            token, now, scope="jobs:complete", forbid_drain=False, check_liveness=False
         )
         with self._database.session_scope() as session:
             self._queue_factory(session).complete(
@@ -203,9 +211,10 @@ class WorkerJobService:
         now: datetime,
     ) -> Job:
         """Report a failure (retry/dead-letter/cancel per the queue). Uses the
-        completion scope; permitted while draining."""
+        completion scope; permitted while draining. NOT liveness-gated (a held
+        lease reporting its real outcome is always accepted; see ``complete``)."""
         self._authorize(
-            token, now, scope="jobs:complete", forbid_drain=False, check_liveness=True
+            token, now, scope="jobs:complete", forbid_drain=False, check_liveness=False
         )
         with self._database.session_scope() as session:
             return self._queue_factory(session).fail(

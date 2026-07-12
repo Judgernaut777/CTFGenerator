@@ -231,6 +231,52 @@ class WorkerJobServiceRejectionTests(unittest.TestCase):
             svc.ping(token, _NOW)  # refresh liveness
             self.assertIsNotNone(svc.claim(token, 60, _NOW))
 
+    def test_stale_worker_can_finish_held_lease_but_not_claim(self) -> None:
+        # A worker busy longer than the heartbeat window between pings must still
+        # be able to complete/fail a lease it holds (the lease_token fences it),
+        # or its lease would be reaped and the job double-executed. It cannot,
+        # however, CLAIM new work until it re-pings.
+        with _migrated_database() as (db, _url):
+            enrollment = WorkerEnrollmentService(db)
+            token = _enroll(db, enrollment, "wa")
+            svc = WorkerJobService(db, enrollment)
+            svc.ping(token, _NOW)  # fresh liveness
+            job_id = _enqueue_launch_job(db)
+            lease = svc.claim(token, 60, _NOW)
+            self.assertIsNotNone(lease)
+            svc.start(token, job_id, lease.lease_token, _NOW)
+
+            # The worker goes quiet past the heartbeat window (busy on the job).
+            with db.session_scope() as s:
+                SqlAlchemyWorkerRegistry(s).heartbeat("wa", _NOW - timedelta(hours=1))
+
+            # complete is accepted despite the stale liveness (lease-fenced).
+            svc.complete(token, job_id, lease.lease_token, {"ok": True}, None, None, _NOW)
+            with db.session_scope() as s:
+                self.assertEqual(SqlAlchemyJobQueue(s).get(job_id).status, "succeeded")
+
+            # But claiming NEW work is still refused until it pings.
+            _enqueue_launch_job(db)
+            with self.assertRaises(WorkerStaleError):
+                svc.claim(token, 60, _NOW)
+
+    def test_stale_worker_can_fail_held_lease(self) -> None:
+        with _migrated_database() as (db, _url):
+            enrollment = WorkerEnrollmentService(db)
+            token = _enroll(db, enrollment, "wa")
+            svc = WorkerJobService(db, enrollment)
+            svc.ping(token, _NOW)
+            job_id = _enqueue_launch_job(db)
+            lease = svc.claim(token, 60, _NOW)
+            svc.start(token, job_id, lease.lease_token, _NOW)
+            with db.session_scope() as s:
+                SqlAlchemyWorkerRegistry(s).heartbeat("wa", _NOW - timedelta(hours=1))
+            # A real failure outcome is accepted despite stale liveness.
+            job = svc.fail(
+                token, job_id, lease.lease_token, "transient", "boom", True, _NOW
+            )
+            self.assertIsInstance(job, Job)
+
     def test_scope_enforced_before_queue(self) -> None:
         with _migrated_database() as (db, _url):
             enrollment = WorkerEnrollmentService(db)
