@@ -248,6 +248,39 @@ def build_parser() -> argparse.ArgumentParser:
         help="List the challenge families the generator can produce",
     )
 
+    new_family_parser = subparsers.add_parser(
+        "new-family",
+        help=(
+            "Scaffold a new challenge family (a lint-clean renderer module, a "
+            "test using ctf_generator.testing, and an entry-point snippet)"
+        ),
+    )
+    new_family_parser.add_argument(
+        "name",
+        help="Family name -- a Python identifier (e.g. web_my_challenge)",
+    )
+    new_family_parser.add_argument(
+        "--category",
+        required=True,
+        help="Family category (e.g. web, network, crypto)",
+    )
+    new_family_parser.add_argument(
+        "--dest",
+        type=Path,
+        default=None,
+        help="Destination directory (default: ./<name>/)",
+    )
+    new_family_parser.add_argument(
+        "--modes",
+        default="red",
+        help="Comma-separated challenge modes from {red,blue,purple} (default: red)",
+    )
+    new_family_parser.add_argument(
+        "--force",
+        action="store_true",
+        help="Overwrite existing scaffold files",
+    )
+
     report_index_parser = subparsers.add_parser(
         "report-index",
         help="Summarize JSON report artifacts in a directory as a table (and optional HTML)",
@@ -524,6 +557,9 @@ def main(argv: list[str] | None = None) -> int:
         for family in FAMILIES:
             print(family)
         return 0
+
+    if args.command == "new-family":
+        return _run_new_family(args)
 
     if args.command == "create":
         spec = None
@@ -998,6 +1034,42 @@ def main(argv: list[str] | None = None) -> int:
 
     parser.error(f"unknown command: {args.command}")
     return 2
+
+
+# --- new-family scaffold helper -----------------------------------------------
+#
+# Standalone helper for the `new-family` dispatch branch. Delegates to the pure
+# ``sdk.scaffold`` module (validation + templating + path-safe writing); this
+# wrapper only maps its result/errors onto CLI stdout/stderr + exit codes. A bad
+# name/category/mode or a would-be clobber is a clean nonzero exit (no
+# traceback), and nothing is written outside DEST.
+
+
+def _run_new_family(args: argparse.Namespace) -> int:
+    from .sdk import scaffold
+
+    dest = args.dest if args.dest is not None else Path(args.name)
+    try:
+        written = scaffold.scaffold_family(
+            args.name,
+            args.category,
+            dest,
+            modes=args.modes,
+            force=args.force,
+        )
+    except scaffold.ScaffoldError as exc:
+        print(f"new-family: {exc}", file=sys.stderr)
+        return 2
+
+    print(f"Scaffolded family {args.name!r} into {dest}:")
+    for path in written:
+        print(f"  {path}")
+    print()
+    print("Next steps:")
+    print(f"  1. Edit {dest / (args.name + '.py')} -- implement render() and REQUIRED_FILES.")
+    print(f"  2. Run the test:  cd {dest} && python -m pytest test_{args.name}.py")
+    print(f"  3. Register it for distribution: see {dest / 'ENTRY_POINT.md'}.")
+    return 0
 
 
 # --- CVE / scenario helpers (Phase 4 platform commands) -----------------------
