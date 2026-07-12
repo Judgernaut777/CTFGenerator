@@ -311,13 +311,16 @@ class OidcService:
         raise OidcAuthError("ambiguous jwks key selection (token has no kid)")
 
     def _verified_email(self, claims: dict) -> str:
-        """Extract the verified email from the claims. Requires an email;
-        respects ``email_verified`` when present; applies the domain allow-list."""
+        """Extract the verified email from the claims. Requires an email and a
+        PRESENT, truthy ``email_verified``; applies the domain allow-list."""
         email = claims.get("email")
         if not isinstance(email, str) or "@" not in email:
             raise OidcAuthError("id token carries no usable email")
-        email_verified = claims.get("email_verified")
-        if email_verified is not None and not _is_true(email_verified):
+        # FAIL CLOSED: email is the identity join key (auto-provision + domain
+        # allow-list), so ``email_verified`` must be PRESENT and truthy. An
+        # absent claim is treated as unverified -- an IdP that emits an email
+        # without asserting verification must never authenticate that identity.
+        if not _is_true(claims.get("email_verified")):
             raise OidcAuthError("id token email is not verified")
         if not self._config.domain_allowed(email):
             raise OidcAuthError("email domain is not allowed")
