@@ -43,6 +43,7 @@ import hashlib
 import json
 import logging
 import re
+import shlex
 import shutil
 import subprocess
 from collections.abc import Sequence
@@ -92,6 +93,16 @@ _FIREWALL_BINARIES = ("iptables-legacy", "iptables-nft", "iptables")
 # A reserved, never-routed probe source used to prove we can add+delete a host
 # INPUT rule before we trust the firewall control (RFC 6598-adjacent test net).
 _FIREWALL_PROBE_SUBNET = "192.0.2.0/32"  # TEST-NET-1, never real traffic
+
+# An iptables comment stamped on every host-block DROP rule we install. It is the
+# DURABLE marker that lets a teardown/recovery sweep find and reclaim a leaked
+# host-block rule by identity, even when the per-instance network it protected was
+# removed OUT-OF-BAND (``docker network rm`` bypassing the backend) and its subnet
+# can no longer be read from a live network. Reclaiming a stranded rule is
+# fail-SAFE hygiene (a stranded DROP over-blocks a recycled subnet, it never opens
+# a hole); the sweep only removes rules whose subnet no longer matches ANY existing
+# ctfgen-managed network, so a rule still guarding a live network is preserved.
+_HOSTBLOCK_COMMENT = "ctfgen-hostblock"
 
 # The outer-layer hardenings a non-rootless host cannot provide. Each may be
 # EXPLICITLY acknowledged (never silently); seccomp is deliberately absent -- it
@@ -523,12 +534,17 @@ class DockerRuntimeBackend:
         return self._detect_firewall_backend() is not None
 
     def _host_block_rules(self, subnet: str) -> tuple[tuple[str, list[str]], ...]:
+        # Every rule carries the ctfgen-hostblock comment so a leaked rule can be
+        # reclaimed by identity even after its network is gone (see _sweep_orphan_
+        # host_blocks). The comment is a no-op match -- it does not change what the
+        # rule drops.
+        tag = ["-m", "comment", "--comment", _HOSTBLOCK_COMMENT]
         return (
             # Critical: container -> any host IP (the gateway IS the host, and its
             # IP is in-subnet) arrives on the host INPUT chain, which docker's
             # --internal (a FORWARD control) never blocks. Drop ALL traffic from
             # the subnet to the host.
-            ("required", ["INPUT", "-s", subnet, "-j", "DROP"]),
+            ("required", ["INPUT", "-s", subnet, *tag, "-j", "DROP"]),
             # Defence in depth: drop forwarded traffic LEAVING the subnet
             # (metadata / other subnets / internet) while permitting intra-subnet
             # container-to-container traffic (``! -d subnet``) so legitimate
@@ -536,7 +552,7 @@ class DockerRuntimeBackend:
             # bridge-nf host would also drop same-instance peer traffic.
             (
                 "best_effort",
-                ["DOCKER-USER", "-s", subnet, "!", "-d", subnet, "-j", "DROP"],
+                ["DOCKER-USER", "-s", subnet, "!", "-d", subnet, *tag, "-j", "DROP"],
             ),
         )
 
@@ -579,6 +595,60 @@ class DockerRuntimeBackend:
                 out = self._fw_exec(binary, ["-D", *rule], check=False)
                 if out.returncode != 0:
                     break
+
+    def _managed_network_subnets(self) -> set[str]:
+        """Subnets of every ctfgen-managed network that CURRENTLY exists (across
+        all workers). A host-block guarding any of these is live and must be
+        preserved by :meth:`_sweep_orphan_host_blocks`."""
+        names = self._run(
+            [
+                "network",
+                "ls",
+                "--filter",
+                f"label={MANAGED_LABEL}=true",
+                "--format",
+                "{{.Name}}",
+            ],
+            check=False,
+        ).stdout.split()
+        subnets: set[str] = set()
+        for name in names:
+            subnet = self._network_subnet(name)
+            if subnet:
+                subnets.add(subnet)
+        return subnets
+
+    def _sweep_orphan_host_blocks(self) -> None:
+        """Reclaim leaked host-block DROP rules by their ctfgen-hostblock comment,
+        independent of whether the network they guarded still exists. This closes
+        the leak where a per-instance network removed OUT-OF-BAND (``docker network
+        rm`` bypassing the backend) strands its INPUT/DOCKER-USER rule -- the normal
+        teardown reads the subnet from the LIVE network, so once the network is gone
+        the rule can no longer be matched by subnet.
+
+        A rule is removed ONLY when its ``-s`` subnet matches NO existing ctfgen
+        network, so a rule still guarding a live network (possibly another worker's)
+        is never dropped -- removing a live network's block would open a hole, which
+        this must never do."""
+        binary = self._fw_binary or self._detect_firewall_backend()
+        if binary is None:
+            return
+        live = self._managed_network_subnets()
+        for chain in ("INPUT", "DOCKER-USER"):
+            listed = self._fw_exec(binary, ["-S", chain], check=False)
+            if listed.returncode != 0:
+                continue
+            for line in listed.stdout.splitlines():
+                if _HOSTBLOCK_COMMENT not in line:
+                    continue
+                parts = shlex.split(line)
+                if len(parts) < 2 or parts[0] != "-A":
+                    continue
+                subnet = _rule_source(parts)
+                if subnet is not None and subnet in live:
+                    continue  # still guards a live network -- keep it
+                # Convert the "-A <chain> ..." listing into a "-D <chain> ..." delete.
+                self._fw_exec(binary, ["-D", *parts[1:]], check=False)
 
     def _network_subnet(self, network_name: str) -> str | None:
         out = self._run(
@@ -999,6 +1069,10 @@ class DockerRuntimeBackend:
         ).stdout.split()
         for name in nets:
             self._remove_network(name)
+        # Reclaim any host-block rule stranded by a network removed out-of-band
+        # (its subnet is no longer readable, so the per-network teardown above
+        # cannot have matched it). Fail-safe: only orphan rules are removed.
+        self._sweep_orphan_host_blocks()
         return len(ids)
 
     def _remove_by_label(self, instance_id: str) -> None:
@@ -1026,6 +1100,14 @@ class DockerRuntimeBackend:
 
 
 # -- module helpers -----------------------------------------------------------
+
+
+def _rule_source(parts: Sequence[str]) -> str | None:
+    """The value following ``-s`` in an ``iptables -S`` rule token list, or None."""
+    for idx, arg in enumerate(parts):
+        if arg == "-s" and idx + 1 < len(parts):
+            return parts[idx + 1]
+    return None
 
 
 def _normalize_arch(arch: str) -> str:
