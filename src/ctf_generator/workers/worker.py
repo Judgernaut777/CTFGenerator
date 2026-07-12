@@ -26,6 +26,7 @@ the control plane BEFORE the container is started.
 from __future__ import annotations
 
 import logging
+import os
 import signal
 import time
 from collections.abc import Sequence
@@ -498,15 +499,56 @@ class Worker:
 
 
 def main(argv: Sequence[str] | None = None) -> int:  # pragma: no cover - entrypoint
-    """Console entrypoint (``ctfgen-worker``). The networked deployment wiring
-    (config, HTTP client) lands in M9; today this refuses to run without an
-    explicit single-host configuration rather than guessing, so it never
-    accidentally starts holding control-plane DB credentials.
+    """Console entrypoint (``ctfgen-worker``): run the NETWORKED worker.
+
+    Transport is config-driven via the environment, keeping the run loop itself
+    transport-agnostic (it only ever sees the :class:`WorkerControlPlaneClient`
+    Protocol):
+
+    * ``CTFGEN_WORKER_TRANSPORT``          -- ``http`` (default). The single-host
+      in-process :class:`LocalControlPlaneClient` is a PROGRAMMATIC path (it needs a
+      DB session and so is never selected from this DSN-free entrypoint).
+    * ``CTFGEN_WORKER_CONTROL_PLANE_URL``  -- the worker gateway base URL.
+    * ``CTFGEN_WORKER_TOKEN``              -- the worker's scoped bearer credential
+      (``ctfw1.<id>.<secret>``). This is the ONLY credential the worker holds --
+      NEVER a control-plane DB DSN and NEVER a signing key.
+    * ``CTFGEN_WORKER_NAME``               -- the worker's registered name.
+    * ``CTFGEN_WORKER_LEASE_SECONDS``      -- lease duration (default 60).
+
+    The token is never logged.
     """
     logging.basicConfig(level=logging.INFO)
-    _LOG.error(
-        "ctfgen-worker: the networked worker transport is deferred to M9. Use "
-        "LocalControlPlaneClient in-process for the single-host/test path (see "
-        "ctf_generator.workers.local_client)."
+    transport = os.environ.get("CTFGEN_WORKER_TRANSPORT", "http").lower()
+    if transport != "http":
+        _LOG.error(
+            "ctfgen-worker: transport %r is not runnable from this entrypoint. The "
+            "in-process LocalControlPlaneClient is a programmatic single-host path "
+            "(it requires a DB session); set CTFGEN_WORKER_TRANSPORT=http.",
+            transport,
+        )
+        return 2
+
+    base_url = os.environ.get("CTFGEN_WORKER_CONTROL_PLANE_URL")
+    token = os.environ.get("CTFGEN_WORKER_TOKEN")
+    name = os.environ.get("CTFGEN_WORKER_NAME")
+    if not (base_url and token and name):
+        _LOG.error(
+            "ctfgen-worker: set CTFGEN_WORKER_CONTROL_PLANE_URL, CTFGEN_WORKER_TOKEN, "
+            "and CTFGEN_WORKER_NAME to run the networked worker."
+        )
+        return 2
+
+    # Imported lazily so importing this module never requires httpx / a docker CLI.
+    from ctf_generator.infrastructure.runtime.docker_backend import (
+        DockerRuntimeBackend,
     )
-    return 2
+    from ctf_generator.workers.http_client import HttpControlPlaneClient
+
+    lease_seconds = int(os.environ.get("CTFGEN_WORKER_LEASE_SECONDS", "60"))
+    config = WorkerConfig(worker_name=name, lease_seconds=lease_seconds)
+    client = HttpControlPlaneClient(base_url=base_url, token=token)
+    backend = DockerRuntimeBackend()
+    worker = Worker(config, client, backend)
+    worker.install_signal_handlers()
+    worker.run_forever()
+    return 0
