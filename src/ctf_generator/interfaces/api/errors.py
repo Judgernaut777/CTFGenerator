@@ -14,6 +14,7 @@ exception                                    status   code
 ``AuthorizationError`` / ``PermissionError`` 403      forbidden
 ``LookupError``                              404      not_found
 ``IntegrityError`` / ``QuotaExceededError``  409      conflict
+``NoEligibleWorkerError``                    409      conflict
 domain ``IdempotencyConflictError``          409      conflict
 ``ChallengeNotAttachedError``                404      not_found
 ``FlagUnavailableError``                     409      conflict
@@ -61,7 +62,10 @@ from ctf_generator.domain.ledger.processing import (
 from ctf_generator.domain.ledger.processing import (
     IdempotencyConflictError as DomainIdempotencyConflictError,
 )
-from ctf_generator.domain.scheduling.models import QuotaExceededError
+from ctf_generator.domain.scheduling.models import (
+    NoEligibleWorkerError,
+    QuotaExceededError,
+)
 
 from .context import current_request_id
 from .envelopes import error_envelope
@@ -188,6 +192,22 @@ async def _handle_quota_exceeded(
     return _response(request, 409, "conflict", "resource quota exceeded")
 
 
+async def _handle_no_eligible_worker(
+    request: Request, exc: NoEligibleWorkerError
+) -> JSONResponse:
+    # A routine capacity/placement condition (no dispatch-eligible worker with a
+    # capability match + free capacity), the sibling of QuotaExceededError -- both
+    # are "the reservation cannot be satisfied", so both map to 409. The message
+    # is generic (the exception carries the requested arch/capabilities, never a
+    # secret, but the wire message stays non-leaking).
+    return _response(
+        request,
+        409,
+        "conflict",
+        "no eligible worker is available to place this instance",
+    )
+
+
 async def _handle_domain_idempotency_conflict(
     request: Request, exc: DomainIdempotencyConflictError
 ) -> JSONResponse:
@@ -262,6 +282,7 @@ def register_exception_handlers(app: FastAPI) -> None:
     app.add_exception_handler(CompetitionWindowError, _handle_competition_window_error)
     app.add_exception_handler(IntegrityError, _handle_integrity_error)
     app.add_exception_handler(QuotaExceededError, _handle_quota_exceeded)
+    app.add_exception_handler(NoEligibleWorkerError, _handle_no_eligible_worker)
     app.add_exception_handler(
         DomainIdempotencyConflictError, _handle_domain_idempotency_conflict
     )
