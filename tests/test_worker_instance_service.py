@@ -133,6 +133,19 @@ class OwnershipTests(unittest.TestCase):
             svc.report_health("tok", _health("w1"), _NOW)
         self.assertEqual(life.observations, [])
 
+    def test_non_owner_cannot_report_endpoint(self) -> None:
+        # Endpoints are reported through the same ownership gate: a worker not
+        # assigned the instance may not register a reachable endpoint for it.
+        svc, life = _svc(assigned="w2", worker_name="w1")
+        with self.assertRaises(InstanceOwnershipError):
+            svc.report_endpoint(
+                "tok",
+                InstanceEndpoint("inst-1", "port-8080", "10.0.0.2", 8080, "tcp",
+                                 "tcp://10.0.0.2:8080", internal=True),
+                _NOW,
+            )
+        self.assertEqual(life.endpoints, [])
+
     def test_non_owner_cannot_transition(self) -> None:
         svc, life = _svc(assigned="w2", worker_name="w1")
         with self.assertRaises(InstanceOwnershipError):

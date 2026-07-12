@@ -95,6 +95,10 @@ class _FakeClient:
     failed: list = field(default_factory=list)
     replaced: bool = False
     claim_lease: JobLease | None = None
+    # The worker the control plane (re)assigns the instance to on replace_instance.
+    # Defaults to "w1" (this worker); set to a different name to simulate the
+    # control plane placing the instance on ANOTHER worker.
+    replace_to_worker: str = "w1"
 
     def authenticate(self, now):
         return self.token
@@ -127,7 +131,7 @@ class _FakeClient:
             definition_slug=self.instance.definition_slug,
             version_no=self.instance.version_no,
             state=self.instance.state,
-            assigned_worker="w1",
+            assigned_worker=self.replace_to_worker,
             image_ref=self.instance.image_ref,
         )
         return self.instance
@@ -211,6 +215,29 @@ class LaunchDispatchTests(unittest.TestCase):
         _worker(client, backend).run_once()
         self.assertTrue(client.replaced)  # slice-2 launch contract honoured
         self.assertIn(("launch", "inst-1"), backend.calls)
+
+    def test_launch_refuses_when_replaced_to_another_worker(self) -> None:
+        # The launch contract re-places an unassigned instance, but the control
+        # plane may assign it to a DIFFERENT worker. This worker MUST NOT launch an
+        # instance it does not own (a report/transition would be ownership-rejected
+        # and leak a live container). It fails the job RETRYABLE (a later re-place
+        # may assign it here) and never calls backend.launch.
+        client = _FakeClient(
+            instance=_instance(assigned=None), replace_to_worker="other-worker"
+        )
+        client.claim_lease = _lease(
+            "launch_instance", {"instance_id": "inst-1", "generation": 1, "action": "launch"}
+        )
+        backend = _FakeBackend()
+        _worker(client, backend).run_once()
+        self.assertTrue(client.replaced)
+        # No container was ever launched for an instance owned elsewhere.
+        self.assertNotIn(("launch", "inst-1"), backend.calls)
+        self.assertEqual(len(client.failed), 1)
+        _job_id, error_class, retryable = client.failed[0]
+        self.assertEqual(error_class, "internal")
+        self.assertTrue(retryable)  # a later re-place may assign it to this worker
+        self.assertEqual(client.completed, [])
 
     def test_unsupported_runtime_fails_non_retryable(self) -> None:
         client = _FakeClient(instance=_instance())

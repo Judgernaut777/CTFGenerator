@@ -217,6 +217,33 @@ class DockerBackendIntegrationTests(unittest.TestCase):
         # Refused BEFORE creating anything.
         self._assert_clean(iid)
 
+    def test_isolated_launch_refuses_without_firewall_and_leaks_nothing(self) -> None:
+        # HARD FLOOR: an isolated launch REQUIRES an enforceable host-block
+        # firewall. When firewall_available() is False the backend must refuse
+        # BEFORE creating any container or per-instance network -- it never runs a
+        # container that could reach the host. This subclass forces the unavailable
+        # case; the refusal path is otherwise unreachable on a host whose firewall
+        # control works (as this one's does).
+        class _NoFirewallBackend(DockerRuntimeBackend):
+            def firewall_available(self) -> bool:  # noqa: D401 - test override
+                return False
+
+        backend = _NoFirewallBackend(
+            require_rootless=False, acknowledged_gaps=_ACKED
+        )
+        iid = f"it-{uuid.uuid4().hex[:12]}"
+        self._instance_ids.append(iid)  # tearDown double-checks cleanliness
+        req = ContainerRequest(
+            instance_id=iid, team_key="red", image_ref=_BENIGN_IMAGE,
+            policy=ContainerPolicy(
+                memory_mb=64, cpu_millis=250, network_mode="isolated"
+            ),
+        )
+        with self.assertRaises(UnsupportedRuntimeError):
+            backend.launch(req, command=_SLEEP)
+        # Refused BEFORE creating anything: no container AND no per-instance network.
+        self._assert_clean(iid)
+
     def test_unacknowledged_gap_refuses(self) -> None:
         probe = _PROBE_BACKEND.probe()
         if probe.rootless:

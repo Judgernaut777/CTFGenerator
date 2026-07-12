@@ -49,8 +49,11 @@ _DOCKER = _PROBE_BACKEND.is_available()
 _SKIP = "docker CLI/daemon not available"
 # The isolated launch REQUIRES an enforceable host-block firewall (a hard floor);
 # if this host cannot enforce it, launch() correctly refuses, so the positive
-# isolation cases here cannot run. That refusal is asserted in the docker-backend
-# suite; here we skip with a clear reason rather than error.
+# isolation cases here cannot run. That refusal (firewall_available() False ->
+# UnsupportedRuntimeError with nothing created) is asserted by
+# test_docker_backend_integration.DockerBackendIntegrationTests
+# .test_isolated_launch_refuses_without_firewall_and_leaks_nothing; here we skip
+# with a clear reason rather than error.
 _FW = _DOCKER and DockerRuntimeBackend(
     require_rootless=False, acknowledged_gaps=_ACKED, worker_name="isotest"
 ).firewall_available()
@@ -63,6 +66,18 @@ def _reach(container_id: str, ip: str, port: int, *, wait: int = 3) -> bool:
         capture_output=True, text=True,
     ).returncode
     return rc == 0
+
+
+def _host_can_reach(ip: str, port: int, *, timeout: float = 3.0) -> bool:
+    """True iff the TEST HOST itself can open a TCP connection to ``ip:port`` --
+    used to guard an egress-denial assertion so it never becomes vacuous on an
+    offline host (where the container would be unreachable regardless of the
+    per-instance block)."""
+    try:
+        with socket.create_connection((ip, port), timeout=timeout):
+            return True
+    except OSError:
+        return False
 
 
 @unittest.skipUnless(_DOCKER, _SKIP)
@@ -88,6 +103,14 @@ class TeamIsolationIntegrationTests(unittest.TestCase):
                 capture_output=True, text=True,
             ).stdout.strip()
             self.assertEqual(ps, "", f"leftover container for {iid}")
+            # destroy() removes the per-instance network too; enforce it here so a
+            # leaked network (and its host-block) cannot pass unnoticed.
+            nets = subprocess.run(
+                ["docker", "network", "ls", "--filter",
+                 f"label=ctfgen.instance={iid}", "--format", "{{.Name}}"],
+                capture_output=True, text=True,
+            ).stdout.strip()
+            self.assertEqual(nets, "", f"leftover network for {iid}")
 
     def _launch(self, command=_SLEEP) -> tuple[str, str, str, str]:
         """Launch one benign instance; return (instance_id, container_id, ip, net)."""
@@ -113,6 +136,23 @@ class TeamIsolationIntegrationTests(unittest.TestCase):
              "{{range .IPAM.Config}}{{.Gateway}}{{end}}", net],
             capture_output=True, text=True,
         ).stdout.strip()
+
+    def _host_block_lines(self, binary: str, subnet: str) -> list[str]:
+        """Every installed ctfgen host-block rule (by comment marker) whose spec
+        mentions ``subnet``, read from the host INPUT + DOCKER-USER chains via the
+        firewall helper container."""
+        lines: list[str] = []
+        for chain in ("INPUT", "DOCKER-USER"):
+            out = subprocess.run(
+                ["docker", "run", "--rm", "--net=host", "--cap-add=NET_ADMIN",
+                 self._backend._firewall_image, binary, "-S", chain],  # noqa: SLF001
+                capture_output=True, text=True,
+            ).stdout
+            lines += [
+                ln for ln in out.splitlines()
+                if "ctfgen-hostblock" in ln and subnet in ln
+            ]
+        return lines
 
     def _probe_from_network(self, net: str, ip: str, port: int) -> bool:
         """Run a throwaway container ON ``net`` and report whether it can reach
@@ -151,6 +191,30 @@ class TeamIsolationIntegrationTests(unittest.TestCase):
         self.assertTrue(
             self._probe_from_network(net, ip, _LISTEN_PORT),
             "_reach-style probe returned False for a genuinely-open co-located target",
+        )
+
+    def test_reach_exec_probe_returns_true_for_open_colocated_target(self) -> None:
+        # POSITIVE CONTROL on the SAME probe path as every negative assertion:
+        # ``_reach`` (docker EXEC ... nc), not ``_probe_from_network`` (docker RUN
+        # ... nc). An exec-probe regression (PATH / -z under exec) would false-green
+        # all the negatives; this proves _reach returns True for a genuinely
+        # reachable target reached over that exact exec path. The peer is a second
+        # RUNNING container co-located on the listener's OWN network (intra-network
+        # traffic is permitted; only container->host is blocked).
+        _iid, _cid, ip, net = self._launch(_LISTEN)
+        self.assertTrue(ip, "listener has no IP on its network")
+        peer = f"probe-{uuid.uuid4().hex[:10]}"
+        self._probe_names.append(peer)
+        run = subprocess.run(
+            ["docker", "run", "-d", "--name", peer, "--network", net,
+             _BENIGN_IMAGE, *_SLEEP],
+            capture_output=True, text=True,
+        )
+        self.assertEqual(run.returncode, 0, run.stderr)
+        self.assertTrue(
+            _reach(peer, ip, _LISTEN_PORT),
+            "exec probe (_reach) returned False for a genuinely reachable "
+            "co-located target -- the exec probe path is broken",
         )
 
     # -- host reachability (the REPRODUCED escape) -----------------------------
@@ -204,20 +268,68 @@ class TeamIsolationIntegrationTests(unittest.TestCase):
 
     def test_metadata_and_internet_egress_is_denied(self) -> None:
         _iid, cid, _ip, _net = self._launch(_SLEEP)
-        # Genuine egress denial: the per-instance network does not forward off its
-        # subnet (--internal + the DOCKER-USER off-subnet DROP), so nothing
-        # off-subnet is reachable. 8.8.8.8:53 is a REAL, live public service that
-        # WOULD answer if egress were open -- its unreachability proves an actual
-        # route-level block, not "no service was present".
+        # THE load-bearing proof: 8.8.8.8:53 is a REAL, live public service that
+        # WOULD answer if egress were open, so the container's inability to reach it
+        # proves an actual route-level block (--internal + the DOCKER-USER off-subnet
+        # DROP), not "nothing was there". GUARD it: if the HOST itself cannot reach
+        # 8.8.8.8:53 (offline CI) the assertion would be vacuous, so skip with a
+        # clear reason rather than green silently.
+        if not _host_can_reach("8.8.8.8", 53):
+            self.skipTest(
+                "host cannot reach 8.8.8.8:53 (offline); the egress-denial "
+                "assertion would be vacuous"
+            )
         self.assertFalse(
             _reach(cid, "8.8.8.8", 53),
             "egress denial breached: instance reached the public internet (8.8.8.8:53)",
         )
-        # The cloud instance-metadata endpoint (a link-local address that on cloud
-        # hosts serves credentials) is likewise unreachable.
+        # Defence-in-depth only, NOT relied on as proof here: the cloud
+        # instance-metadata endpoint. On this non-cloud host nothing answers
+        # 169.254.169.254 at all, so this assertion is VACUOUS locally and is a
+        # meaningful check only on a cloud host (where it serves credentials). It is
+        # kept as a documented cloud-only guard, not as evidence of the block.
         self.assertFalse(
             _reach(cid, _METADATA_IP, 80),
             "isolation breached: instance reached cloud metadata endpoint",
+        )
+
+    # -- fail-safe host-block teardown (out-of-band network removal) ------------
+
+    def test_out_of_band_network_removal_leaves_no_orphan_host_block(self) -> None:
+        # The normal teardown reads a network's subnet from the LIVE network to
+        # drop its host-block. If a per-instance network is removed OUT-OF-BAND
+        # (``docker network rm`` bypassing the backend) the subnet becomes
+        # unreadable, so a subnet-matched teardown can no longer find the rule and
+        # it strands. reap_managed()'s comment-marker sweep must reclaim it. (The
+        # stranded rule is fail-SAFE -- it over-blocks a recycled subnet, never
+        # opens a hole -- but a leaked rule is still hygiene debt.)
+        iid, cid, _ip, net = self._launch(_SLEEP)
+        subnet = self._backend._network_subnet(net)  # noqa: SLF001
+        self.assertTrue(subnet, "no subnet on the per-instance network")
+        binary = self._backend._detect_firewall_backend()  # noqa: SLF001
+        self.assertIsNotNone(binary, "no working firewall backend")
+        # The host-block rule is present while the network is live.
+        self.assertTrue(
+            self._host_block_lines(binary, subnet),
+            "host-block rule missing while the network is live",
+        )
+        # Remove the network OUT-OF-BAND: force-remove the container (the only
+        # endpoint) then the network directly, bypassing the backend teardown.
+        subprocess.run(["docker", "rm", "-f", cid], capture_output=True)
+        rm = subprocess.run(
+            ["docker", "network", "rm", net], capture_output=True, text=True
+        )
+        self.assertEqual(rm.returncode, 0, rm.stderr)
+        # The rule is now STRANDED (network + subnet gone) -- the leak we close.
+        self.assertTrue(
+            self._host_block_lines(binary, subnet),
+            "expected the host-block rule to strand after out-of-band removal",
+        )
+        # The comment-marker orphan sweep in reap_managed reclaims it.
+        self._backend.reap_managed()
+        self.assertEqual(
+            self._host_block_lines(binary, subnet), [],
+            "orphan ctfgen host-block rule leaked after reap_managed",
         )
 
     # -- egress mode is refused until real restriction lands -------------------
