@@ -122,6 +122,57 @@ class OpenApiContractTests(unittest.TestCase):
             {"get", "post"},
         )
 
+    def test_worker_gateway_paths_present(self) -> None:
+        paths = self.spec["paths"]
+        for expected in (
+            "/api/v1/worker/auth",
+            "/api/v1/worker/jobs/claim",
+            "/api/v1/worker/jobs/{job_id}/start",
+            "/api/v1/worker/jobs/{job_id}/heartbeat",
+            "/api/v1/worker/jobs/{job_id}/complete",
+            "/api/v1/worker/jobs/{job_id}/fail",
+            "/api/v1/worker/instances/{instance_id}",
+            "/api/v1/worker/instances/{instance_id}/replace",
+            "/api/v1/worker/instances/{instance_id}/health",
+            "/api/v1/worker/instances/{instance_id}/resource",
+            "/api/v1/worker/instances/{instance_id}/endpoint",
+            "/api/v1/worker/instances/{instance_id}/transition",
+        ):
+            self.assertIn(expected, paths, f"missing worker path {expected}")
+
+    def test_worker_gateway_verbs(self) -> None:
+        paths = self.spec["paths"]
+        self.assertEqual(set(paths["/api/v1/worker/jobs/claim"].keys()), {"post"})
+        self.assertEqual(
+            set(paths["/api/v1/worker/instances/{instance_id}"].keys()), {"get"}
+        )
+        self.assertEqual(
+            set(paths["/api/v1/worker/instances/{instance_id}/transition"].keys()),
+            {"post"},
+        )
+
+    def test_worker_claim_documents_401_and_409(self) -> None:
+        # The worker credential + eligibility failures must be documented on claim.
+        responses = self.spec["paths"]["/api/v1/worker/jobs/claim"]["post"][
+            "responses"
+        ]
+        for code in ("401", "403", "409"):
+            self.assertIn(code, responses)
+
+    def test_worker_only_app_exposes_only_worker_paths(self) -> None:
+        # The separate-listener worker app carries the worker gateway and NOTHING
+        # else -- a human resource route has nothing to reach there.
+        from ctf_generator.interfaces.api.app import create_worker_app
+
+        wspec = create_worker_app(ApiSettings()).openapi()
+        paths = list(wspec["paths"])
+        self.assertTrue(paths, "worker app exposes no paths")
+        for path in paths:
+            self.assertTrue(
+                path.startswith("/api/v1/worker/"),
+                f"non-worker path on the worker-only app: {path}",
+            )
+
     def test_system_probes_are_unauthenticated_in_spec(self) -> None:
         # The unauthenticated probes carry no security requirement and are not
         # documented with auth-related error codes.
