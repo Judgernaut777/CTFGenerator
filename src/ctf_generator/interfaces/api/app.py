@@ -99,7 +99,11 @@ def create_app(
         rate_limiter = TokenBucketLimiter(
             rate=settings.rate_limit_rate, burst=settings.rate_limit_burst
         )
-    app.add_middleware(RateLimitMiddleware, limiter=rate_limiter)
+    app.add_middleware(
+        RateLimitMiddleware,
+        limiter=rate_limiter,
+        trust_forwarded_for=settings.trust_forwarded_for,
+    )
     app.add_middleware(AccessLogMiddleware)
     app.add_middleware(RequestIDMiddleware)
     if settings.cors_allow_origins:
@@ -172,7 +176,11 @@ def create_worker_app(
         rate_limiter = TokenBucketLimiter(
             rate=settings.rate_limit_rate, burst=settings.rate_limit_burst
         )
-    app.add_middleware(RateLimitMiddleware, limiter=rate_limiter)
+    app.add_middleware(
+        RateLimitMiddleware,
+        limiter=rate_limiter,
+        trust_forwarded_for=settings.trust_forwarded_for,
+    )
     app.add_middleware(AccessLogMiddleware)
     app.add_middleware(RequestIDMiddleware)
 
@@ -227,6 +235,7 @@ _module_auth_service = (
 app = create_app(
     ApiSettings(
         rate_limit_enabled=os.environ.get("CTFGEN_API_RATE_LIMIT", "1") != "0",
+        trust_forwarded_for=os.environ.get("CTFGEN_API_TRUSTED_PROXY", "0") == "1",
     ),
     database=_module_database,
     auth_service=_module_auth_service,

@@ -22,3 +22,8 @@ class ApiSettings:
     rate_limit_enabled: bool = False
     rate_limit_rate: float = 10.0
     rate_limit_burst: int = 20
+    # Trust the LEFTMOST X-Forwarded-For address for the rate-limit key. OFF by
+    # default: keying on a caller-spoofable header would let a pre-auth attacker
+    # rotate buckets and bypass the login limiter. Turn ON only behind a trusted
+    # reverse proxy that owns X-Forwarded-For (an M18 deployment concern).
+    trust_forwarded_for: bool = False
