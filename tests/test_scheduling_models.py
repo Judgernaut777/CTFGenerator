@@ -273,6 +273,31 @@ class ContainerPolicyTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             ContainerPolicy(memory_mb=0, cpu_millis=1000)
 
+    def test_unconfined_seccomp_rejected(self) -> None:
+        for value in ("unconfined", "Unconfined", "  UNCONFINED  "):
+            with self.assertRaises(ValueError, msg=value):
+                ContainerPolicy(memory_mb=512, cpu_millis=1000, seccomp_profile=value)
+
+    def test_unconfined_or_disabled_apparmor_rejected(self) -> None:
+        for value in ("unconfined", "disable", "DISABLE"):
+            with self.assertRaises(ValueError, msg=value):
+                ContainerPolicy(memory_mb=512, cpu_millis=1000, apparmor_profile=value)
+
+    def test_host_namespaces_forbidden(self) -> None:
+        for flag in (
+            "host_pid_namespace",
+            "host_ipc_namespace",
+            "host_uts_namespace",
+        ):
+            with self.assertRaises(ValueError, msg=flag):
+                ContainerPolicy(memory_mb=512, cpu_millis=1000, **{flag: True})
+
+    def test_host_namespaces_default_false(self) -> None:
+        p = ContainerPolicy(memory_mb=512, cpu_millis=1000)
+        self.assertFalse(p.host_pid_namespace)
+        self.assertFalse(p.host_ipc_namespace)
+        self.assertFalse(p.host_uts_namespace)
+
 
 class RuntimeCapabilitiesTests(unittest.TestCase):
     def _caps(self, **over) -> RuntimeCapabilities:

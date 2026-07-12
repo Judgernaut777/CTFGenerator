@@ -84,6 +84,13 @@ class ContainerPolicy:
     run_as_non_root: bool = True
     user_namespace: bool = True
     privileged: bool = False
+    # Host-namespace prohibition -- sharing the host PID/IPC/UTS namespace with a
+    # challenge container defeats the isolation floor, so each is fixed False and
+    # part of the contract slice 2 must honor (validated exactly like
+    # ``privileged``: unconstructible when True).
+    host_pid_namespace: bool = False
+    host_ipc_namespace: bool = False
+    host_uts_namespace: bool = False
 
     def __post_init__(self) -> None:
         _require_positive(self.memory_mb, "memory_mb")
@@ -98,6 +105,20 @@ class ContainerPolicy:
             )
         _require_nonempty(self.seccomp_profile, "seccomp_profile")
         _require_nonempty(self.apparmor_profile, "apparmor_profile")
+        # ``seccomp_profile`` / ``apparmor_profile`` are profile NAMES the worker
+        # applies, with a secure floor: a profile that *disables* confinement is
+        # unrepresentable. (Stronger still would be an allowlist -- e.g.
+        # ``{'runtime-default'}`` plus explicitly-registered names -- which slice
+        # 2 may tighten to; the floor below is the minimum this VO enforces.)
+        if self.seccomp_profile.strip().lower() == "unconfined":
+            raise ValueError(
+                "seccomp_profile 'unconfined' is forbidden by policy"
+            )
+        if self.apparmor_profile.strip().lower() in ("unconfined", "disable"):
+            raise ValueError(
+                "apparmor_profile must not disable confinement "
+                f"(got {self.apparmor_profile!r})"
+            )
         # The security floor: none of these may be relaxed through this VO.
         if self.privileged:
             raise ValueError("privileged containers are forbidden by policy")
@@ -110,6 +131,15 @@ class ContainerPolicy:
         ):
             if getattr(self, flag_name) is not True:
                 raise ValueError(f"{flag_name} may not be disabled by policy")
+        for ns_flag in (
+            "host_pid_namespace",
+            "host_ipc_namespace",
+            "host_uts_namespace",
+        ):
+            if getattr(self, ns_flag) is not False:
+                raise ValueError(
+                    f"{ns_flag} is forbidden by policy (no host-namespace sharing)"
+                )
 
 
 @dataclass(frozen=True)
