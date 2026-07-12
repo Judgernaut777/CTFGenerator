@@ -46,8 +46,37 @@ class OpenApiContractTests(unittest.TestCase):
             "/api/v1/challenge-versions",
             "/api/v1/challenge-versions/{definition_slug}/{version_no}",
             "/api/v1/challenge-versions/{definition_slug}/{version_no}/publish",
+            "/api/v1/users",
+            "/api/v1/users/{user_id}",
+            "/api/v1/competitions/{competition_id}/submissions",
+            "/api/v1/submissions/{submission_id}",
+            "/api/v1/competitions/{competition_id}/scoreboard",
+            "/api/v1/competitions/{competition_id}/scoreboard/lag",
         ):
             self.assertIn(expected, paths, f"missing path {expected}")
+
+    def test_slice_b_verbs(self) -> None:
+        paths = self.spec["paths"]
+        self.assertEqual(set(paths["/api/v1/users"].keys()), {"get", "post"})
+        self.assertEqual(
+            set(paths["/api/v1/competitions/{competition_id}/submissions"].keys()),
+            {"get", "post"},
+        )
+        self.assertEqual(
+            set(paths["/api/v1/submissions/{submission_id}"].keys()), {"get"}
+        )
+        self.assertEqual(
+            set(paths["/api/v1/competitions/{competition_id}/scoreboard"].keys()),
+            {"get"},
+        )
+
+    def test_submit_documents_201_and_error_codes(self) -> None:
+        responses = self.spec["paths"][
+            "/api/v1/competitions/{competition_id}/submissions"
+        ]["post"]["responses"]
+        self.assertIn("201", responses)
+        for code in ("400", "401", "403", "404", "409", "422", "429"):
+            self.assertIn(code, responses)
 
     def test_competitions_expose_full_crud_verbs(self) -> None:
         paths = self.spec["paths"]

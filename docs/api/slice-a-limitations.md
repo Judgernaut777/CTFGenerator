@@ -28,3 +28,41 @@ them is closed by weakening a design — each is an additive M10 wiring change.
   reliably yields `412` under READ COMMITTED. A later slice can introduce a row
   `version` column and swap the validator's source **without any wire-contract
   change** (the client still sends/receives opaque `ETag` / `If-Match`).
+
+## M9 slice-b (contestant loop) — residual gaps
+
+Slice-b adds the contestant competition-loop surface (users, submissions,
+scoreboard) on the same foundation. Its authorization is still coarse; the
+following are recorded so they are not silent gaps, and each closes with M10 auth
+wiring, not by weakening a design.
+
+- **Submission tenancy is team-scope only (name-based) — hardened in M10.**
+  `submission_team_scope` confines a `player`/`captain` principal to its own
+  `Principal.team` (a team *name*); organizer/admin/staff are unrestricted. The
+  team name is not yet validated to belong to the competition in the path (the
+  `Principal` carries a bare team string, not a `(competition, team)` pair), so a
+  player whose `Principal.team` matches a same-named team in a different
+  competition could read that competition's team submissions. Full
+  `(org, competition, team)` resource-ownership scoping lands in M10; the coarse
+  team-name confinement here is what the current `Principal` can express.
+
+- **User registration `role` is validated, not persisted — by design this slice.**
+  `POST /users` validates the requested `role` against `VALID_ROLES` (422 on an
+  unknown role) and records it in the audit trail, but the global user profile
+  stores only `email` + `display_name`. Role/team placement is competition-scoped
+  (a `Membership`) and is assigned through the membership surface (M9c/M11), not
+  the global profile — so the create/get response never claims to have stored a
+  role. No credential is modelled (authN is M10).
+
+- **Scoreboard reads are projection-only and never fold on GET — intentional.**
+  `GET …/scoreboard` serves the cached projection as-is; it never triggers a
+  projection run, so a just-recorded solve appears only after the `ScoreProjector`
+  has folded its score event. An unstarted/unknown competition returns an empty
+  standings list rather than 404 (the read leaks nothing). `…/scoreboard/lag`
+  reports the *shared* projection outbox lag (global, not per-competition) and is
+  restricted to operators/organizers (`scoreboard:lag`).
+
+- **Submitter attribution is not linked — deferred.** A recorded submission's
+  `submitter_email` is left unset by the API this slice (the ledger supports it,
+  but linking the authenticated principal to a `User`/`Membership` row is the M10
+  identity join); submissions are attributed to the team, not yet the member.
