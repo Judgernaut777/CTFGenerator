@@ -22,9 +22,13 @@ from __future__ import annotations
 
 from typing import Any
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 
-from ctf_generator.domain.instances.models import Instance, InstanceEndpoint
+from ctf_generator.domain.instances.models import (
+    VALID_INSTANCE_STATES,
+    Instance,
+    InstanceEndpoint,
+)
 from ctf_generator.domain.work.models import JobLease
 
 # NOTE ON IDENTITY: no request DTO carries a ``worker`` / ``worker_id`` /
@@ -201,6 +205,18 @@ class EndpointReportRequest(BaseModel):
 class TransitionRequest(BaseModel):
     to_state: str = Field(min_length=1)
     reason: str = Field(min_length=1)
+
+    @field_validator("to_state")
+    @classmethod
+    def _to_state_is_known(cls, value: str) -> str:
+        """Reject an UNKNOWN target state at the schema boundary (422) so a bogus
+        ``to_state`` never reaches the DB. The legal-GRAPH check (a valid state but
+        an illegal move) is enforced by the application/domain layer -> 409."""
+        if value not in VALID_INSTANCE_STATES:
+            raise ValueError(
+                f"to_state must be one of {sorted(VALID_INSTANCE_STATES)}"
+            )
+        return value
 
 
 def endpoint_from_request(

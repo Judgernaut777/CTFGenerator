@@ -123,6 +123,23 @@ def _require_positive(value: int, field_name: str) -> None:
         raise ValueError(f"{field_name} must be an int >= 1, got {value!r}")
 
 
+class IllegalInstanceTransitionError(Exception):
+    """A requested ``from_state -> to_state`` is not in
+    :data:`LEGAL_INSTANCE_TRANSITIONS` (or targets a frozen terminal row). Raised
+    by the application layer BEFORE the store's plpgsql guard is reached, so an
+    illegal transition surfaces as a clean domain conflict rather than a raw
+    ``ProgrammingError`` (SQLSTATE P0001) that would otherwise fall through to a
+    500. The DB trigger stays a backstop; it is byte-equivalent to this matrix, so
+    this check never rejects a transition the store would have allowed."""
+
+    def __init__(self, from_state: str, to_state: str) -> None:
+        self.from_state = from_state
+        self.to_state = to_state
+        super().__init__(
+            f"illegal instance transition {from_state!r} -> {to_state!r}"
+        )
+
+
 def is_legal_instance_transition(from_state: str, to_state: str) -> bool:
     """Whether ``from_state -> to_state`` is a sanctioned move. A self-transition
     (a field update, not a state change) is legal for every NON-terminal state;
