@@ -62,6 +62,10 @@ try:
         InstanceEndpoint,
         RuntimeResource,
     )
+    from ctf_generator.domain.scheduling.models import (
+        PLATFORM_SCOPE_KEY,
+        ResourceQuota,
+    )
     from ctf_generator.domain.work.models import Job, JobLease
     from ctf_generator.infrastructure.database.config import DatabaseConfig
     from ctf_generator.infrastructure.database.instance_repository import (
@@ -69,6 +73,9 @@ try:
     )
     from ctf_generator.infrastructure.database.job_queue_repository import (
         SqlAlchemyJobQueue,
+    )
+    from ctf_generator.infrastructure.database.quota_repository import (
+        SqlAlchemyQuotaPolicyRepository,
     )
     from ctf_generator.infrastructure.database.session import Database
     from ctf_generator.infrastructure.database.worker_repository import (
@@ -171,6 +178,15 @@ def _enqueue_launch(db) -> str:
 def _http_client(db, token: str) -> HttpControlPlaneClient:
     app = create_app(ApiSettings(), database=db)
     return HttpControlPlaneClient(token=token, client=TestClient(app))
+
+
+def _seed_platform_quota(db, *, limit: int = 100) -> None:
+    """Seed the shared platform ``active_instances`` pool so a networked
+    ``replace_instance`` reservation has a counter to lock."""
+    with db.session_scope() as s:
+        SqlAlchemyQuotaPolicyRepository(s).upsert_limit(
+            ResourceQuota("platform", PLATFORM_SCOPE_KEY, "active_instances", limit)
+        )
 
 
 def _seed_instance(db, *, assigned, state="starting") -> str:
@@ -319,6 +335,22 @@ class HttpClientRoundTripTests(unittest.TestCase):
                 self.assertEqual(repo.get(iid).state, "healthy")
                 self.assertEqual(repo.latest_observation(iid).worker, _WORKER)
 
+    def test_replace_instance_round_trips(self) -> None:
+        with _migrated_database() as db:
+            token = _enroll(db)
+            _seed_platform_quota(db)
+            iid = _seed_instance(db, assigned=None, state="starting")
+            client = _http_client(db, token)
+            instance = client.replace_instance(iid, _now())
+            # The returned domain object is re-placed onto the credential's worker.
+            self.assertIsInstance(instance, Instance)
+            self.assertEqual(instance.instance_id, iid)
+            self.assertEqual(instance.assigned_worker, _WORKER)
+            with db.session_scope() as s:
+                self.assertEqual(
+                    SqlAlchemyInstanceRepository(s).get(iid).assigned_worker, _WORKER
+                )
+
 
 @unittest.skipUnless(_ENABLED, _SKIP_REASON)
 class HttpClientErrorMappingTests(unittest.TestCase):
@@ -382,6 +414,21 @@ class HttpClientErrorMappingTests(unittest.TestCase):
                         worker=_WORKER, generation=1, observed_at=now,
                     ),
                     now,
+                )
+
+    def test_replace_on_other_workers_instance_maps_to_ownership_error(self) -> None:
+        with _migrated_database() as db:
+            token = _enroll(db, name=_WORKER)
+            _enroll(db, name=_OTHER)
+            _seed_platform_quota(db)
+            iid = _seed_instance(db, assigned=_OTHER, state="starting")
+            client = _http_client(db, token)
+            with self.assertRaises(InstanceOwnershipError):
+                client.replace_instance(iid, _now())
+            # The ownership refusal left the instance assigned to the other worker.
+            with db.session_scope() as s:
+                self.assertEqual(
+                    SqlAlchemyInstanceRepository(s).get(iid).assigned_worker, _OTHER
                 )
 
     def test_wrong_lease_token_maps_to_lookup_error(self) -> None:
