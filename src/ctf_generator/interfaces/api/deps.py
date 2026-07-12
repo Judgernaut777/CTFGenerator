@@ -163,15 +163,31 @@ def principal_for(
     )
 
 
-def submission_team_scope(principal: Principal) -> str | None:
-    """The single team a principal may read submissions for, or ``None`` when the
-    principal is tenancy-unrestricted (organizer / admin / staff -- may read any
-    team). Team-scoped principals (``player`` / ``captain``) are confined to their
-    own :attr:`Principal.team`; a principal with no team carries an empty scope
-    and can see nothing until placed on a team."""
+@dataclass(frozen=True)
+class SubmissionAccess:
+    """A principal's submission tenancy scope.
+
+    ``unrestricted`` distinguishes a tenancy-unrestricted role (organizer / admin
+    / staff -- may act on any team) from a team-scoped role. For a team-scoped
+    principal, ``team`` is the single team it is confined to; ``team is None``
+    means the principal is not placed on a team and can see NOTHING (fail closed).
+    ``team`` is meaningful only when ``unrestricted`` is False.
+    """
+
+    unrestricted: bool
+    team: str | None
+
+
+def submission_team_scope(principal: Principal) -> SubmissionAccess:
+    """Resolve a principal's submission tenancy scope.
+
+    A tenancy-unrestricted principal (organizer / admin / staff) may act on any
+    team. A team-scoped principal (``player`` / ``captain``) is confined to its own
+    :attr:`Principal.team`; a principal with no team is denied entirely until
+    placed on a team (fail closed)."""
     if principal.roles & TENANCY_UNRESTRICTED_ROLES:
-        return None
-    return principal.team
+        return SubmissionAccess(unrestricted=True, team=None)
+    return SubmissionAccess(unrestricted=False, team=principal.team)
 
 
 class Authenticator(Protocol):

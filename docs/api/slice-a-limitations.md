@@ -38,7 +38,10 @@ wiring, not by weakening a design.
 
 - **Submission tenancy is team-scope only (name-based) — hardened in M10.**
   `submission_team_scope` confines a `player`/`captain` principal to its own
-  `Principal.team` (a team *name*); organizer/admin/staff are unrestricted. The
+  `Principal.team` (a team *name*); organizer/admin/staff are unrestricted. A
+  team-scoped principal that is not placed on a team is **denied entirely** (fail
+  closed): it cannot submit (403), cannot list (403), and cannot read another
+  team's submission by id (404) — it is never treated as unrestricted. The
   team name is not yet validated to belong to the competition in the path (the
   `Principal` carries a bare team string, not a `(competition, team)` pair), so a
   player whose `Principal.team` matches a same-named team in a different
