@@ -19,6 +19,7 @@ from ctf_generator.application.catalog import (
     TeamService,
 )
 from ctf_generator.application.catalog.publication_service import PublicationService
+from ctf_generator.application.identity import IdentityService
 from ctf_generator.application.instances.service import InstanceLifecycleService
 from ctf_generator.application.jobs.service import JobService
 from ctf_generator.application.scheduling.service import SchedulingService
@@ -100,3 +101,7 @@ def get_web_build_service(request: Request) -> BuildService:
 
 def get_web_scoreboard_service(request: Request) -> ScoreboardService:
     return ScoreboardService(get_web_database(request))
+
+
+def get_web_identity_service(request: Request) -> IdentityService:
+    return IdentityService(get_web_database(request))

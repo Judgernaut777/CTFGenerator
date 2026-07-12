@@ -1,0 +1,24 @@
+{% extends "base.html" %}
+{% block title %}Play - CTFGenerator{% endblock %}
+{% block content %}
+<div class="card">
+  <h1>Play</h1>
+  <p class="muted">The competitions you can take part in.</p>
+  {% if competitions %}
+  <table>
+    <thead><tr><th>Competition</th><th>ID</th><th>Starts</th></tr></thead>
+    <tbody>
+      {% for c in competitions %}
+      <tr>
+        <td><a href="{{ mount_path }}/competitions/{{ c.competition_id }}/play">{{ c.name }}</a></td>
+        <td class="muted mono">{{ c.competition_id }}</td>
+        <td class="muted">{{ c.start_time or "—" }}</td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  {% else %}
+  <p class="muted">You are not signed up for any competitions yet.</p>
+  {% endif %}
+</div>
+{% endblock %}

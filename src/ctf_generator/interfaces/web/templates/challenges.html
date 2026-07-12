@@ -1,0 +1,26 @@
+{% extends "base.html" %}
+{% block title %}Challenges - {{ competition_id }}{% endblock %}
+{% block content %}
+<div class="card">
+  <p class="muted"><a href="{{ mount_path }}/competitions/{{ competition_id }}/play">&larr; Back to competition</a></p>
+  <h1>Challenges</h1>
+  <p class="muted mono">{{ competition_id }}</p>
+  {% if catalog %}
+  <table>
+    <thead><tr><th>Challenge</th><th>Category</th><th>Mode</th><th>Version</th></tr></thead>
+    <tbody>
+      {% for ch in catalog %}
+      <tr>
+        <td>{{ ch.title }}<br><span class="muted mono">{{ ch.slug }}</span></td>
+        <td class="muted">{{ ch.category or "—" }}</td>
+        <td class="muted">{{ ch.mode or "—" }}</td>
+        <td class="muted">v{{ ch.version_no }}{% if not ch.available %} <span class="muted">(unavailable)</span>{% endif %}</td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  {% else %}
+  <p class="muted">No challenges have been published yet.</p>
+  {% endif %}
+</div>
+{% endblock %}

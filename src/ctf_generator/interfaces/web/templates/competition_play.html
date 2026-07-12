@@ -1,0 +1,44 @@
+{% extends "base.html" %}
+{% block title %}{{ competition.name }} - Play{% endblock %}
+{% block content %}
+<div class="card">
+  <p class="muted"><a href="{{ mount_path }}/play">&larr; All competitions</a></p>
+  <h1>{{ competition.name }}</h1>
+  <dl class="kv">
+    <dt>ID</dt><dd class="muted mono">{{ competition.competition_id }}</dd>
+    <dt>Start</dt><dd>{{ competition.start_time or "—" }}</dd>
+    <dt>End</dt><dd>{{ competition.end_time or "—" }}</dd>
+    <dt>Your team</dt>
+    <dd>
+      {% if unrestricted %}<span class="muted">Staff access (all teams)</span>
+      {% elif team_name %}{{ team_name }}
+      {% else %}<span class="muted">You are not on a team yet.</span>{% endif %}
+    </dd>
+  </dl>
+  <div class="actions">
+    <a href="{{ mount_path }}/competitions/{{ competition.competition_id }}/challenges">Challenges</a>
+    <a href="{{ mount_path }}/competitions/{{ competition.competition_id }}/roster">Roster</a>
+    <a href="{{ mount_path }}/competitions/{{ competition.competition_id }}/scoreboard">Scoreboard</a>
+  </div>
+</div>
+<div class="card">
+  <h2>Challenges</h2>
+  {% if catalog %}
+  <table>
+    <thead><tr><th>Challenge</th><th>Category</th><th>Mode</th><th>Version</th></tr></thead>
+    <tbody>
+      {% for ch in catalog %}
+      <tr>
+        <td>{{ ch.title }}<br><span class="muted mono">{{ ch.slug }}</span></td>
+        <td class="muted">{{ ch.category or "—" }}</td>
+        <td class="muted">{{ ch.mode or "—" }}</td>
+        <td class="muted">v{{ ch.version_no }}{% if not ch.available %} <span class="muted">(unavailable)</span>{% endif %}</td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  {% else %}
+  <p class="muted">No challenges have been published yet.</p>
+  {% endif %}
+</div>
+{% endblock %}

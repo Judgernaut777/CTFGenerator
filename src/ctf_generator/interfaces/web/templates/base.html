@@ -79,6 +79,7 @@
   <nav>
     <a href="{{ mount_path }}/">Dashboard</a>
     <a href="{{ mount_path }}/competitions">Competitions</a>
+    <a href="{{ mount_path }}/play">Play</a>
     <span class="muted">{{ principal_subject }}</span>
     <form class="inline" method="post" action="{{ mount_path }}/logout">
       {% if csrf_token %}<input type="hidden" name="csrf_token" value="{{ csrf_token }}">{% endif %}
