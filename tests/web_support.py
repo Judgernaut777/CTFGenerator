@@ -100,9 +100,13 @@ def competition_config(cid: str, name: str, *, with_scoring: bool = False) -> Co
 
 
 @contextmanager
-def web_client(*, seed: bool = True):
+def web_client(*, seed: bool = True, artifact_store=None):
     """Yield ``(client, db, service)`` with a fresh migrated database, the M11 web
-    UI mounted at ``/app``, and (by default) the standard fixture data seeded."""
+    UI mounted at ``/app``, and (by default) the standard fixture data seeded.
+
+    ``artifact_store`` (M14 14c-2) is passed through to the mounted web app so a
+    contestant-download test can wire a real ``LocalFilesystemArtifactStore``; left
+    ``None`` it stays unconfigured (the download then cleanly 404s)."""
     base = make_url(TEST_URL)
     name = f"ctfgen_web_it_{uuid.uuid4().hex[:12]}"
     admin = sa.create_engine(
@@ -129,6 +133,7 @@ def web_client(*, seed: bool = True):
                 database=db,
                 auth_service=service,
                 settings=WebSettings(mount_path="/app", cookie_secure=True),
+                artifact_store=artifact_store,
             )
             client = TestClient(app, base_url="https://testserver")
             yield client, db, service
