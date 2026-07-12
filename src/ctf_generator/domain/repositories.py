@@ -387,9 +387,11 @@ class JobQueue(Protocol):
     caller-passed (repositories stay clock-free; tests stay deterministic).
     """
 
-    def enqueue(self, job: Job) -> Job:
+    def enqueue(self, job: Job, now: datetime | None = None) -> Job:
         """Insert a ``queued`` job. Duplicate ``idempotency_key`` ->
-        IntegrityError. Returns the persisted job."""
+        IntegrityError. Returns the persisted job. The enqueue transition is
+        recorded at ``now`` (the enqueue instant); ``available_at`` is only the
+        dispatch gate. ``now`` defaults to ``available_at``."""
         ...
 
     def get(self, job_id: str) -> Job | None:
@@ -409,7 +411,20 @@ class JobQueue(Protocol):
         ``required_capabilities`` the worker satisfies (``FOR UPDATE SKIP
         LOCKED``: at most one claimer per row, no blocking). ``None`` when
         nothing is claimable. Increments the attempt count and mints the
-        fencing ``lease_token``."""
+        fencing ``lease_token``.
+
+        M8 OBLIGATION (INVARIANT). ``claim`` accepts a ``worker_id`` *string*
+        with no ``workers``-table FK and consults NO trust/drain/quarantine/
+        heartbeat state -- the queue enforces queue mechanics only. Therefore
+        the M8 worker-facing API MUST expose only an application-layer
+        ``WorkerJobService`` that, before EVERY queue verb (claim / heartbeat /
+        complete / fail): (i) authenticates the presented credential,
+        (ii) rejects a non-trusted / quarantined / draining / heartbeat-stale
+        worker, and (iii) derives ``worker_id`` EXCLUSIVELY from the
+        authenticated credential. Raw ``JobQueue.claim`` must never be
+        reachable with a request-supplied ``worker_id``. (``Worker
+        .drain_requested_at`` is currently dead state whose enforcement lands
+        in M8.)"""
         ...
 
     def start(self, job_id: str, lease_token: str, now: datetime) -> None:
@@ -617,4 +632,9 @@ class ScoreboardProjectionRepository(Protocol):
         ...
 
     def get(self, competition_id: str) -> ScoreboardProjectionRecord | None:
+        ...
+
+    def delete_all(self) -> int:
+        """Delete every cached projection row (rebuild support). Returns the
+        number of rows removed. The ledger remains the sole source of truth."""
         ...

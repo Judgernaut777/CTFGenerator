@@ -23,7 +23,10 @@ try:
     from sqlalchemy.engine import make_url
     from sqlalchemy.exc import IntegrityError, ProgrammingError
 
-    from ctf_generator.application.jobs.service import JobService
+    from ctf_generator.application.jobs.service import (
+        JobIdempotencyConflictError,
+        JobService,
+    )
     from ctf_generator.domain.work.models import (
         LEGAL_JOB_TRANSITIONS,
         TERMINAL_JOB_STATUSES,
@@ -147,6 +150,63 @@ class JobEnqueueTests(unittest.TestCase):
             )
             second, created2 = service.enqueue_idempotent(
                 _job(idempotency_key="dup-2")
+            )
+        self.assertTrue(created1)
+        self.assertFalse(created2)
+        self.assertEqual(second.job_id, first.job_id)
+
+    def test_enqueue_transition_recorded_at_now_not_available_at(self) -> None:
+        with _migrated_database() as (db, _url):
+            enqueue_at = _NOW
+            available_at = _NOW + timedelta(hours=2)  # future dispatch gate
+            job = _job(available_at=available_at)
+            with db.session_scope() as s:
+                SqlAlchemyJobQueue(s).enqueue(job, enqueue_at)
+            with db.session_scope() as s:
+                queue = SqlAlchemyJobQueue(s)
+                got = queue.get(job.job_id)
+                history = queue.list_transitions(job.job_id)
+        self.assertEqual(got.available_at, available_at)  # gate unchanged
+        self.assertEqual(history[0].occurred_at, enqueue_at)  # audit at now
+
+    def test_enqueue_idempotent_conflicting_payload_raises(self) -> None:
+        with _migrated_database() as (db, _url):
+            service = JobService(db)
+            service.enqueue_idempotent(
+                _job(idempotency_key="idk", payload={"build_sha256": "aa"})
+            )
+            with self.assertRaises(JobIdempotencyConflictError):
+                service.enqueue_idempotent(
+                    _job(idempotency_key="idk", payload={"build_sha256": "bb"})
+                )
+
+    def test_enqueue_idempotent_conflicting_job_type_raises(self) -> None:
+        with _migrated_database() as (db, _url):
+            service = JobService(db)
+            service.enqueue_idempotent(
+                _job(idempotency_key="idk2", job_type="build_challenge")
+            )
+            with self.assertRaises(JobIdempotencyConflictError):
+                service.enqueue_idempotent(
+                    _job(idempotency_key="idk2", job_type="collect_logs")
+                )
+
+    def test_enqueue_idempotent_identical_request_collapses(self) -> None:
+        with _migrated_database() as (db, _url):
+            service = JobService(db)
+            first, created1 = service.enqueue_idempotent(
+                _job(
+                    idempotency_key="idk3",
+                    payload={"build_sha256": "aa"},
+                    required_capabilities=("docker", "arm64"),
+                )
+            )
+            second, created2 = service.enqueue_idempotent(
+                _job(
+                    idempotency_key="idk3",
+                    payload={"build_sha256": "aa"},
+                    required_capabilities=("arm64", "docker"),  # order differs
+                )
             )
         self.assertTrue(created1)
         self.assertFalse(created2)
@@ -595,6 +655,97 @@ class CancellationTests(unittest.TestCase):
             with self.assertRaises(LookupError):
                 with db.session_scope() as s:
                     SqlAlchemyJobQueue(s).request_cancel(job.job_id, _NOW)
+
+    def test_cancel_requested_claimed_job_reaps_to_cancelled(self) -> None:
+        # A cancel requested while claimed/running takes precedence over the
+        # lease-expiry requeue path: the job ends 'cancelled', not requeued.
+        with _migrated_database() as (db, _url):
+            job = _job(max_attempts=3)
+            with db.session_scope() as s:
+                SqlAlchemyJobQueue(s).enqueue(job)
+            with db.session_scope() as s:
+                SqlAlchemyJobQueue(s).claim("w1", frozenset(), 60, _NOW)
+            with db.session_scope() as s:
+                still = SqlAlchemyJobQueue(s).request_cancel(job.job_id, _NOW)
+            self.assertEqual(still.status, "claimed")  # cooperative stamp only
+            with db.session_scope() as s:
+                reaped = SqlAlchemyJobQueue(s).reap_expired(
+                    _NOW + timedelta(minutes=5)
+                )
+            self.assertEqual([j.status for j in reaped], ["cancelled"])
+            with db.session_scope() as s:
+                got = SqlAlchemyJobQueue(s).get(job.job_id)
+                history = SqlAlchemyJobQueue(s).list_transitions(job.job_id)
+        self.assertEqual(got.status, "cancelled")
+        self.assertEqual(history[-1].to_status, "cancelled")
+
+    def test_claim_skips_cancel_requested_queued_job(self) -> None:
+        # A queued row carrying cancel_requested_at (a requeue that raced a
+        # cancel) must not be re-dispatched; a clean sibling still claims.
+        with _migrated_database() as (db, _url):
+            clean = _job()
+            with db.session_scope() as s:
+                SqlAlchemyJobQueue(s).enqueue(clean)
+            cancel_id = uuid.uuid4()
+            with db.session_scope() as s:
+                s.execute(
+                    sa.text(
+                        "INSERT INTO jobs (id, job_type, status, "
+                        "idempotency_key, available_at, cancel_requested_at, "
+                        "priority) VALUES (:id, 'build_challenge', 'queued', "
+                        ":key, :avail, :cancel, 1)"
+                    ),
+                    {
+                        "id": cancel_id,
+                        "key": f"cancelled-{cancel_id.hex}",
+                        "avail": _NOW,
+                        "cancel": _NOW,
+                    },
+                )
+            # priority 1 would win, but it is cancel-requested and skipped, so
+            # the clean priority-100 job is claimed instead.
+            with db.session_scope() as s:
+                lease = SqlAlchemyJobQueue(s).claim("w1", frozenset(), 60, _NOW)
+            self.assertIsNotNone(lease)
+            self.assertEqual(lease.job.job_id, clean.job_id)
+
+    def test_retry_dead_letter_clears_cancel_signal(self) -> None:
+        # A dead-letter row carrying cancel_requested_at (only reachable by a
+        # raw insert -- INSERT is unguarded) is re-dispatchable after the
+        # operator requeue, and a subsequent heartbeat reports no cancel.
+        with _migrated_database() as (db, _url):
+            dead_id = uuid.uuid4()
+            with db.session_scope() as s:
+                s.execute(
+                    sa.text(
+                        "INSERT INTO jobs (id, job_type, status, "
+                        "idempotency_key, available_at, finished_at, "
+                        "error_class, cancel_requested_at, attempt_count, "
+                        "max_attempts) VALUES (:id, 'build_challenge', "
+                        "'dead_letter', :key, :avail, :fin, 'internal', "
+                        ":cancel, 1, 1)"
+                    ),
+                    {
+                        "id": dead_id,
+                        "key": f"dead-{dead_id.hex}",
+                        "avail": _NOW,
+                        "fin": _NOW,
+                        "cancel": _NOW,
+                    },
+                )
+            with db.session_scope() as s:
+                requeued = SqlAlchemyJobQueue(s).retry_dead_letter(str(dead_id), _NOW)
+            self.assertEqual(requeued.status, "queued")
+            self.assertIsNone(requeued.cancel_requested_at)
+            with db.session_scope() as s:
+                lease = SqlAlchemyJobQueue(s).claim("w1", frozenset(), 60, _NOW)
+            self.assertIsNotNone(lease)
+            self.assertEqual(lease.job.job_id, str(dead_id))
+            with db.session_scope() as s:
+                cancel = SqlAlchemyJobQueue(s).heartbeat(
+                    str(dead_id), lease.lease_token, 60, _NOW
+                )
+        self.assertFalse(cancel)  # the cancel signal was cleared on requeue
 
 
 @unittest.skipUnless(_ENABLED, _SKIP_REASON)
