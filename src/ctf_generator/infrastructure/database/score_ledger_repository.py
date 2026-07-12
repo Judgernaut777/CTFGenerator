@@ -10,6 +10,8 @@ Flush only; no update/delete (the ``score_events_immutable`` trigger backstops).
 
 from __future__ import annotations
 
+from datetime import datetime
+
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
@@ -62,7 +64,22 @@ class SqlAlchemyScoreLedger:
 
     def append(self, event: ScoreEvent) -> ScoreEvent:
         """Append an event, assigning ``seq``. Returns the persisted event
-        carrying its ``seq``. Raises :class:`LookupError` if a parent is missing."""
+        carrying its ``seq``. Raises :class:`LookupError` if a parent is missing,
+        and :class:`ValueError` (failing the appending transaction) if ``ts`` is
+        not an ISO-8601 timestamp carrying a timezone offset -- a naive instant
+        is ambiguous and the projector's fold contract requires tz-aware
+        timestamps."""
+        try:
+            parsed_ts = datetime.fromisoformat(event.ts)
+        except (ValueError, TypeError) as exc:
+            raise ValueError(
+                "ScoreEvent.ts must be an ISO-8601 timestamp"
+            ) from exc
+        if parsed_ts.tzinfo is None:
+            raise ValueError(
+                "ScoreEvent.ts must carry a timezone offset (got a naive "
+                "instant); the fold requires an unambiguous UTC instant"
+            )
         competition_uuid = _resolve.competition_uuid(self._session, event.competition_id)
         team_uuid = _resolve.team_uuid(self._session, competition_uuid, event.team_name)
         version_uuid = _resolve.version_uuid(

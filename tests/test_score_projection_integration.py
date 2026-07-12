@@ -20,13 +20,14 @@ import unittest
 import uuid
 from contextlib import contextmanager
 from datetime import UTC, datetime, timedelta
+from unittest import mock
 
 try:
     import sqlalchemy as sa
     from alembic import command
     from alembic.config import Config as AlembicConfig
     from sqlalchemy.engine import make_url
-    from sqlalchemy.exc import IntegrityError
+    from sqlalchemy.exc import IntegrityError, OperationalError
     from sqlalchemy.orm import Session
 
     from ctf_generator.application.scoring.projector import ScoreProjector
@@ -451,26 +452,102 @@ class ProjectorBehaviorTests(unittest.TestCase):
         self.assertIn("ProjectionUnsupportedEventError", failed[0].last_error)
         self.assertNotIn("ctf{", failed[0].last_error)
         self.assertNotIn("secret_looking", failed[0].last_error)
+        # A sanitized error never carries SQLAlchemy's raw statement echo.
+        self.assertNotIn("[SQL", failed[0].last_error)
 
-    def test_requeued_failed_row_projects_after_fix(self) -> None:
-        # A failed row is re-runnable: requeue_all flips it to pending. (The
-        # 'fix' here is that nothing was actually wrong with the sibling
-        # solve event -- the poison row simply fails again, isolated.)
+    def test_requeue_all_resets_a_genuinely_failed_row_to_pending(self) -> None:
+        # Actually exercise the failed->pending UPDATE branch: append a poison
+        # event, drain to produce a real status='failed' row, THEN requeue_all
+        # and assert the row is pending with last_error cleared and attempts
+        # preserved (before any second drain re-fails it).
+        with _migrated_database() as (db, _url):
+            _seed(db)
+            with db.session_scope() as s:
+                SqlAlchemyScoreLedger(s).append(_event(type_="freeze"))  # poison
+            projector = ScoreProjector(db)
+            projector.run_until_drained()
+            with db.session_scope() as s:
+                failed = SqlAlchemyScoreProjectionQueue(s).list_failed()
+            self.assertEqual(len(failed), 1)
+            self.assertEqual(failed[0].attempts, 1)
+            seq = failed[0].seq
+            with db.session_scope() as s:
+                reset = SqlAlchemyScoreProjectionQueue(s).requeue_all()
+            self.assertGreaterEqual(reset, 1)
+            with db.session_scope() as s:
+                row = s.execute(
+                    sa.text(
+                        "SELECT status, last_error, attempts FROM "
+                        "score_projection_outbox WHERE seq = :seq"
+                    ),
+                    {"seq": seq},
+                ).one()
+        self.assertEqual(row.status, "pending")
+        self.assertIsNone(row.last_error)  # cleared on requeue
+        self.assertEqual(row.attempts, 1)  # preserved across the reset
+
+    def test_transient_error_leaves_rows_pending_and_later_drain_succeeds(
+        self,
+    ) -> None:
+        # A non-deterministic failure (here an OperationalError) must NOT poison
+        # the competition: the outbox rows stay pending (re-claimable) and a
+        # subsequent drain succeeds once the transient condition clears.
         with _migrated_database() as (db, _url):
             _seed(db)
             with db.session_scope() as s:
                 SqlAlchemyScoreLedger(s).append(_event())
             projector = ScoreProjector(db)
-            projector.run_until_drained()
+            boom = OperationalError("SELECT 1", {}, Exception("connection reset"))
+            with mock.patch.object(
+                ScoreProjector, "_refold", side_effect=boom
+            ):
+                projector.run_once()
             with db.session_scope() as s:
                 queue = SqlAlchemyScoreProjectionQueue(s)
-                requeued = queue.requeue_all()
-            self.assertGreaterEqual(requeued, 1)
+                lag = queue.pending_stats()
+                projection = SqlAlchemyScoreboardProjectionRepository(s).get("cup")
+            self.assertEqual(lag.pending_count, 1)  # still pending, not failed
+            self.assertEqual(lag.failed_count, 0)
+            self.assertIsNone(projection)  # nothing projected yet
+            # The transient condition clears; a normal drain now succeeds.
             projector.run_until_drained()
             with db.session_scope() as s:
                 lag = SqlAlchemyScoreProjectionQueue(s).pending_stats()
+                projection = SqlAlchemyScoreboardProjectionRepository(s).get("cup")
         self.assertEqual(lag.pending_count, 0)
-        self.assertEqual(lag.max_as_of_seq, lag.latest_seq)
+        self.assertEqual(lag.failed_count, 0)
+        self.assertIsNotNone(projection)
+
+    def test_lag_reports_failed_count(self) -> None:
+        with _migrated_database() as (db, _url):
+            _seed(db)
+            with db.session_scope() as s:
+                SqlAlchemyScoreLedger(s).append(_event(type_="freeze"))  # poison
+            ScoreProjector(db).run_until_drained()
+            with db.session_scope() as s:
+                lag = SqlAlchemyScoreProjectionQueue(s).pending_stats()
+        self.assertEqual(lag.pending_count, 0)
+        self.assertEqual(lag.failed_count, 1)
+
+    def test_naive_ts_is_rejected_at_append(self) -> None:
+        with _migrated_database() as (db, _url):
+            _seed(db)
+            naive = ScoreEvent(
+                competition_id="cup",
+                team_name="Red",
+                definition_slug="sql",
+                version_no=1,
+                type="solve",
+                ts="2026-06-01T12:00:00",  # no offset -> ambiguous
+            )
+            with self.assertRaises(ValueError):
+                with db.session_scope() as s:
+                    SqlAlchemyScoreLedger(s).append(naive)
+            with db.session_scope() as s:
+                count = s.execute(
+                    sa.text("SELECT count(*) FROM score_events")
+                ).scalar()
+        self.assertEqual(count, 0)  # the appending transaction failed
 
     def test_rebuild_equals_fresh_fold(self) -> None:
         with _migrated_database() as (db, _url):

@@ -96,8 +96,8 @@ class SqlAlchemyScoreProjectionQueue:
         self._session.flush()
 
     def fail(self, seqs: Sequence[int], error: str) -> int:
-        """Mark still-pending rows failed with a sanitized error. Returns the
-        number of rows marked."""
+        """Mark still-pending rows failed with a sanitized error (deterministic
+        poison isolation). Returns the number of rows marked."""
         if not seqs:
             return 0
         result = self._session.execute(
@@ -111,6 +111,36 @@ class SqlAlchemyScoreProjectionQueue:
         )
         self._session.flush()
         return int(result.rowcount or 0)
+
+    def mark_transient(
+        self, seqs: Sequence[int], error: str, max_attempts: int
+    ) -> int:
+        """Record a *transient* (non-deterministic) failure: bump the attempts
+        counter and leave the rows ``pending`` so they are re-claimable, only
+        diverting to ``failed`` once ``attempts`` reaches ``max_attempts`` (a
+        wedged competition eventually surfaces instead of spinning forever).
+        Returns the number of rows diverted to ``failed``."""
+        if not seqs:
+            return 0
+        self._session.execute(
+            sa.update(OutboxRow)
+            .where(OutboxRow.seq.in_(list(seqs)), OutboxRow.status == "pending")
+            .values(
+                attempts=OutboxRow.attempts + 1,
+                last_error=error[:_MAX_ERROR_LEN],
+            )
+        )
+        diverted = self._session.execute(
+            sa.update(OutboxRow)
+            .where(
+                OutboxRow.seq.in_(list(seqs)),
+                OutboxRow.status == "pending",
+                OutboxRow.attempts >= max_attempts,
+            )
+            .values(status="failed")
+        )
+        self._session.flush()
+        return int(diverted.rowcount or 0)
 
     def list_failed(self) -> list[ProjectionTask]:
         rows = self._session.execute(
@@ -155,6 +185,9 @@ class SqlAlchemyScoreProjectionQueue:
                 OutboxRow.status == "pending"
             )
         ).one()
+        failed_count = self._session.execute(
+            select(func.count()).where(OutboxRow.status == "failed")
+        ).scalar_one()
         latest_seq = self._session.execute(
             select(func.coalesce(func.max(ScoreEventRow.seq), 0))
         ).scalar_one()
@@ -166,6 +199,7 @@ class SqlAlchemyScoreProjectionQueue:
             latest_seq=int(latest_seq),
             max_as_of_seq=int(max_as_of),
             oldest_pending_created_at=oldest,
+            failed_count=int(failed_count),
         )
 
 
@@ -207,3 +241,10 @@ class SqlAlchemyScoreboardProjectionRepository:
         if row is None:
             return None
         return scoreboard_projection_from_orm(row, competition_id)
+
+    def delete_all(self) -> int:
+        """Delete every cached projection row (rebuild support). Returns the
+        number of rows removed; the ledger remains the sole source of truth."""
+        result = self._session.execute(sa.delete(ScoreboardProjectionRow))
+        self._session.flush()
+        return int(result.rowcount or 0)
