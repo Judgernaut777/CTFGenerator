@@ -10,16 +10,26 @@ from __future__ import annotations
 import uuid
 from datetime import UTC, datetime
 
+from ctf_generator.domain.authoring.models import (
+    ChallengeBuild,
+    ChallengeDefinition,
+    ChallengePublication,
+    ChallengeVersion,
+)
 from ctf_generator.domain.challenges.models import CompetitionConfig
 from ctf_generator.domain.identity.models import Membership, Team, User
 
+from .models import ChallengeBuild as ChallengeBuildRow
+from .models import ChallengeDefinition as ChallengeDefinitionRow
+from .models import ChallengeVersion as ChallengeVersionRow
 from .models import Competition
+from .models import CompetitionChallenge as CompetitionChallengeRow
 from .models import Membership as MembershipRow
 from .models import Team as TeamRow
 from .models import User as UserRow
 
 
-def _to_utc(value: datetime | None) -> datetime | None:
+def to_utc(value: datetime | None) -> datetime | None:
     """Coerce a datetime to an unambiguous UTC instant for persistence.
 
     A tz-aware value keeps its instant (converted to UTC). A naive value is
@@ -58,17 +68,17 @@ def competition_to_orm(
         return Competition(
             slug=config.competition_id,
             name=config.name,
-            start_time=_to_utc(config.start_time),
-            end_time=_to_utc(config.end_time),
-            scoring_start_at=_to_utc(config.scoring_start_time),
-            freeze_time=_to_utc(config.freeze_time),
+            start_time=to_utc(config.start_time),
+            end_time=to_utc(config.end_time),
+            scoring_start_at=to_utc(config.scoring_start_time),
+            freeze_time=to_utc(config.freeze_time),
         )
 
     existing.name = config.name
-    existing.start_time = _to_utc(config.start_time)
-    existing.end_time = _to_utc(config.end_time)
-    existing.scoring_start_at = _to_utc(config.scoring_start_time)
-    existing.freeze_time = _to_utc(config.freeze_time)
+    existing.start_time = to_utc(config.start_time)
+    existing.end_time = to_utc(config.end_time)
+    existing.scoring_start_at = to_utc(config.scoring_start_time)
+    existing.freeze_time = to_utc(config.freeze_time)
     return existing
 
 
@@ -195,4 +205,181 @@ def membership_from_orm(
         competition_id=competition_slug,
         role=row.role,
         team_name=team_name,
+    )
+
+
+# --- Authoring aggregates ------------------------------------------------
+#
+# Definitions map purely (slug is the business key, like Competition). Versions,
+# builds and publications reference parents by surrogate uuid, which the domain
+# never sees -- so their ``*_to_orm`` take already-resolved parent uuids (the
+# repository looks them up by business key and fails loud if absent) and their
+# ``*_from_orm`` take the parent business keys the repository read alongside the
+# row. Version transitions (publish/archive) are applied by the repository
+# directly on the row, so ``*_version_to_orm`` is create-only.
+
+
+def challenge_definition_to_orm(
+    definition: ChallengeDefinition, existing: ChallengeDefinitionRow | None = None
+) -> ChallengeDefinitionRow:
+    """Map a domain ``ChallengeDefinition`` onto its ORM row.
+
+    Fresh row when ``existing is None``. With ``existing`` given, only the
+    mutable ``title`` is updated; ``id``/``family``/``slug``/``created_at`` are
+    left untouched (the repository's ``update`` relies on this)."""
+    if existing is None:
+        return ChallengeDefinitionRow(
+            family=definition.family, slug=definition.slug, title=definition.title
+        )
+    existing.title = definition.title
+    return existing
+
+
+def challenge_definition_from_orm(
+    row: ChallengeDefinitionRow,
+) -> ChallengeDefinition:
+    return ChallengeDefinition(family=row.family, slug=row.slug, title=row.title)
+
+
+def challenge_version_to_orm(
+    version: ChallengeVersion, definition_uuid: uuid.UUID
+) -> ChallengeVersionRow:
+    """Map a domain ``ChallengeVersion`` onto a fresh ORM row (create-only).
+
+    ``definition_uuid`` is the owning definition's surrogate id, resolved by the
+    repository from ``version.definition_slug``. ``spec`` (a mapping) is stored
+    as ``jsonb``; ``cve_refs`` stores ``NULL`` when empty (design: non-CVE)."""
+    return ChallengeVersionRow(
+        definition_id=definition_uuid,
+        version_no=version.version_no,
+        state=version.state,
+        family_version=version.family_version,
+        seed=version.seed,
+        mode=version.mode,
+        spec_sha256=version.spec_sha256,
+        spec_json=dict(version.spec),
+        cve_refs=list(version.cve_refs) if version.cve_refs else None,
+        cve_content_hash=version.cve_content_hash,
+        spec_version=version.spec_version,
+        published_at=to_utc(version.published_at),
+    )
+
+
+def challenge_version_from_orm(
+    row: ChallengeVersionRow, definition_slug: str
+) -> ChallengeVersion:
+    """Map an ORM ``ChallengeVersion`` row back to a domain object.
+
+    ``definition_slug`` is the owning definition's business id (read by the
+    repository). ``spec_json`` (``jsonb``) comes back as a dict -- round-tripped
+    at the dict level, not byte-for-byte; ``spec_sha256`` is the authoritative
+    identity. NULL ``cve_refs`` becomes an empty tuple."""
+    return ChallengeVersion(
+        definition_slug=definition_slug,
+        version_no=row.version_no,
+        state=row.state,
+        family_version=row.family_version,
+        seed=row.seed,
+        spec_sha256=row.spec_sha256,
+        spec=dict(row.spec_json),
+        spec_version=row.spec_version,
+        mode=row.mode,
+        cve_refs=tuple(row.cve_refs) if row.cve_refs else (),
+        cve_content_hash=row.cve_content_hash,
+        published_at=row.published_at,
+    )
+
+
+def challenge_build_to_orm(
+    build: ChallengeBuild, version_uuid: uuid.UUID
+) -> ChallengeBuildRow:
+    """Map a domain ``ChallengeBuild`` onto a fresh ORM row (insert-only).
+
+    ``version_uuid`` is the materialized version's surrogate id, resolved by the
+    repository from ``(definition_slug, version_no)``."""
+    return ChallengeBuildRow(
+        build_sha256=build.build_sha256,
+        challenge_version_id=version_uuid,
+        family=build.family,
+        seed=build.seed,
+        family_version=build.family_version,
+        spec_sha256=build.spec_sha256,
+        generator_version=build.generator_version,
+        manifest_json=dict(build.manifest),
+        storage_uri=build.storage_uri,
+    )
+
+
+def challenge_build_from_orm(
+    row: ChallengeBuildRow, definition_slug: str, version_no: int
+) -> ChallengeBuild:
+    """Map an ORM ``ChallengeBuild`` row back to a domain object. The parent
+    ``(definition_slug, version_no)`` are read by the repository via a join."""
+    return ChallengeBuild(
+        build_sha256=row.build_sha256,
+        definition_slug=definition_slug,
+        version_no=version_no,
+        family=row.family,
+        seed=row.seed,
+        spec_sha256=row.spec_sha256,
+        generator_version=row.generator_version,
+        manifest=dict(row.manifest_json),
+        family_version=row.family_version,
+        storage_uri=row.storage_uri,
+    )
+
+
+def challenge_publication_to_orm(
+    publication: ChallengePublication,
+    competition_uuid: uuid.UUID,
+    version_uuid: uuid.UUID,
+    existing: CompetitionChallengeRow | None = None,
+) -> CompetitionChallengeRow:
+    """Map a domain ``ChallengePublication`` onto a ``competition_challenges``
+    row. The two surrogate uuids are resolved by the repository. With
+    ``existing`` given, only the mutable scoring fields are updated; the
+    identity (``competition_id``/``challenge_version_id``) and ``created_at`` are
+    left untouched."""
+    if existing is None:
+        return CompetitionChallengeRow(
+            competition_id=competition_uuid,
+            challenge_version_id=version_uuid,
+            initial_value=publication.initial_value,
+            minimum_value=publication.minimum_value,
+            decay_function=publication.decay_function,
+            decay=publication.decay,
+            first_blood_enabled=publication.first_blood_enabled,
+            first_blood_bonus_points=publication.first_blood_bonus_points,
+            first_blood_bonus_percent=publication.first_blood_bonus_percent,
+        )
+    existing.initial_value = publication.initial_value
+    existing.minimum_value = publication.minimum_value
+    existing.decay_function = publication.decay_function
+    existing.decay = publication.decay
+    existing.first_blood_enabled = publication.first_blood_enabled
+    existing.first_blood_bonus_points = publication.first_blood_bonus_points
+    existing.first_blood_bonus_percent = publication.first_blood_bonus_percent
+    return existing
+
+
+def challenge_publication_from_orm(
+    row: CompetitionChallengeRow,
+    competition_slug: str,
+    definition_slug: str,
+    version_no: int,
+) -> ChallengePublication:
+    """Map a ``competition_challenges`` row back to a domain
+    ``ChallengePublication``. The parent business keys are read by the
+    repository via joins."""
+    return ChallengePublication(
+        competition_id=competition_slug,
+        definition_slug=definition_slug,
+        version_no=version_no,
+        initial_value=row.initial_value,
+        minimum_value=row.minimum_value,
+        decay_function=row.decay_function,
+        decay=row.decay,
+        first_blood_enabled=row.first_blood_enabled,
+        first_blood_bonus_points=row.first_blood_bonus_points,
+        first_blood_bonus_percent=row.first_blood_bonus_percent,
     )
