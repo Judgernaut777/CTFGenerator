@@ -9,7 +9,12 @@ from __future__ import annotations
 
 from fastapi import APIRouter, Depends, Query, Request
 
-from ..deps import Permission, Principal, get_scoreboard_service, require_permission
+from ..deps import (
+    Permission,
+    Principal,
+    get_scoreboard_service,
+    require_competition_permission,
+)
 from ..envelopes import (
     SCOREBOARD_LAG_SCHEMA,
     SCOREBOARD_SCHEMA,
@@ -40,7 +45,9 @@ def get_scoreboard(
     competition_id: str,
     limit: int | None = Query(default=None, ge=1),
     cursor: str | None = Query(default=None),
-    principal: Principal = Depends(require_permission(Permission.SCOREBOARD_READ)),
+    principal: Principal = Depends(
+        require_competition_permission(Permission.SCOREBOARD_READ)
+    ),
     service=Depends(get_scoreboard_service),
 ):
     entries = sorted(service.standings(competition_id), key=entry_sort_key)
@@ -64,7 +71,7 @@ def get_scoreboard_lag(
     request: Request,
     competition_id: str,
     principal: Principal = Depends(
-        require_permission(Permission.SCOREBOARD_LAG_READ)
+        require_competition_permission(Permission.SCOREBOARD_LAG_READ)
     ),
     service=Depends(get_scoreboard_service),
 ):

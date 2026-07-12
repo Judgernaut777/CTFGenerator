@@ -24,8 +24,12 @@ from ..concurrency import compute_etag
 from ..deps import (
     Permission,
     Principal,
+    assert_competition_permission,
+    authorized_competitions,
     get_instance_lifecycle_service,
-    require_permission,
+    get_principal,
+    require_any_competition_permission,
+    require_competition_permission,
 )
 from ..envelopes import (
     INSTANCE_LIST_SCHEMA,
@@ -73,11 +77,25 @@ def _paged(instances, *, limit, cursor):
     )
 
 
-def _detail_or_404(service, instance_id: str):
+def _load_for_action(service, principal, instance_id: str, permission: Permission):
+    """Load an instance by id (404 if absent) and authorize ``permission`` against
+    ITS competition before any mutation/return -- the competition is not a path
+    param on the by-id routes, so tenancy is resolved from the loaded row."""
+    instance = service.get(instance_id)
+    if instance is None:
+        raise LookupError(f"instance not found: {instance_id!r}")
+    assert_competition_permission(principal, instance.competition_id, permission)
+    return instance
+
+
+def _detail_or_404(service, principal, instance_id: str):
     view = service.get_operator_view(instance_id)
     if view is None:
         raise LookupError(f"instance not found: {instance_id!r}")
     instance, endpoints, health = view
+    assert_competition_permission(
+        principal, instance.competition_id, Permission.INSTANCE_READ
+    )
     envelope = resource_envelope(
         INSTANCE_SCHEMA, instance_to_response(instance, endpoints, health)
     )
@@ -107,10 +125,20 @@ def _action_response(request, principal, instance, *, action, scope, body_json):
 def list_instances(
     limit: int | None = Query(default=None, ge=1),
     cursor: str | None = Query(default=None),
-    principal: Principal = Depends(require_permission(Permission.INSTANCE_READ)),
+    principal: Principal = Depends(
+        require_any_competition_permission(Permission.INSTANCE_READ)
+    ),
     service=Depends(get_instance_lifecycle_service),
 ):
-    envelope = _paged(service.list_instances(), limit=limit, cursor=cursor)
+    # Cross-competition operator view. SAFE CHOICE: a system role (admin/support)
+    # sees every instance; anyone else is filtered to only the competitions where
+    # their membership grants instance:read -- so no other competition's rows leak
+    # (rather than requiring a system role and 403-ing every organizer).
+    instances = service.list_instances()
+    allowed = authorized_competitions(principal, Permission.INSTANCE_READ)
+    if allowed is not None:
+        instances = [i for i in instances if i.competition_id in allowed]
+    envelope = _paged(instances, limit=limit, cursor=cursor)
     return respond(200, envelope)
 
 
@@ -123,7 +151,9 @@ def list_competition_instances(
     competition_id: str,
     limit: int | None = Query(default=None, ge=1),
     cursor: str | None = Query(default=None),
-    principal: Principal = Depends(require_permission(Permission.INSTANCE_READ)),
+    principal: Principal = Depends(
+        require_competition_permission(Permission.INSTANCE_READ)
+    ),
     service=Depends(get_instance_lifecycle_service),
 ):
     envelope = _paged(
@@ -144,10 +174,10 @@ def list_competition_instances(
 )
 def get_instance(
     instance_id: str,
-    principal: Principal = Depends(require_permission(Permission.INSTANCE_READ)),
+    principal: Principal = Depends(get_principal),
     service=Depends(get_instance_lifecycle_service),
 ):
-    return _detail_or_404(service, instance_id)
+    return _detail_or_404(service, principal, instance_id)
 
 
 @router.post(
@@ -162,9 +192,13 @@ def get_instance(
 def request_instance(
     request: Request,
     body: InstanceLaunchRequest,
-    principal: Principal = Depends(require_permission(Permission.INSTANCE_OPERATE)),
+    # The target competition is in the BODY; instance:operate is scoped to it.
+    principal: Principal = Depends(get_principal),
     service=Depends(get_instance_lifecycle_service),
 ):
+    assert_competition_permission(
+        principal, body.competition_id, Permission.INSTANCE_OPERATE
+    )
     body_json = body.model_dump(mode="json")
     scope = f"{principal.subject}:instance:request"
     replayed = replay(request, scope, body_json)
@@ -214,9 +248,10 @@ def request_instance(
 def stop_instance(
     request: Request,
     instance_id: str,
-    principal: Principal = Depends(require_permission(Permission.INSTANCE_OPERATE)),
+    principal: Principal = Depends(get_principal),
     service=Depends(get_instance_lifecycle_service),
 ):
+    _load_for_action(service, principal, instance_id, Permission.INSTANCE_OPERATE)
     scope = f"{principal.subject}:instance:stop:{instance_id}"
     replayed = replay(request, scope, {})
     if replayed is not None:
@@ -239,9 +274,10 @@ def reset_instance(
     request: Request,
     instance_id: str,
     body: InstanceResetRequest | None = None,
-    principal: Principal = Depends(require_permission(Permission.INSTANCE_OPERATE)),
+    principal: Principal = Depends(get_principal),
     service=Depends(get_instance_lifecycle_service),
 ):
+    _load_for_action(service, principal, instance_id, Permission.INSTANCE_OPERATE)
     params = body or InstanceResetRequest()
     body_json = params.model_dump(mode="json")
     scope = f"{principal.subject}:instance:reset:{instance_id}"
@@ -268,9 +304,10 @@ def reset_instance(
 def delete_instance(
     request: Request,
     instance_id: str,
-    principal: Principal = Depends(require_permission(Permission.INSTANCE_OPERATE)),
+    principal: Principal = Depends(get_principal),
     service=Depends(get_instance_lifecycle_service),
 ):
+    _load_for_action(service, principal, instance_id, Permission.INSTANCE_OPERATE)
     scope = f"{principal.subject}:instance:delete:{instance_id}"
     replayed = replay(request, scope, {})
     if replayed is not None:

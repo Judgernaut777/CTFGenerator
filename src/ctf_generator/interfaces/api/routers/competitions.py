@@ -17,6 +17,7 @@ from ..deps import (
     Permission,
     Principal,
     get_competition_service,
+    require_competition_permission,
     require_permission,
 )
 from ..envelopes import (
@@ -57,6 +58,9 @@ _CREATE_SCOPE = "competitions:create"
 def create_competition(
     request: Request,
     body: CompetitionCreateRequest,
+    # Create + list carry NO {competition_id} path param (the competition does not
+    # exist yet / the list spans all), so they stay on the flat require_permission:
+    # creating a NEW competition cannot be scoped to a pre-existing membership.
     principal: Principal = Depends(require_permission(Permission.COMPETITION_WRITE)),
     service=Depends(get_competition_service),
 ):
@@ -115,7 +119,9 @@ def list_competitions(
 )
 def get_competition(
     competition_id: str,
-    principal: Principal = Depends(require_permission(Permission.COMPETITION_READ)),
+    principal: Principal = Depends(
+        require_competition_permission(Permission.COMPETITION_READ)
+    ),
     service=Depends(get_competition_service),
 ):
     config = service.get(competition_id)
@@ -140,7 +146,9 @@ def patch_competition(
     request: Request,
     competition_id: str,
     body: CompetitionPatchRequest,
-    principal: Principal = Depends(require_permission(Permission.COMPETITION_WRITE)),
+    principal: Principal = Depends(
+        require_competition_permission(Permission.COMPETITION_WRITE)
+    ),
     service=Depends(get_competition_service),
 ):
     if_match = request.headers.get("If-Match")

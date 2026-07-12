@@ -26,9 +26,11 @@ from ..concurrency import compute_etag
 from ..deps import (
     Permission,
     Principal,
+    assert_competition_permission,
+    get_principal,
     get_submission_processing_service,
     get_submission_query_service,
-    require_permission,
+    require_competition_permission,
     submission_team_scope,
 )
 from ..envelopes import (
@@ -85,12 +87,15 @@ def submit_answer(
     request: Request,
     competition_id: str,
     body: SubmissionCreateRequest,
-    principal: Principal = Depends(require_permission(Permission.SUBMISSION_CREATE)),
+    principal: Principal = Depends(
+        require_competition_permission(Permission.SUBMISSION_CREATE)
+    ),
     service=Depends(get_submission_processing_service),
 ):
-    # Tenancy: a team-scoped principal may submit only for its own team; a
-    # team-scoped principal not placed on a team is denied (fail closed).
-    access = submission_team_scope(principal)
+    # Tenancy: submission:create is already scoped to THIS competition by the
+    # dependency; now confine a team-scoped principal to its own team in it (a
+    # team-scoped principal not placed on a team here is denied, fail closed).
+    access = submission_team_scope(principal, competition_id)
     if not access.unrestricted:
         if access.team is None:
             raise AuthorizationError("not placed on a team")
@@ -151,10 +156,12 @@ def list_submissions(
     ),
     limit: int | None = Query(default=None, ge=1),
     cursor: str | None = Query(default=None),
-    principal: Principal = Depends(require_permission(Permission.SUBMISSION_READ)),
+    principal: Principal = Depends(
+        require_competition_permission(Permission.SUBMISSION_READ)
+    ),
     service=Depends(get_submission_query_service),
 ):
-    access = submission_team_scope(principal)
+    access = submission_team_scope(principal, competition_id)
     if access.unrestricted:
         # Tenancy-unrestricted: an optional team filter, else the whole competition.
         submissions = (
@@ -193,14 +200,20 @@ def list_submissions(
 )
 def get_submission(
     submission_id: str,
-    principal: Principal = Depends(require_permission(Permission.SUBMISSION_READ)),
+    # No {competition_id} in the path; the target competition is resolved from the
+    # loaded row, then submission:read is authorized against it (below).
+    principal: Principal = Depends(get_principal),
     service=Depends(get_submission_query_service),
 ):
     detail = service.get_detail(submission_id)
     if detail is None:
         raise LookupError(f"submission not found: {submission_id!r}")
     submission, solve = detail
-    access = submission_team_scope(principal)
+    # Cross-competition: no submission:read in the row's competition -> 403.
+    assert_competition_permission(
+        principal, submission.competition_id, Permission.SUBMISSION_READ
+    )
+    access = submission_team_scope(principal, submission.competition_id)
     if not access.unrestricted and (
         access.team is None or submission.team_name != access.team
     ):
