@@ -186,6 +186,28 @@ Decisions made while implementing M8 (execution plane, `0009_scheduling_quotas`)
   live, non-draining worker; `start`/`heartbeat`/`complete`/`fail` are fenced by
   the `lease_token` and are accepted regardless of heartbeat age, so a busy worker
   reporting a real outcome cannot have its lease reaped and its job double-run.
+- **SLICE-2 LAUNCH-JOB RE-PLACEMENT CONTRACT.** A `launch_instance` job for an
+  instance whose `assigned_worker` is `None` (e.g. after a stale-worker
+  evacuation cleared the assignment and bumped the generation) **MUST** re-place
+  the instance via `SchedulingService` and re-establish a reservation **before**
+  starting the container — it may not launch on a stale placement. On stale-worker
+  evacuation the reservation *header* remains keyed to the (now dead) original
+  worker, so the transient *phantom* `active_instances` count still attributed to
+  that worker is reconciled away by `QuotaLedger.reconcile_counters` (the counter
+  is repaired to the true held sum, never rewriting the append-only items). A
+  cleaner slice-2 option is to **delete + re-reserve** the reservation header on a
+  fresh candidate worker as part of re-placement, so the header is never left
+  pointing at a dead worker; either way the launch never proceeds without a live
+  placement + accounted hold.
+- **`expire()` / TTL-SWEEPER CONTRACT.** `InstanceLifecycleService.expire()` only
+  converges an instance in `{healthy, active, degraded}` — the states from which
+  `'expired'` is a legal transition — and raises `ValueError` otherwise (it never
+  silently releases the hold for a transition that did not happen). A TTL-elapsed
+  instance in a *pre-running* state (`requested` / `queued` / `building` / `ready`
+  / `starting`) is **not** driven by `expire()`: its abandoned capacity hold is
+  reclaimed by `QuotaLedger.release_expired` (the abandoned-hold safety sweep) and
+  the instance itself is driven to a terminal state by `request_stop` /
+  `request_delete` + the reconciler, not by `expire()`.
 
 Decisions made while implementing §6 (the ledger), consistent with this design:
 
