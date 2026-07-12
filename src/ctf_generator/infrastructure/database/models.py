@@ -22,8 +22,18 @@ from sqlalchemy.dialects.postgresql import ARRAY, JSONB
 from sqlalchemy.orm import Mapped, mapped_column
 
 from ...domain.authoring.models import VALID_DECAY_FUNCTIONS, VALID_VERSION_STATES
+from ...domain.execution.models import VALID_RUNTIME_TYPES, VALID_TRUST_STATES
 from ...domain.identity.models import VALID_ROLES
-from ...domain.ledger.models import VALID_SCORE_EVENT_TYPES
+from ...domain.ledger.models import (
+    VALID_PROJECTION_TASK_STATUSES,
+    VALID_SCORE_EVENT_TYPES,
+)
+from ...domain.work.models import (
+    TERMINAL_JOB_STATUSES,
+    VALID_JOB_ERROR_CLASSES,
+    VALID_JOB_STATUSES,
+    VALID_JOB_TYPES,
+)
 from .base import Base
 
 # Allowed lifecycle states for a competition row. ``status`` is ORM-managed and
@@ -39,6 +49,22 @@ _VERSION_STATE_IN_LIST = ", ".join(f"'{s}'" for s in sorted(VALID_VERSION_STATES
 _DECAY_FUNCTION_IN_LIST = ", ".join(f"'{d}'" for d in sorted(VALID_DECAY_FUNCTIONS))
 _SCORE_EVENT_TYPE_IN_LIST = ", ".join(
     f"'{t}'" for t in sorted(VALID_SCORE_EVENT_TYPES)
+)
+# M7: job queue, worker trust, and projection-outbox enumerations -- rendered
+# from the domain frozensets (single source of truth) and sorted, so the ORM
+# CHECK SQL and the migration SQL cannot drift from the domain or each other.
+_JOB_TYPE_IN_LIST = ", ".join(f"'{t}'" for t in sorted(VALID_JOB_TYPES))
+_JOB_STATUS_IN_LIST = ", ".join(f"'{s}'" for s in sorted(VALID_JOB_STATUSES))
+_JOB_ERROR_CLASS_IN_LIST = ", ".join(
+    f"'{c}'" for c in sorted(VALID_JOB_ERROR_CLASSES)
+)
+_TRUST_STATE_IN_LIST = ", ".join(f"'{s}'" for s in sorted(VALID_TRUST_STATES))
+_RUNTIME_TYPE_IN_LIST = ", ".join(f"'{r}'" for r in sorted(VALID_RUNTIME_TYPES))
+_PROJECTION_STATUS_IN_LIST = ", ".join(
+    f"'{s}'" for s in sorted(VALID_PROJECTION_TASK_STATUSES)
+)
+_TERMINAL_JOB_STATUS_IN_LIST = ", ".join(
+    f"'{s}'" for s in sorted(TERMINAL_JOB_STATUSES)
 )
 
 
@@ -596,4 +622,374 @@ class ScoreEvent(Base):
         ),
         Index("ix_score_events_competition_id_seq", "competition_id", "seq"),
         Index("ix_score_events_type", "type"),
+    )
+
+
+class Job(Base):
+    """Persistent form of the domain ``Job`` -- one durable queue row (ADR-003).
+
+    ``id`` is the business ``job_id`` (caller-supplied uuid, like
+    ``submissions.id``); ``idempotency_key`` is the UNIQUE dedupe business key.
+    Claiming is ``SELECT ... FOR UPDATE SKIP LOCKED`` over the
+    ``ix_jobs_claim`` partial index. The ``job_transition_guard`` BEFORE UPDATE
+    trigger (owned by migration 0006) enforces the legal-transition matrix,
+    freezes terminal rows, and freezes id/job_type/payload/idempotency_key/
+    created_at after insert; the CHECKs below tie state to its fields.
+    ``payload``/``result_json``/``error_detail`` carry references and hashes
+    only -- never flags, tokens, or credentials.
+    """
+
+    __tablename__ = "jobs"
+
+    id: Mapped[uuid.UUID] = mapped_column(sa.Uuid, primary_key=True)
+    job_type: Mapped[str] = mapped_column(sa.Text, nullable=False)
+    status: Mapped[str] = mapped_column(
+        sa.Text, nullable=False, server_default=sa.text("'queued'"), default="queued"
+    )
+    priority: Mapped[int] = mapped_column(
+        sa.Integer, nullable=False, server_default=sa.text("100")
+    )
+    payload: Mapped[dict] = mapped_column(
+        JSONB, nullable=False, server_default=sa.text("'{}'")
+    )
+    idempotency_key: Mapped[str] = mapped_column(sa.Text, nullable=False)
+    required_capabilities: Mapped[list[str]] = mapped_column(
+        ARRAY(sa.Text), nullable=False, server_default=sa.text("'{}'::text[]")
+    )
+    attempt_count: Mapped[int] = mapped_column(
+        sa.Integer, nullable=False, server_default=sa.text("0")
+    )
+    max_attempts: Mapped[int] = mapped_column(
+        sa.Integer, nullable=False, server_default=sa.text("3")
+    )
+    backoff_base_seconds: Mapped[int] = mapped_column(
+        sa.Integer, nullable=False, server_default=sa.text("30")
+    )
+    available_at: Mapped[datetime] = mapped_column(
+        sa.DateTime(timezone=True), nullable=False
+    )
+    claimed_by: Mapped[str | None] = mapped_column(sa.Text, nullable=True)
+    lease_token: Mapped[uuid.UUID | None] = mapped_column(sa.Uuid, nullable=True)
+    lease_expires_at: Mapped[datetime | None] = mapped_column(
+        sa.DateTime(timezone=True), nullable=True
+    )
+    heartbeat_at: Mapped[datetime | None] = mapped_column(
+        sa.DateTime(timezone=True), nullable=True
+    )
+    cancel_requested_at: Mapped[datetime | None] = mapped_column(
+        sa.DateTime(timezone=True), nullable=True
+    )
+    started_at: Mapped[datetime | None] = mapped_column(
+        sa.DateTime(timezone=True), nullable=True
+    )
+    finished_at: Mapped[datetime | None] = mapped_column(
+        sa.DateTime(timezone=True), nullable=True
+    )
+    error_class: Mapped[str | None] = mapped_column(sa.Text, nullable=True)
+    error_detail: Mapped[str | None] = mapped_column(sa.Text, nullable=True)
+    result_json: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
+    result_ref: Mapped[str | None] = mapped_column(sa.Text, nullable=True)
+    log_ref: Mapped[str | None] = mapped_column(sa.Text, nullable=True)
+    competition_id: Mapped[uuid.UUID | None] = mapped_column(
+        sa.Uuid, ForeignKey("competitions.id", ondelete="RESTRICT"), nullable=True
+    )
+    challenge_version_id: Mapped[uuid.UUID | None] = mapped_column(
+        sa.Uuid,
+        ForeignKey("challenge_versions.id", ondelete="RESTRICT"),
+        nullable=True,
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        sa.DateTime(timezone=True), nullable=False, server_default=sa.func.now()
+    )
+
+    __table_args__ = (
+        UniqueConstraint("idempotency_key", name="uq_jobs_idempotency_key"),
+        CheckConstraint(f"job_type IN ({_JOB_TYPE_IN_LIST})", name="type_valid"),
+        CheckConstraint(f"status IN ({_JOB_STATUS_IN_LIST})", name="status_valid"),
+        CheckConstraint(
+            f"error_class IS NULL OR error_class IN ({_JOB_ERROR_CLASS_IN_LIST})",
+            name="error_class_valid",
+        ),
+        CheckConstraint(
+            r"idempotency_key !~ '^\s*$'", name="idempotency_key_non_empty"
+        ),
+        CheckConstraint("priority >= 0", name="priority_non_negative"),
+        CheckConstraint("max_attempts >= 1", name="max_attempts_positive"),
+        CheckConstraint(
+            "attempt_count >= 0 AND attempt_count <= max_attempts",
+            name="attempts_bounded",
+        ),
+        CheckConstraint("backoff_base_seconds >= 1", name="backoff_positive"),
+        # A job holds full lease state iff it is claimed/running.
+        CheckConstraint(
+            "(status IN ('claimed', 'running')) = "
+            "(claimed_by IS NOT NULL AND lease_token IS NOT NULL "
+            "AND lease_expires_at IS NOT NULL)",
+            name="lease_state",
+        ),
+        CheckConstraint(
+            "status <> 'running' OR started_at IS NOT NULL", name="running_started"
+        ),
+        CheckConstraint(
+            f"(status IN ({_TERMINAL_JOB_STATUS_IN_LIST})) = "
+            "(finished_at IS NOT NULL)",
+            name="terminal_finished",
+        ),
+        CheckConstraint(
+            "status NOT IN ('dead_letter', 'failed') OR error_class IS NOT NULL",
+            name="failure_classified",
+        ),
+        # The hot claim path: queued jobs by (priority, available_at).
+        Index(
+            "ix_jobs_claim",
+            "priority",
+            "available_at",
+            postgresql_where=sa.text("status = 'queued'"),
+        ),
+        # The lease sweeper's scan.
+        Index(
+            "ix_jobs_lease_reap",
+            "lease_expires_at",
+            postgresql_where=sa.text("status IN ('claimed', 'running')"),
+        ),
+        Index("ix_jobs_competition_id", "competition_id"),
+    )
+
+
+class JobTransition(Base):
+    """Append-only per-attempt state history for jobs (``from_status IS NULL``
+    marks the enqueue). Written in the same transaction as every state change;
+    UPDATE/DELETE/TRUNCATE are rejected by the shared ``reject_mutation``
+    triggers (function owned by migration 0004, reused by name)."""
+
+    __tablename__ = "job_transitions"
+
+    id: Mapped[uuid.UUID] = mapped_column(sa.Uuid, primary_key=True, default=uuid.uuid4)
+    job_id: Mapped[uuid.UUID] = mapped_column(
+        sa.Uuid, ForeignKey("jobs.id", ondelete="RESTRICT"), nullable=False
+    )
+    from_status: Mapped[str | None] = mapped_column(sa.Text, nullable=True)
+    to_status: Mapped[str] = mapped_column(sa.Text, nullable=False)
+    attempt: Mapped[int] = mapped_column(sa.Integer, nullable=False)
+    worker_id: Mapped[str | None] = mapped_column(sa.Text, nullable=True)
+    error_class: Mapped[str | None] = mapped_column(sa.Text, nullable=True)
+    error_detail: Mapped[str | None] = mapped_column(sa.Text, nullable=True)
+    occurred_at: Mapped[datetime] = mapped_column(
+        sa.DateTime(timezone=True), nullable=False
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        sa.DateTime(timezone=True), nullable=False, server_default=sa.func.now()
+    )
+
+    __table_args__ = (
+        CheckConstraint(
+            f"to_status IN ({_JOB_STATUS_IN_LIST})", name="to_status_valid"
+        ),
+        CheckConstraint(
+            f"from_status IS NULL OR from_status IN ({_JOB_STATUS_IN_LIST})",
+            name="from_status_valid",
+        ),
+        CheckConstraint("attempt >= 0", name="attempt_non_negative"),
+        CheckConstraint(
+            f"error_class IS NULL OR error_class IN ({_JOB_ERROR_CLASS_IN_LIST})",
+            name="error_class_valid",
+        ),
+        Index("ix_job_transitions_job_id_occurred_at", "job_id", "occurred_at"),
+    )
+
+
+class Worker(Base):
+    """Persistent form of the domain ``Worker`` -- an execution-plane host
+    identity. ``name`` is the business key. Trust is one 3-state axis
+    (pending/trusted/revoked); drain and quarantine are orthogonal timestamp
+    overlays. The partial ``ix_workers_dispatch_eligible`` index is the queue's
+    eligible-worker scan."""
+
+    __tablename__ = "workers"
+
+    id: Mapped[uuid.UUID] = mapped_column(sa.Uuid, primary_key=True, default=uuid.uuid4)
+    name: Mapped[str] = mapped_column(sa.Text, nullable=False)
+    runtime_type: Mapped[str] = mapped_column(sa.Text, nullable=False)
+    architectures: Mapped[list[str]] = mapped_column(ARRAY(sa.Text), nullable=False)
+    capabilities: Mapped[list[str]] = mapped_column(ARRAY(sa.Text), nullable=False)
+    capacity: Mapped[int] = mapped_column(sa.Integer, nullable=False)
+    version: Mapped[str] = mapped_column(sa.Text, nullable=False)
+    trust_state: Mapped[str] = mapped_column(
+        sa.Text, nullable=False, server_default=sa.text("'pending'"), default="pending"
+    )
+    revoked_at: Mapped[datetime | None] = mapped_column(
+        sa.DateTime(timezone=True), nullable=True
+    )
+    drain_requested_at: Mapped[datetime | None] = mapped_column(
+        sa.DateTime(timezone=True), nullable=True
+    )
+    quarantined_at: Mapped[datetime | None] = mapped_column(
+        sa.DateTime(timezone=True), nullable=True
+    )
+    quarantine_reason: Mapped[str | None] = mapped_column(sa.Text, nullable=True)
+    last_heartbeat_at: Mapped[datetime | None] = mapped_column(
+        sa.DateTime(timezone=True), nullable=True
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        sa.DateTime(timezone=True), nullable=False, server_default=sa.func.now()
+    )
+
+    __table_args__ = (
+        UniqueConstraint("name", name="uq_workers_name"),
+        CheckConstraint(r"name !~ '^\s*$'", name="name_non_empty"),
+        CheckConstraint(
+            f"trust_state IN ({_TRUST_STATE_IN_LIST})", name="trust_state_valid"
+        ),
+        CheckConstraint(
+            "(trust_state = 'revoked') = (revoked_at IS NOT NULL)",
+            name="revoked_state_consistent",
+        ),
+        CheckConstraint(
+            "(quarantined_at IS NULL) = (quarantine_reason IS NULL)",
+            name="quarantine_reason_consistent",
+        ),
+        CheckConstraint(
+            f"runtime_type IN ({_RUNTIME_TYPE_IN_LIST})", name="runtime_type_valid"
+        ),
+        CheckConstraint("capacity >= 1", name="capacity_positive"),
+        CheckConstraint(
+            "cardinality(architectures) >= 1", name="architectures_non_empty"
+        ),
+        CheckConstraint(
+            "cardinality(capabilities) >= 1", name="capabilities_non_empty"
+        ),
+        CheckConstraint(r"version !~ '^\s*$'", name="version_non_empty"),
+        Index("ix_workers_trust_state", "trust_state"),
+        # Dispatch eligibility is the conjunction of all three axes.
+        Index(
+            "ix_workers_dispatch_eligible",
+            "last_heartbeat_at",
+            postgresql_where=sa.text(
+                "trust_state = 'trusted' AND quarantined_at IS NULL "
+                "AND drain_requested_at IS NULL"
+            ),
+        ),
+    )
+
+
+class WorkerCredential(Base):
+    """Persistent form of the domain ``WorkerCredential`` -- a hashed, scoped,
+    short-lived bearer credential. ``id`` is the business ``credential_id``.
+    Only the sha256 hex of the secret is stored (the format CHECK makes a
+    plaintext ``ctfw1.`` token structurally unstorable). Near-append-only: the
+    single legal UPDATE is the ``revoked_at`` NULL->value flip (the
+    ``worker_credentials_freeze`` trigger, owned by migration 0007, enforces
+    it; DELETE/TRUNCATE hit the shared ``reject_mutation``). At most one live
+    credential per worker via the partial UNIQUE index."""
+
+    __tablename__ = "worker_credentials"
+
+    id: Mapped[uuid.UUID] = mapped_column(sa.Uuid, primary_key=True)
+    worker_id: Mapped[uuid.UUID] = mapped_column(
+        sa.Uuid, ForeignKey("workers.id", ondelete="RESTRICT"), nullable=False
+    )
+    token_hash: Mapped[str] = mapped_column(sa.Text, nullable=False)
+    scopes: Mapped[list[str]] = mapped_column(ARRAY(sa.Text), nullable=False)
+    issued_at: Mapped[datetime] = mapped_column(
+        sa.DateTime(timezone=True), nullable=False
+    )
+    expires_at: Mapped[datetime] = mapped_column(
+        sa.DateTime(timezone=True), nullable=False
+    )
+    revoked_at: Mapped[datetime | None] = mapped_column(
+        sa.DateTime(timezone=True), nullable=True
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        sa.DateTime(timezone=True), nullable=False, server_default=sa.func.now()
+    )
+
+    __table_args__ = (
+        UniqueConstraint("token_hash", name="uq_worker_credentials_token_hash"),
+        CheckConstraint(
+            "token_hash ~ '^[0-9a-f]{64}$'", name="token_hash_format"
+        ),
+        CheckConstraint("expires_at > issued_at", name="expiry_after_issue"),
+        CheckConstraint("cardinality(scopes) >= 1", name="scopes_non_empty"),
+        # At most one live credential per worker -- rotation is race-proof.
+        Index(
+            "uq_worker_credentials_worker_id_active",
+            "worker_id",
+            unique=True,
+            postgresql_where=sa.text("revoked_at IS NULL"),
+        ),
+        Index("ix_worker_credentials_worker_id", "worker_id"),
+    )
+
+
+class ScoreProjectionOutbox(Base):
+    """Transactional-outbox work row for the scoreboard projector (M7).
+
+    Rows are inserted by the DB trigger ``score_events_enqueue_projection``
+    (migration-owned, like ``reject_mutation``) in the same transaction as
+    each ``score_events`` INSERT -- the ORM never inserts them. Deliberately
+    MUTABLE (a work table, not ledger history): success deletes the row in the
+    same transaction that folded it; failure marks it ``failed`` with a
+    sanitized error. ``competition_id`` is denormalized by the trigger so
+    claiming/grouping needs no join."""
+
+    __tablename__ = "score_projection_outbox"
+
+    seq: Mapped[int] = mapped_column(
+        sa.BigInteger,
+        ForeignKey("score_events.seq", ondelete="RESTRICT"),
+        primary_key=True,
+        autoincrement=False,
+    )
+    competition_id: Mapped[uuid.UUID] = mapped_column(
+        sa.Uuid, ForeignKey("competitions.id", ondelete="RESTRICT"), nullable=False
+    )
+    status: Mapped[str] = mapped_column(
+        sa.Text, nullable=False, server_default=sa.text("'pending'")
+    )
+    attempts: Mapped[int] = mapped_column(
+        sa.Integer, nullable=False, server_default=sa.text("0")
+    )
+    last_error: Mapped[str | None] = mapped_column(sa.Text, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(
+        sa.DateTime(timezone=True), nullable=False, server_default=sa.func.now()
+    )
+
+    __table_args__ = (
+        CheckConstraint(
+            f"status IN ({_PROJECTION_STATUS_IN_LIST})", name="status_valid"
+        ),
+        CheckConstraint("attempts >= 0", name="attempts_nonnegative"),
+        Index(
+            "ix_score_projection_outbox_pending_seq",
+            "seq",
+            postgresql_where=sa.text("status = 'pending'"),
+        ),
+        Index("ix_score_projection_outbox_competition_id", "competition_id"),
+    )
+
+
+class ScoreboardProjection(Base):
+    """The rebuildable scoreboard cache (design doc §7's ``scoreboard_cache``),
+    one row per competition, stamped with ``as_of_seq``. Written only via the
+    monotonic-guarded UPSERT; never a source of truth (delete + replay the
+    ledger reproduces it). ``entries`` is the rendered public scoreboard --
+    team names/points/solve times only, no secrets by content."""
+
+    __tablename__ = "scoreboard_projections"
+
+    competition_id: Mapped[uuid.UUID] = mapped_column(
+        sa.Uuid,
+        ForeignKey("competitions.id", ondelete="RESTRICT"),
+        primary_key=True,
+    )
+    as_of_seq: Mapped[int] = mapped_column(sa.BigInteger, nullable=False)
+    entries: Mapped[dict] = mapped_column(
+        JSONB, nullable=False, server_default=sa.text("'{}'")
+    )
+    computed_at: Mapped[datetime] = mapped_column(
+        sa.DateTime(timezone=True), nullable=False, server_default=sa.func.now()
+    )
+
+    __table_args__ = (
+        CheckConstraint("as_of_seq >= 0", name="as_of_seq_nonnegative"),
     )
