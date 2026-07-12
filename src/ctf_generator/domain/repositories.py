@@ -798,16 +798,16 @@ class InstanceRepository(Protocol):
         scan input."""
         ...
 
-    def list_all(self, limit: int = 500) -> list[Instance]:
+    def list_all(self) -> list[Instance]:
         """Every instance (including archived), stable-sorted by ``(created_at,
-        id)`` for the operator list view."""
+        id)`` for the operator list view. The FULL ordered result set (no cap);
+        the caller paginates over it with an opaque cursor."""
         ...
 
-    def list_for_competition(
-        self, competition_id: str, limit: int = 500
-    ) -> list[Instance]:
-        """Every instance of one competition, stable-sorted like ``list_all``;
-        raises :class:`LookupError` on an unknown competition."""
+    def list_for_competition(self, competition_id: str) -> list[Instance]:
+        """Every instance of one competition, stable-sorted like ``list_all``
+        (the FULL result set, no cap); raises :class:`LookupError` on an unknown
+        competition."""
         ...
 
     def transition(
