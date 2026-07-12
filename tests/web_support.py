@@ -27,7 +27,12 @@ from sqlalchemy.engine import make_url
 
 from ctf_generator.application.auth import AuthService
 from ctf_generator.application.auth.hashing import Pbkdf2Sha256Hasher
-from ctf_generator.application.catalog import CompetitionService
+from ctf_generator.application.catalog import (
+    ChallengeDefinitionService,
+    ChallengeVersionService,
+    CompetitionService,
+)
+from ctf_generator.domain.authoring.models import ChallengeDefinition
 from ctf_generator.domain.challenges.models import (
     ChallengeScoringConfig,
     CompetitionConfig,
@@ -56,6 +61,7 @@ ALICE = "alice@example.com"  # organizer of competition A only
 CAROL = "carol@example.com"  # organizer of competition B only
 DAVE = "dave@example.com"  # system admin (sees all)
 NOBODY = "nobody@example.com"  # authenticated but authorized in no competition
+EVE = "eve@example.com"  # a contestant (player) in competition A -- no write grants
 
 COMP_A = "alpha-ctf-2026"
 COMP_B = "bravo-ctf-2026"
@@ -140,15 +146,37 @@ def _seed(db: Database, service: AuthService) -> None:
             (CAROL, "Carol"),
             (DAVE, "Dave"),
             (NOBODY, "Nobody"),
+            (EVE, "Eve"),
         ):
             users.add(User(email=email, display_name=name))
-    for email in (ALICE, CAROL, DAVE, NOBODY):
+    for email in (ALICE, CAROL, DAVE, NOBODY, EVE):
         service.set_password(email, PASSWORD, NOW)
     service.grant_system_role(DAVE, "admin")
     with db.session_scope() as s:
         memberships = SqlAlchemyMembershipRepository(s)
         memberships.add(Membership(user_email=ALICE, competition_id=COMP_A, role="organizer"))
         memberships.add(Membership(user_email=CAROL, competition_id=COMP_B, role="organizer"))
+        memberships.add(
+            Membership(user_email=EVE, competition_id=COMP_A, role="player", team_name=None)
+        )
+
+
+def seed_published_version(
+    db: Database, slug: str, title: str, *, family: str = "web"
+) -> tuple[str, int]:
+    """Create a challenge definition + one draft version and publish it, returning
+    ``(slug, version_no)`` -- the pair an organizer can attach to a competition."""
+    definitions = ChallengeDefinitionService(db)
+    definitions.create(ChallengeDefinition(family=family, slug=slug, title=title))
+    versions = ChallengeVersionService(db)
+    version = versions.create_draft(
+        definition_slug=slug,
+        seed="s",
+        family_version="1.0.0",
+        spec={"title": title},
+    )
+    versions.publish(slug, version.version_no, NOW)
+    return slug, version.version_no
 
 
 def add_competition(db: Database, cid: str, name: str) -> None:
