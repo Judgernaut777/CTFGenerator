@@ -28,11 +28,9 @@ from .authoring.models import (
 from .challenges.models import (
     ChallengeSpec,
     CompetitionConfig,
-    ScoreboardSnapshot,
-    Submission,
 )
-from .competitions.events import EventStore
 from .identity.models import Membership, Team, User
+from .ledger.models import LedgerSubmission, ScoreEvent, Solve
 
 
 class CompetitionRepository(Protocol):
@@ -271,27 +269,70 @@ class ChallengePublicationRepository(Protocol):
         ...
 
 
-class SubmissionRepository(Protocol):
-    """Stores flag submissions and supports lookup by id and by team."""
+class LedgerSubmissionRepository(Protocol):
+    """Append-only store of answer attempts, keyed by ``submission_id``.
 
-    def add(self, submission: Submission) -> None:
-        ...
-
-    def get(self, submission_id: str) -> Submission | None:
-        ...
-
-    def list_for_team(self, team_id: str) -> list[Submission]:
-        ...
-
-
-class ScoreEventStore(EventStore, Protocol):
-    """Append-only store of competition scoring events.
-
-    Extends the pure :class:`~ctf_generator.domain.competitions.events.EventStore`
-    contract; a persistent implementation lives in infrastructure in M6.
+    A submission's correctness is decided at insert and never edited; there is
+    no ``update`` or ``delete`` (the store enforces append-only with a trigger).
     """
 
-    def snapshot(self) -> ScoreboardSnapshot | None:
+    def add(self, submission: LedgerSubmission) -> None:
+        ...
+
+    def get(self, submission_id: str) -> LedgerSubmission | None:
+        ...
+
+    def list_for_team(
+        self, competition_id: str, team_name: str
+    ) -> list[LedgerSubmission]:
+        ...
+
+
+class SolveRepository(Protocol):
+    """Append-only store of accepted solves, at most one per ``(competition,
+    team, challenge version)``.
+
+    ``add`` resolves the referenced competition, team, version and source
+    submission by business identity and fails loudly if any is missing; a second
+    solve for the same ``(competition, team, version)`` raises the underlying
+    integrity error (the schema's UNIQUE), and a solve referencing an incorrect
+    or mismatched submission is rejected (composite FK + trigger).
+    """
+
+    def add(self, solve: Solve) -> None:
+        ...
+
+    def get(self, solve_id: str) -> Solve | None:
+        ...
+
+    def get_for_challenge(
+        self, competition_id: str, team_name: str, definition_slug: str, version_no: int
+    ) -> Solve | None:
+        ...
+
+    def list_for_competition(self, competition_id: str) -> list[Solve]:
+        ...
+
+
+class ScoreLedger(Protocol):
+    """Append-only, event-sourced score ledger (the source of truth).
+
+    ``append`` assigns a strictly monotonic ``seq`` (DB sequence) and returns the
+    persisted event carrying it. ``since``/``latest_seq`` mirror the pure
+    :class:`~ctf_generator.domain.competitions.events.EventStore` cursor
+    contract. Entries are never updated or deleted (trigger-enforced).
+    """
+
+    def append(self, event: ScoreEvent) -> ScoreEvent:
+        ...
+
+    def since(self, seq: int) -> list[ScoreEvent]:
+        ...
+
+    def latest_seq(self) -> int:
+        ...
+
+    def list_for_competition(self, competition_id: str) -> list[ScoreEvent]:
         ...
 
 
