@@ -1,0 +1,57 @@
+{% extends "base.html" %}
+{% block title %}Publications - {{ competition_id }}{% endblock %}
+{% block content %}
+<div class="card">
+  <p class="muted"><a href="{{ mount_path }}/competitions/{{ competition_id }}">&larr; Competition</a></p>
+  <h1>Published challenges</h1>
+  <p class="muted mono">{{ competition_id }}</p>
+  {% if publications %}
+  <table>
+    <thead><tr><th>Challenge</th><th>Version</th><th>Initial</th><th>Minimum</th><th>Decay</th><th></th></tr></thead>
+    <tbody>
+      {% for p in publications %}
+      <tr>
+        <td class="mono">{{ p.definition_slug }}</td>
+        <td>v{{ p.version_no }}</td>
+        <td>{{ p.initial_value }}</td>
+        <td>{{ p.minimum_value }}</td>
+        <td>{{ p.decay_function }}</td>
+        <td>
+          <form class="inline" method="post"
+                action="{{ mount_path }}/competitions/{{ competition_id }}/publications/detach">
+            {% if csrf_token %}<input type="hidden" name="csrf_token" value="{{ csrf_token }}">{% endif %}
+            <input type="hidden" name="definition_slug" value="{{ p.definition_slug }}">
+            <input type="hidden" name="version_no" value="{{ p.version_no }}">
+            <button class="linklike" type="submit">Detach</button>
+          </form>
+        </td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  {% else %}
+  <p class="muted">No challenges published to this competition yet.</p>
+  {% endif %}
+</div>
+<div class="card">
+  <h2>Attach a published version</h2>
+  {% if errors.get("__all__") %}<div class="error-banner">{{ errors["__all__"] }}</div>{% endif %}
+  {% if version_choices %}
+  <form method="post" action="{{ mount_path }}/competitions/{{ competition_id }}/publications">
+    {% if csrf_token %}<input type="hidden" name="csrf_token" value="{{ csrf_token }}">{% endif %}
+    <div class="form-row">
+      <label for="publication_target">Challenge version</label><br>
+      <select id="publication_target" name="publication_target" class="field-full" required>
+        {% for c in version_choices %}
+        <option value="{{ c.value }}" {% if values.get('publication_target') == c.value %}selected{% endif %}>{{ c.label }}</option>
+        {% endfor %}
+      </select>
+      {% if errors.get("publication_target") %}<div class="field-error">{{ errors["publication_target"] }}</div>{% endif %}
+    </div>
+    <button type="submit" class="btn">Attach</button>
+  </form>
+  {% else %}
+  <p class="muted">No published challenge versions are available to attach.</p>
+  {% endif %}
+</div>
+{% endblock %}
