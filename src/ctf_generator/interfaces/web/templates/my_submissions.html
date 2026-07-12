@@ -1,0 +1,29 @@
+{% extends "base.html" %}
+{% block title %}Your submissions - {{ competition_id }}{% endblock %}
+{% block content %}
+<div class="card">
+  <p class="muted"><a href="{{ mount_path }}/competitions/{{ competition_id }}/play">&larr; Back to competition</a></p>
+  <h1>Your team's submissions</h1>
+  <p class="muted mono">{{ competition_id }}</p>
+  {% if teamless %}
+  <p class="muted">You are not on a team in this competition yet, so you have no submissions to show.</p>
+  {% elif submissions %}
+  {% if team_name %}<p class="muted">Your team: {{ team_name }}</p>{% endif %}
+  <table>
+    <thead><tr><th>Challenge</th><th>Version</th><th>Submitted</th><th>Result</th></tr></thead>
+    <tbody>
+      {% for s in submissions %}
+      <tr>
+        <td>{{ s.title }}<br><span class="muted mono">{{ s.definition_slug }}</span></td>
+        <td class="muted">v{{ s.version_no }}</td>
+        <td class="muted">{{ s.submitted_at or "—" }}</td>
+        <td>{% if s.correct %}<span class="solve">Solved</span>{% else %}<span class="muted">Incorrect</span>{% endif %}</td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  {% else %}
+  <p class="muted">You have not submitted any answers yet.</p>
+  {% endif %}
+</div>
+{% endblock %}

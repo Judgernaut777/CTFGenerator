@@ -24,6 +24,7 @@ from ctf_generator.domain.instances.models import (
     Instance,
     InstanceEndpoint,
 )
+from ctf_generator.domain.ledger.models import LedgerSubmission
 from ctf_generator.domain.work.models import Job
 from ctf_generator.interfaces.api.schemas.builds import build_to_list_item
 from ctf_generator.interfaces.api.schemas.instances import (
@@ -199,4 +200,21 @@ def roster_member(membership: Membership) -> dict[str, Any]:
         "user_email": membership.user_email,
         "role": membership.role,
         "team_name": membership.team_name,
+    }
+
+
+def submission_history_row(
+    submission: LedgerSubmission, title: str
+) -> dict[str, Any]:
+    """One own-team submission-history row (M12b). Exposes ONLY the public attempt
+    facts: which challenge (slug + resolved title + version), when, and whether it
+    was correct. The candidate answer is inbound-only and is NOT stored on
+    :class:`LedgerSubmission`, so it can never appear here; no team is rendered (the
+    surface is already confined server-side to the caller's own team)."""
+    return {
+        "definition_slug": submission.definition_slug,
+        "version_no": submission.version_no,
+        "title": title or submission.definition_slug,
+        "submitted_at": _iso(submission.submitted_at),
+        "correct": submission.correct,
     }

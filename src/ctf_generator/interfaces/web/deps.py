@@ -24,6 +24,10 @@ from ctf_generator.application.instances.service import InstanceLifecycleService
 from ctf_generator.application.jobs.service import JobService
 from ctf_generator.application.scheduling.service import SchedulingService
 from ctf_generator.application.scoring.scoreboard_service import ScoreboardService
+from ctf_generator.application.submissions.query_service import SubmissionQueryService
+from ctf_generator.application.submissions.service import (
+    SubmissionProcessingService,
+)
 from ctf_generator.infrastructure.database.session import Database
 
 from .settings import WebSettings
@@ -105,3 +109,19 @@ def get_web_scoreboard_service(request: Request) -> ScoreboardService:
 
 def get_web_identity_service(request: Request) -> IdentityService:
     return IdentityService(get_web_database(request))
+
+
+# -- contestant submission services (mirroring the API's deps getters) ------
+
+
+def get_web_submission_processing_service(
+    request: Request,
+) -> SubmissionProcessingService:
+    # The SAME transactional attempt->verify->first-correct-solve->commit-once
+    # service the JSON API uses (default SpecFlagVerifier). The candidate answer is
+    # inbound-only: never persisted, never echoed, never logged.
+    return SubmissionProcessingService(get_web_database(request))
+
+
+def get_web_submission_query_service(request: Request) -> SubmissionQueryService:
+    return SubmissionQueryService(get_web_database(request))
