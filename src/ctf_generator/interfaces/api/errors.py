@@ -89,11 +89,45 @@ from ctf_generator.domain.scheduling.models import (
     QuotaExceededError,
 )
 
+from .audit import audit
 from .context import current_request_id
 from .envelopes import error_envelope
-from .exceptions import ApiError, AuthorizationError, RateLimitedError
+from .exceptions import (
+    ApiError,
+    AuthenticationError,
+    AuthorizationError,
+    RateLimitedError,
+)
 
 _logger = logging.getLogger("ctfgen.api")
+
+
+def _emit_denied_audit(request: Request, outcome: str) -> None:
+    """Record a denied/errored authorization or authentication attempt on the
+    app's audit sink (closing the M10 'audit denied privileged attempts' gap).
+
+    The record carries only ``actor`` (the resolved principal subject, else
+    ``'anonymous'`` when authentication itself failed), ``action`` (the HTTP
+    method), ``target`` (the request PATH -- never the query string, body, or
+    token), and ``outcome``. Emission is best-effort: a missing sink or a sink
+    error must never turn a 401/403 into a 500, so it is fully guarded."""
+    sink = getattr(request.app.state, "audit_sink", None)
+    if sink is None:
+        return
+    principal = getattr(request.state, "principal", None)
+    actor = getattr(principal, "subject", None) or "anonymous"
+    try:
+        audit(
+            sink,
+            actor=actor,
+            action=request.method,
+            target=request.url.path,
+            outcome=outcome,
+        )
+    except Exception:  # pragma: no cover - audit must never mask the real error
+        _logger.warning(
+            "failed to record denial audit request_id=%s", _request_id(request)
+        )
 
 # Framework HTTPException status -> canonical error.code. Anything unlisted maps
 # to the generic ``invalid_request``.
@@ -136,6 +170,12 @@ async def _handle_api_error(request: Request, exc: ApiError) -> JSONResponse:
     headers: dict[str, str] | None = None
     if isinstance(exc, RateLimitedError):
         headers = {"Retry-After": str(exc.retry_after)}
+    # Audit a denied authorization (403) or a failed authentication (401). Both
+    # are modelled security events in M10 -- 'denied' captures each.
+    if isinstance(exc, AuthorizationError):
+        _emit_denied_audit(request, "denied")
+    elif isinstance(exc, AuthenticationError):
+        _emit_denied_audit(request, "denied")
     return _response(
         request, exc.status_code, exc.code, exc.message, detail=exc.detail,
         headers=headers,
@@ -149,6 +189,7 @@ async def _handle_permission_error(
     # failures are handled by _handle_api_error above. The worker-credential
     # PermissionError subclasses (auth / draining / stale / ownership) get their
     # own more-specific handlers below so they map to 401 / 409 / 403 correctly.
+    _emit_denied_audit(request, "denied")
     return _response(request, 403, AuthorizationError.code, "permission denied")
 
 
