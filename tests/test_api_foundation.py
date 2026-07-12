@@ -508,7 +508,12 @@ class _BoomDatabase:
 @unittest.skipIf(_SKIP, _REASON)
 class AppLevelErrorTests(unittest.TestCase):
     def _client(self) -> TestClient:
-        auth = StubAuthenticator({"t": principal_for("a", {"admin"})})
+        # A real system admin (system_roles) so the per-competition-scoped GET
+        # /competitions authorizes it deployment-wide and the request reaches the
+        # (boom) service -- the point here is the opaque 500, not authorization.
+        auth = StubAuthenticator(
+            {"t": principal_for("a", {"admin"}, system_roles={"admin"})}
+        )
         app = create_app(
             ApiSettings(), database=_BoomDatabase(), authenticator=auth
         )
