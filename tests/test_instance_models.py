@@ -97,9 +97,20 @@ class TransitionMatrixTests(unittest.TestCase):
         for targets in LEGAL_INSTANCE_TRANSITIONS.values():
             self.assertTrue(targets <= VALID_INSTANCE_STATES)
 
-    def test_self_transition_always_legal(self) -> None:
+    def test_self_transition_legal_for_non_terminal_only(self) -> None:
+        # A self-transition is a field update, legal for every non-terminal
+        # state; a terminal ('archived') row is frozen entirely, so even
+        # archived -> archived is illegal (matching the store's guard, which
+        # RAISEs on ANY update to an archived row before the no-op shortcut).
         for state in VALID_INSTANCE_STATES:
-            self.assertTrue(is_legal_instance_transition(state, state))
+            if state in TERMINAL_INSTANCE_STATES:
+                self.assertFalse(
+                    is_legal_instance_transition(state, state),
+                    f"terminal self-transition {state}->{state} must be illegal",
+                )
+                self.assertFalse(_instance(state=state).can_transition_to(state))
+            else:
+                self.assertTrue(is_legal_instance_transition(state, state))
 
     def test_representative_legal_moves(self) -> None:
         for src, dst in [

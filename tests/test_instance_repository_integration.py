@@ -299,6 +299,30 @@ class RoundTripTests(unittest.TestCase):
                     SqlAlchemyInstanceRepository(s).list_endpoints(iid), []
                 )
 
+    def test_credential_scopes_round_trip_verbatim(self) -> None:
+        # Scopes must round-trip verbatim (order + duplicates preserved): the
+        # mapper previously rewrote them as sorted(set(...)), so domain value
+        # != stored value.
+        with _migrated_database() as db:
+            _seed_parents(db)
+            inst = _new_instance()
+            iid = inst.instance_id
+            scopes = ("z-scope", "a-scope", "z-scope")
+            with db.session_scope() as s:
+                repo = SqlAlchemyInstanceRepository(s)
+                repo.add(inst, _NOW)
+                repo.record_credential(
+                    InstanceCredential(
+                        instance_id=iid,
+                        name="access",
+                        secret_ref="vault://k",  # noqa: S106 - a handle, not a secret
+                        scopes=scopes,
+                    )
+                )
+            with db.session_scope() as s:
+                creds = SqlAlchemyInstanceRepository(s).list_credentials(iid)
+            self.assertEqual(creds[0].scopes, scopes)
+
     def test_observation_round_trip_and_latest(self) -> None:
         with _migrated_database() as db:
             _seed_parents(db)
@@ -478,6 +502,112 @@ class AppendOnlyTests(unittest.TestCase):
             with self.assertRaises(ProgrammingError):
                 with db.session_scope() as s:
                     s.execute(sa.text("TRUNCATE instance_events"))
+
+
+@unittest.skipUnless(_ENABLED, _SKIP_REASON)
+class CheckConstraintBodyTests(unittest.TestCase):
+    """Raw-SQL INSERTs (bypassing the domain) that pin each migration CHECK
+    body: Alembic autogenerate does NOT diff CHECK expressions, so an
+    out-of-set value must be rejected here as an IntegrityError -- exactly the
+    class of drift the author already hit."""
+
+    def _seed_instance_and_refs(self, db):
+        inst = _new_instance()
+        with db.session_scope() as s:
+            SqlAlchemyInstanceRepository(s).add(inst, _NOW)
+        with db.session_scope() as s:
+            refs = s.execute(
+                sa.text(
+                    "SELECT competition_id, team_id, challenge_version_id "
+                    "FROM instances WHERE id = :iid"
+                ),
+                {"iid": inst.instance_id},
+            ).one()
+            worker_id = s.execute(
+                sa.text("SELECT id FROM workers WHERE name = 'w1'")
+            ).scalar_one()
+        return inst.instance_id, refs, worker_id
+
+    def _reject(self, db, sql, params):
+        with self.assertRaises(IntegrityError):
+            with db.session_scope() as s:
+                s.execute(sa.text(sql), params)
+
+    def test_instances_state_check(self) -> None:
+        with _migrated_database() as db:
+            _seed_parents(db)
+            _iid, refs, _w = self._seed_instance_and_refs(db)
+            self._reject(
+                db,
+                "INSERT INTO instances (id, competition_id, team_id, "
+                "challenge_version_id, state, desired_state, generation, "
+                "created_at, updated_at) "
+                "VALUES (:id, :c, :t, :v, 'bogus', 'active', 1, :n, :n)",
+                {"id": str(uuid.uuid4()), "c": refs[0], "t": refs[1],
+                 "v": refs[2], "n": _NOW},
+            )
+
+    def test_instances_desired_state_check(self) -> None:
+        with _migrated_database() as db:
+            _seed_parents(db)
+            _iid, refs, _w = self._seed_instance_and_refs(db)
+            self._reject(
+                db,
+                "INSERT INTO instances (id, competition_id, team_id, "
+                "challenge_version_id, state, desired_state, generation, "
+                "created_at, updated_at) "
+                "VALUES (:id, :c, :t, :v, 'requested', 'running', 1, :n, :n)",
+                {"id": str(uuid.uuid4()), "c": refs[0], "t": refs[1],
+                 "v": refs[2], "n": _NOW},
+            )
+
+    def test_health_observations_observed_state_check(self) -> None:
+        with _migrated_database() as db:
+            _seed_parents(db)
+            iid, _refs, w = self._seed_instance_and_refs(db)
+            self._reject(
+                db,
+                "INSERT INTO health_observations (id, instance_id, "
+                "observed_state, healthy, worker_id, generation, observed_at) "
+                "VALUES (:id, :iid, 'bogus', true, :w, 1, :n)",
+                {"id": str(uuid.uuid4()), "iid": iid, "w": w, "n": _NOW},
+            )
+
+    def test_runtime_resources_kind_check(self) -> None:
+        with _migrated_database() as db:
+            _seed_parents(db)
+            iid, _refs, w = self._seed_instance_and_refs(db)
+            self._reject(
+                db,
+                "INSERT INTO runtime_resources (id, instance_id, kind, "
+                "external_ref, worker_id, generation, state) "
+                "VALUES (:id, :iid, 'pod', 'ref', :w, 1, 'active')",
+                {"id": str(uuid.uuid4()), "iid": iid, "w": w},
+            )
+
+    def test_runtime_resources_state_check(self) -> None:
+        with _migrated_database() as db:
+            _seed_parents(db)
+            iid, _refs, w = self._seed_instance_and_refs(db)
+            self._reject(
+                db,
+                "INSERT INTO runtime_resources (id, instance_id, kind, "
+                "external_ref, worker_id, generation, state) "
+                "VALUES (:id, :iid, 'container', 'ref', :w, 1, 'bogus')",
+                {"id": str(uuid.uuid4()), "iid": iid, "w": w},
+            )
+
+    def test_instance_events_actor_check(self) -> None:
+        with _migrated_database() as db:
+            _seed_parents(db)
+            iid, _refs, _w = self._seed_instance_and_refs(db)
+            self._reject(
+                db,
+                "INSERT INTO instance_events (id, instance_id, from_state, "
+                "to_state, reason, actor, generation, occurred_at) "
+                "VALUES (:id, :iid, NULL, 'requested', 'x', 'hacker', 1, :n)",
+                {"id": str(uuid.uuid4()), "iid": iid, "n": _NOW},
+            )
 
 
 if __name__ == "__main__":
