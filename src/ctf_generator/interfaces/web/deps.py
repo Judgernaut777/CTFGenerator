@@ -11,6 +11,7 @@ from __future__ import annotations
 from fastapi import Request
 
 from ctf_generator.application.auth import AuthService
+from ctf_generator.application.authoring.build_service import BuildService
 from ctf_generator.application.catalog import (
     ChallengeDefinitionService,
     ChallengeVersionService,
@@ -18,6 +19,10 @@ from ctf_generator.application.catalog import (
     TeamService,
 )
 from ctf_generator.application.catalog.publication_service import PublicationService
+from ctf_generator.application.instances.service import InstanceLifecycleService
+from ctf_generator.application.jobs.service import JobService
+from ctf_generator.application.scheduling.service import SchedulingService
+from ctf_generator.application.scoring.scoreboard_service import ScoreboardService
 from ctf_generator.infrastructure.database.session import Database
 
 from .settings import WebSettings
@@ -64,3 +69,34 @@ def get_web_challenge_definition_service(
 
 def get_web_challenge_version_service(request: Request) -> ChallengeVersionService:
     return ChallengeVersionService(get_web_database(request))
+
+
+# -- ops services (mirroring the API's deps getters exactly) ----------------
+
+
+def get_web_instance_lifecycle_service(
+    request: Request,
+) -> InstanceLifecycleService:
+    # Composed exactly as the API's ``get_instance_lifecycle_service`` -- the web
+    # handlers only ever call its read + desired-state methods; the enqueued
+    # corrective jobs are claimed by workers with scoped credentials (never
+    # launched from a web handler).
+    database = get_web_database(request)
+    return InstanceLifecycleService(
+        database,
+        scheduling=SchedulingService(database),
+        jobs=JobService(database),
+    )
+
+
+def get_web_job_service(request: Request) -> JobService:
+    return JobService(get_web_database(request))
+
+
+def get_web_build_service(request: Request) -> BuildService:
+    database = get_web_database(request)
+    return BuildService(database, jobs=JobService(database))
+
+
+def get_web_scoreboard_service(request: Request) -> ScoreboardService:
+    return ScoreboardService(get_web_database(request))
