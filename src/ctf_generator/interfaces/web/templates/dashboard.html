@@ -1,0 +1,31 @@
+{% extends "base.html" %}
+{% block title %}Dashboard - CTFGenerator{% endblock %}
+{% block content %}
+<div class="card">
+  <h1>Dashboard</h1>
+  <p class="muted">Signed in as {{ principal_subject }}{% if is_system_admin %} (system admin){% endif %}.</p>
+</div>
+<div class="card">
+  <h2>Your competitions</h2>
+  <div class="count">{{ competition_count }}</div>
+  <p class="muted">competitions you can access</p>
+</div>
+<div class="card">
+  <h2>Recent competitions</h2>
+  {% if competitions %}
+  <table>
+    <thead><tr><th>Name</th><th>ID</th></tr></thead>
+    <tbody>
+      {% for c in competitions %}
+      <tr>
+        <td><a href="{{ mount_path }}/competitions/{{ c.competition_id }}">{{ c.name }}</a></td>
+        <td class="muted">{{ c.competition_id }}</td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  {% else %}
+  <p class="muted">No competitions to show.</p>
+  {% endif %}
+</div>
+{% endblock %}
