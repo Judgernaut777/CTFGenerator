@@ -43,6 +43,7 @@ from .routers import (
     competitions,
     instances,
     jobs,
+    oidc,
     publications,
     scoreboard,
     submissions,
@@ -62,6 +63,7 @@ def create_app(
     database: Database | None = None,
     authenticator: Authenticator | None = None,
     auth_service: AuthService | None = None,
+    oidc_service=None,
     idempotency_store: IdempotencyStore | None = None,
     audit_sink: AuditSink | None = None,
     rate_limiter=None,
@@ -87,6 +89,11 @@ def create_app(
         AuthService(database) if database is not None else None
     )
     app.state.authenticator = authenticator or StubAuthenticator()
+    # OIDC federated login is OPTIONAL: its router is mounted only when an
+    # OidcService is provided (i.e. an OidcProviderConfig is configured). When
+    # absent, the /auth/oidc/* routes simply do not exist -- a clean 404
+    # (feature-disabled) envelope, and local auth is entirely unaffected.
+    app.state.oidc_service = oidc_service
     app.state.idempotency_store = idempotency_store or InMemoryIdempotencyStore()
     app.state.audit_sink = audit_sink or LoggingAuditSink()
 
@@ -130,6 +137,11 @@ def create_app(
         system,
     ):
         app.include_router(module.router, prefix=API_V1_PREFIX)
+
+    # OIDC federated-login routes are mounted ONLY when configured (else the
+    # endpoints do not exist -> clean 404, not a broken half-wired feature).
+    if oidc_service is not None:
+        app.include_router(oidc.router, prefix=API_V1_PREFIX)
 
     # The worker-facing gateway. Included here for the single-host / dev / test
     # path; a PRODUCTION deployment SHOULD bind it to a separate interface/port via
@@ -228,6 +240,22 @@ def _database_from_env() -> Database | None:
 # (opt-OUT via CTFGEN_API_RATE_LIMIT=0) so the shipped production app is never
 # unthrottled; the create_app/test injection path keeps ApiSettings' False
 # default so the unit/OpenAPI suites stay unthrottled.
+def _oidc_service_from_env(database: Database | None, auth_service: AuthService | None):
+    """Build the OIDC federated-login service for the module-level (production)
+    app, or ``None`` when OIDC is not configured (no ``CTFGEN_OIDC_*`` env) or the
+    prerequisites (a database + auth service) are absent. A present-but-invalid
+    OIDC config fails fast (``OidcConfigurationError``) rather than silently
+    disabling the feature. NEVER logs the client_secret."""
+    if database is None or auth_service is None:
+        return None
+    from ctf_generator.application.auth.oidc import OidcProviderConfig, OidcService
+
+    config = OidcProviderConfig.from_env()
+    if config is None:
+        return None
+    return OidcService(config, database, auth_service)
+
+
 _module_database = _database_from_env()
 _module_auth_service = (
     AuthService(_module_database) if _module_database is not None else None
@@ -240,4 +268,5 @@ app = create_app(
     database=_module_database,
     auth_service=_module_auth_service,
     authenticator=_authenticator_from_env(_module_auth_service),
+    oidc_service=_oidc_service_from_env(_module_database, _module_auth_service),
 )
