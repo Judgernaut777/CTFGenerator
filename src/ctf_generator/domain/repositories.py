@@ -16,8 +16,15 @@ by-id lookups) -- enough to express the contract, not a frozen final API.
 
 from __future__ import annotations
 
+from datetime import datetime
 from typing import Protocol
 
+from .authoring.models import (
+    ChallengeBuild,
+    ChallengeDefinition,
+    ChallengePublication,
+    ChallengeVersion,
+)
 from .challenges.models import (
     ChallengeSpec,
     CompetitionConfig,
@@ -147,6 +154,120 @@ class ChallengeRepository(Protocol):
         ...
 
     def list_versions(self, challenge_id: str) -> list[ChallengeSpec]:
+        ...
+
+
+class ChallengeDefinitionRepository(Protocol):
+    """Stores challenge definitions (the stable identity across edits), keyed by
+    ``slug``. ``title`` is mutable metadata; ``family``/``slug`` are identity."""
+
+    def add(self, definition: ChallengeDefinition) -> None:
+        ...
+
+    def get(self, slug: str) -> ChallengeDefinition | None:
+        ...
+
+    def list(self) -> list[ChallengeDefinition]:
+        ...
+
+    def update(self, definition: ChallengeDefinition) -> None:
+        """Update the mutable metadata (``title``) of an existing definition,
+        keyed by ``slug``. Raises if it does not exist."""
+        ...
+
+
+class ChallengeVersionRepository(Protocol):
+    """Stores immutable-once-published challenge versions under a definition.
+
+    ``add`` inserts a version (typically ``draft``); ``(definition_slug,
+    version_no)`` and ``(definition_slug, spec_sha256)`` are unique, so
+    re-adding the identical spec is rejected (content dedup upholds
+    determinism). State moves are explicit and forward-only: ``publish`` freezes
+    a draft's content and stamps ``published_at``; ``archive`` retires a
+    published version. There is no generic content ``update`` -- published
+    content is immutable (and the store enforces it with a trigger).
+    """
+
+    def add(self, version: ChallengeVersion) -> None:
+        """Insert a version. ``version_no`` is caller-assigned (monotonic per
+        definition from 1); the store enforces ``(definition, version_no)`` and
+        ``(definition, spec_sha256)`` uniqueness but does not allocate numbers or
+        forbid gaps -- a concurrent duplicate resolves to one winner and one
+        IntegrityError the caller handles."""
+        ...
+
+    def get(self, definition_slug: str, version_no: int) -> ChallengeVersion | None:
+        ...
+
+    def get_by_spec_sha256(
+        self, definition_slug: str, spec_sha256: str
+    ) -> ChallengeVersion | None:
+        ...
+
+    def list_for_definition(self, definition_slug: str) -> list[ChallengeVersion]:
+        ...
+
+    def publish(
+        self, definition_slug: str, version_no: int, published_at: datetime
+    ) -> None:
+        """Transition a ``draft`` version to ``published`` (freezing content).
+        Raises if the version is missing or not in ``draft``."""
+        ...
+
+    def archive(
+        self, definition_slug: str, version_no: int, archived_at: datetime
+    ) -> None:
+        """Transition a ``published`` version to ``archived`` (retaining
+        ``published_at``, stamping ``archived_at``). Raises if the version is
+        missing or not ``published``."""
+        ...
+
+
+class ChallengeBuildRepository(Protocol):
+    """Stores content-addressed, insert-only build artifacts, keyed by
+    ``build_sha256``. Builds are never updated -- a new build is a new hash."""
+
+    def add(self, build: ChallengeBuild) -> None:
+        ...
+
+    def get(self, build_sha256: str) -> ChallengeBuild | None:
+        ...
+
+    def list_for_version(
+        self, definition_slug: str, version_no: int
+    ) -> list[ChallengeBuild]:
+        ...
+
+
+class ChallengePublicationRepository(Protocol):
+    """Attaches published versions to competitions with per-competition scoring
+    config, keyed by ``(competition_id, definition_slug, version_no)``. Scoring
+    fields are mutable via ``update``; a version appears at most once per
+    competition.
+
+    ``add`` requires the version to be ``published``. A version that is later
+    ``archived`` in the catalog keeps its existing publications (a running
+    competition must not lose a challenge because the authoring catalog moved
+    on); ``update`` therefore does not re-check version state. Only *new*
+    attachments require a currently-published version.
+    """
+
+    def add(self, publication: ChallengePublication) -> None:
+        ...
+
+    def get(
+        self, competition_id: str, definition_slug: str, version_no: int
+    ) -> ChallengePublication | None:
+        ...
+
+    def list_for_competition(
+        self, competition_id: str
+    ) -> list[ChallengePublication]:
+        ...
+
+    def update(self, publication: ChallengePublication) -> None:
+        """Update the mutable scoring fields of an existing publication, keyed by
+        ``(competition_id, definition_slug, version_no)``. Raises if missing."""
         ...
 
 
