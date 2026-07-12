@@ -18,6 +18,16 @@
     <a href="{{ mount_path }}/competitions/{{ competition.competition_id }}/publications">Publications</a>
   </div>
   {% endif %}
+  {% if can_view_instances or can_view_scoreboard %}
+  <div class="actions">
+    {% if can_view_instances %}
+    <a href="{{ mount_path }}/competitions/{{ competition.competition_id }}/instances">Instances</a>
+    {% endif %}
+    {% if can_view_scoreboard %}
+    <a href="{{ mount_path }}/competitions/{{ competition.competition_id }}/scoreboard">Scoreboard</a>
+    {% endif %}
+  </div>
+  {% endif %}
 </div>
 {% if competition.scoring %}
 <div class="card">
