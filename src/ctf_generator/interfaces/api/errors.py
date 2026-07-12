@@ -16,6 +16,7 @@ exception                                    status   code
 ``IntegrityError`` / ``QuotaExceededError``  409      conflict
 ``NoEligibleWorkerError``                    409      conflict
 domain ``IdempotencyConflictError``          409      conflict
+``IllegalInstanceTransitionError``           409      conflict
 ``ChallengeNotAttachedError``                404      not_found
 ``FlagUnavailableError``                     409      conflict
 ``FlagRejectedError`` / other                422      validation_failed
@@ -69,6 +70,9 @@ from ctf_generator.application.execution.worker_job_service import (
 from ctf_generator.application.execution.worker_job_service import (
     WorkerDrainingError,
     WorkerStaleError,
+)
+from ctf_generator.domain.instances.models import (
+    IllegalInstanceTransitionError,
 )
 from ctf_generator.domain.ledger.processing import (
     ChallengeNotAttachedError,
@@ -266,6 +270,18 @@ async def _handle_no_eligible_worker(
     )
 
 
+async def _handle_illegal_instance_transition(
+    request: Request, exc: IllegalInstanceTransitionError
+) -> JSONResponse:
+    # A worker (or reconciler) drove an instance along an edge not in the legal
+    # transition graph. Caught in the application layer before the store's plpgsql
+    # guard, so it is a clean 409 rather than a raw ProgrammingError -> 500. The
+    # message is generic (never echoes the from/to internals to the client).
+    return _response(
+        request, 409, "conflict", "illegal instance state transition"
+    )
+
+
 async def _handle_domain_idempotency_conflict(
     request: Request, exc: DomainIdempotencyConflictError
 ) -> JSONResponse:
@@ -343,6 +359,9 @@ def register_exception_handlers(app: FastAPI) -> None:
     app.add_exception_handler(NoEligibleWorkerError, _handle_no_eligible_worker)
     app.add_exception_handler(
         DomainIdempotencyConflictError, _handle_domain_idempotency_conflict
+    )
+    app.add_exception_handler(
+        IllegalInstanceTransitionError, _handle_illegal_instance_transition
     )
     # Submission-processing errors. ChallengeNotAttachedError is registered
     # explicitly so it stays a 404 (its own MRO entry wins over the

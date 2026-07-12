@@ -30,10 +30,12 @@ from sqlalchemy.orm import Session
 
 from ctf_generator.domain.instances.models import (
     HealthObservation,
+    IllegalInstanceTransitionError,
     Instance,
     InstanceCredential,
     InstanceEndpoint,
     RuntimeResource,
+    is_legal_instance_transition,
 )
 from ctf_generator.domain.ledger.processing import IdempotencyConflictError
 from ctf_generator.domain.repositories import InstanceRepository
@@ -201,9 +203,12 @@ class InstanceLifecycleService:
         now: datetime,
     ) -> Instance:
         """Apply a guarded state transition. A transition to the CURRENT state is
-        an idempotent no-op (re-applying the same transition never errors). On
-        reaching ``stopped`` / ``expired`` / ``archived`` the capacity hold is
-        released."""
+        an idempotent no-op (re-applying the same transition never errors). An
+        illegal graph transition is rejected here with
+        :class:`IllegalInstanceTransitionError` BEFORE the store's plpgsql guard
+        (whose ``RAISE`` would otherwise surface as a raw ``ProgrammingError`` ->
+        500); the DB trigger remains a byte-equivalent backstop. On reaching
+        ``stopped`` / ``expired`` / ``archived`` the capacity hold is released."""
         with self._database.session_scope() as session:
             repo = self._repo(session)
             current = repo.get(instance_id)
@@ -211,6 +216,8 @@ class InstanceLifecycleService:
                 raise LookupError(f"instance not found: {instance_id!r}")
             if current.state == to_state:
                 return current
+            if not is_legal_instance_transition(current.state, to_state):
+                raise IllegalInstanceTransitionError(current.state, to_state)
             updated = repo.transition(
                 instance_id, to_state, reason=reason, actor=actor, now=now
             )
