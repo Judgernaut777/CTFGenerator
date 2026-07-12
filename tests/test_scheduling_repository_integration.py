@@ -16,6 +16,7 @@ shared-pool overrun, is idempotent per instance id, and raises
 from __future__ import annotations
 
 import os
+import threading
 import unittest
 import uuid
 from contextlib import contextmanager
@@ -36,6 +37,7 @@ try:
         ReservationItem,
         ResourceQuota,
         WorkerRequirements,
+        worker_matches,
     )
     from ctf_generator.infrastructure.database.config import DatabaseConfig
     from ctf_generator.infrastructure.database.quota_repository import (
@@ -315,6 +317,64 @@ class SelectAndReserveTests(unittest.TestCase):
             with db.session_scope() as s:
                 self.assertEqual(SqlAlchemyScheduler(s).free_capacity("w1"), 2)
 
+    def test_release_then_rereserve_reholds_capacity(self) -> None:
+        # Reusing a reservation_id whose hold was RELEASED must re-reserve
+        # capacity, not replay the stale (capacity-free) placement.
+        with _migrated_database() as (db, _url):
+            self._platform_pool(db, 10)
+            _make_worker(db, "w1", capacity=2)
+            svc = SchedulingService(db)
+            rid = str(uuid.uuid4())
+            _r, worker = self._reserve(svc, rid)
+            self.assertEqual(worker, "w1")
+            with db.session_scope() as s:
+                self.assertEqual(SqlAlchemyScheduler(s).free_capacity("w1"), 1)
+
+            self.assertTrue(svc.release(rid, _NOW))
+            with db.session_scope() as s:
+                self.assertEqual(SqlAlchemyScheduler(s).free_capacity("w1"), 2)
+
+            reheld, worker2 = self._reserve(svc, rid)  # same id -> re-holds
+            self.assertEqual(worker2, "w1")
+            self.assertEqual(reheld.state, "held")
+            with db.session_scope() as s:
+                self.assertEqual(SqlAlchemyScheduler(s).free_capacity("w1"), 1)
+
+    def test_concurrent_first_reserves_on_fresh_worker_both_succeed(self) -> None:
+        # Two concurrent first launches both lazily seed the worker's capacity
+        # quota. The seed is race-safe (INSERT ... ON CONFLICT DO NOTHING), so
+        # neither surfaces a raw IntegrityError misread as a duplicate reserve.
+        with _migrated_database() as (db, _url):
+            self._platform_pool(db, 10)
+            _make_worker(db, "w1", capacity=2)  # fresh: no worker quota row yet
+            svc = SchedulingService(db)
+            barrier = threading.Barrier(2)
+            workers: list[str] = []
+            errors: list[Exception] = []
+            lock = threading.Lock()
+
+            def attempt() -> None:
+                rid = str(uuid.uuid4())
+                barrier.wait()
+                try:
+                    _r, worker = self._reserve(svc, rid)
+                    with lock:
+                        workers.append(worker)
+                except Exception as exc:  # pragma: no cover - failure path
+                    with lock:
+                        errors.append(exc)
+
+            threads = [threading.Thread(target=attempt) for _ in range(2)]
+            for t in threads:
+                t.start()
+            for t in threads:
+                t.join()
+
+            self.assertEqual(errors, [])  # no raw IntegrityError from the seed race
+            self.assertEqual(sorted(workers), ["w1", "w1"])
+            with db.session_scope() as s:
+                self.assertEqual(SqlAlchemyScheduler(s).free_capacity("w1"), 0)
+
     def test_no_worker_raises_no_eligible(self) -> None:
         with _migrated_database() as (db, _url):
             self._platform_pool(db, 10)
@@ -354,6 +414,121 @@ class SelectAndReserveTests(unittest.TestCase):
             self.assertIn(rid, released)
             with db.session_scope() as s:
                 self.assertEqual(SqlAlchemyScheduler(s).free_capacity("w1"), 2)
+
+
+@unittest.skipUnless(_ENABLED, _SKIP_REASON)
+class WorkerMatchesEquivalenceTests(unittest.TestCase):
+    """The pure ``worker_matches`` spec and the SQL ``candidate_workers`` filter
+    encode the same capability predicate; this cross-checks them over identical
+    fixtures so they cannot silently diverge."""
+
+    def test_capability_axis_agrees_with_sql_filter(self) -> None:
+        req = _requirements()  # x86_64, {launch_instance, isolation:container}
+        # name, archs, caps, runtime (all trusted / live / free capacity)
+        specs = [
+            ("m-basic", ("x86_64",), _CAPS, "docker-rootless"),
+            ("m-multi-arch", ("x86_64", "arm64"), _CAPS, "docker-rootless"),
+            ("m-podman", ("x86_64",), _CAPS, "podman-rootless"),
+            ("x-arch", ("arm64",), _CAPS, "docker-rootless"),
+            (
+                "x-no-launch",
+                ("x86_64",),
+                ("isolation:container", "collect_logs"),
+                "docker-rootless",
+            ),
+            (
+                "x-wrong-iso",
+                ("x86_64",),
+                ("launch_instance", "isolation:raw_tcp", "collect_logs"),
+                "docker-rootless",
+            ),
+        ]
+        with _migrated_database() as (db, _url):
+            for name, archs, caps, runtime in specs:
+                _make_worker(
+                    db, name, archs=archs, caps=caps, runtime=runtime, capacity=2
+                )
+            with db.session_scope() as s:
+                sql = {
+                    c.worker_name
+                    for c in SqlAlchemyScheduler(s).candidate_workers(req, _NOW, 60)
+                }
+            spec = {
+                name
+                for name, archs, caps, runtime in specs
+                if worker_matches(
+                    architectures=archs,
+                    capabilities=caps,
+                    runtime_type=runtime,
+                    requirements=req,
+                )
+            }
+            self.assertEqual(sql, spec)
+            self.assertEqual(sql, {"m-basic", "m-multi-arch", "m-podman"})
+
+    def test_runtime_axis_agrees_with_sql_filter(self) -> None:
+        req = WorkerRequirements(
+            "x86_64",
+            frozenset({"launch_instance", "isolation:container"}),
+            runtime_type="podman-rootless",
+        )
+        specs = [
+            ("docker", ("x86_64",), _CAPS, "docker-rootless"),
+            ("podman", ("x86_64",), _CAPS, "podman-rootless"),
+        ]
+        with _migrated_database() as (db, _url):
+            for name, archs, caps, runtime in specs:
+                _make_worker(
+                    db, name, archs=archs, caps=caps, runtime=runtime, capacity=2
+                )
+            with db.session_scope() as s:
+                sql = {
+                    c.worker_name
+                    for c in SqlAlchemyScheduler(s).candidate_workers(req, _NOW, 60)
+                }
+            spec = {
+                name
+                for name, archs, caps, runtime in specs
+                if worker_matches(
+                    architectures=archs,
+                    capabilities=caps,
+                    runtime_type=runtime,
+                    requirements=req,
+                )
+            }
+            self.assertEqual(sql, spec)
+            self.assertEqual(sql, {"podman"})
+
+    def test_candidate_filter_gates_ineligible_even_when_capability_matches(
+        self,
+    ) -> None:
+        # Every worker below satisfies the pure capability spec, but
+        # candidate_workers ADDS dispatch-eligibility gating (trust / drain /
+        # quarantine / revoke / heartbeat freshness) -- proving the SQL filter is
+        # a strict superset of the capability predicate, never a divergence on it.
+        req = _requirements()
+        for caps in (_CAPS,):
+            self.assertTrue(
+                worker_matches(
+                    architectures=("x86_64",),
+                    capabilities=caps,
+                    runtime_type="docker-rootless",
+                    requirements=req,
+                )
+            )
+        with _migrated_database() as (db, _url):
+            _make_worker(db, "ok")
+            _make_worker(db, "draining", draining=True)
+            _make_worker(db, "quarantined", quarantined=True)
+            _make_worker(db, "revoked", trust="revoked")
+            _make_worker(db, "stale", heartbeat=_NOW - timedelta(hours=1))
+            _make_worker(db, "pending", trust="pending")
+            with db.session_scope() as s:
+                sql = {
+                    c.worker_name
+                    for c in SqlAlchemyScheduler(s).candidate_workers(req, _NOW, 60)
+                }
+            self.assertEqual(sql, {"ok"})
 
 
 if __name__ == "__main__":

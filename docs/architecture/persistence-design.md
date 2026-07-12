@@ -151,6 +151,42 @@ transaction, gap-safe projection):
   (`infrastructure.database.locks.acquire_competition_lock`) rather than
   reaching into `_resolve` or each other's private helpers.
 
+Decisions made while implementing M8 (execution plane, `0009_scheduling_quotas`):
+
+- **A reservation hold is renewed, not just swept.** `release_expired` is a
+  *safety sweep* for abandoned holds only: it releases every `held` reservation
+  past `expires_at`. The instance-lifecycle owner (slice 1b) **MUST** call
+  `QuotaLedger.renew(reservation_id, new_expires_at, now)` to extend the hold for
+  as long as the instance is running, or the sweep will reclaim capacity out from
+  under a live instance. `renew` takes the header `FOR UPDATE` and raises
+  `LookupError` if the reservation is missing or already released.
+- **A released `reservation_id` is re-holdable in place.** Reusing a
+  `reservation_id` whose prior reservation was *released* (a relaunch/reset of the
+  same instance) does **not** replay the stale, capacity-free placement:
+  `SchedulingService.select_and_reserve` detects the `released` header and calls
+  `QuotaLedger.reactivate`, which flips `released → held` under the header
+  `FOR UPDATE` lock, clears `released_at`, extends the TTL, and re-increments the
+  counters for the reservation's *original* append-only items (never rewriting
+  them). A still-`held` id replays idempotently (no double count). A brand-new id
+  inserts its header first, so a concurrent racer collapses on the
+  `pk_quota_reservations` unique violation only — other integrity errors propagate.
+- **The worker-capacity seed is race-safe and non-clobbering.**
+  `upsert_limit` uses `INSERT ... ON CONFLICT DO NOTHING` on
+  `(scope_type, scope_key, dimension)`: two concurrent first-time launches on a
+  fresh worker both no-op instead of one raising a unique violation (previously
+  misread as a duplicate-reservation collision), and an existing operator-set
+  limit is never overwritten by a stale candidate snapshot.
+- **`reserved_value` may never be raised above `limit_value`.** A
+  `resource_quotas_within_limit()` BEFORE UPDATE trigger (migration-owned) is
+  defence-in-depth over the app-level reserve check; it deliberately allows a
+  limit cut below current holds (grandfathered) and a reconcile restoring the true
+  held sum, firing only when an UPDATE *increases* `reserved_value` past the
+  limit.
+- **Worker liveness gates `claim` only.** Claiming *new* work requires a fresh,
+  live, non-draining worker; `start`/`heartbeat`/`complete`/`fail` are fenced by
+  the `lease_token` and are accepted regardless of heartbeat age, so a busy worker
+  reporting a real outcome cannot have its lease reaped and its job double-run.
+
 Decisions made while implementing §6 (the ledger), consistent with this design:
 
 - **New ledger aggregates bridge the flat scoring domain to the normalized

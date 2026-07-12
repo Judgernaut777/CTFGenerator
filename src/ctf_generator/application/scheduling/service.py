@@ -12,8 +12,11 @@ the capability-aware scheduler to the atomic quota ledger:
   scheduling ride the one race-safe primitive. A *full worker* (its counter is
   saturated) makes the loop retry the next candidate; a *shared-pool overrun*
   propagates (no worker will help); no eligible candidate raises
-  ``NoEligibleWorkerError``. A duplicate ``reservation_id`` (a re-launch of the
-  same instance) collapses idempotently to the existing reservation.
+  ``NoEligibleWorkerError``. A duplicate ``reservation_id`` whose reservation is
+  still *held* (a re-launch of the same instance) collapses idempotently to the
+  existing reservation; if that reservation was *released*, it is transparently
+  re-held in place against its original placement (a relaunch/reset re-reserves,
+  rather than replaying a stale, capacity-free placement).
 * ``ensure_worker_capacity_quota`` -- lazily seed a worker's capacity quota so
   ``worker_enrollment`` stays untouched.
 * ``release`` / ``release_expired`` -- return capacity; sweep leaked holds.
@@ -60,6 +63,18 @@ from ctf_generator.infrastructure.database.session import Database
 
 _WORKER_SCOPE = "worker"
 _ACTIVE_INSTANCES = "active_instances"
+
+# The reservation-header primary-key constraint (migration 0009). Only a unique
+# violation on THIS constraint is an idempotent reservation collapse.
+_RESERVATION_PK = "pk_quota_reservations"
+
+
+def _integrity_constraint_name(exc: IntegrityError) -> str | None:
+    """The Postgres constraint name an ``IntegrityError`` violated, if psycopg
+    surfaced it (``exc.orig.diag.constraint_name``); ``None`` when unavailable,
+    which the caller treats conservatively."""
+    diag = getattr(getattr(exc, "orig", None), "diag", None)
+    return getattr(diag, "constraint_name", None)
 
 # Default liveness window: a worker whose last heartbeat is older than this is
 # not dispatch-eligible (the M7 "heartbeat fresh" conjunct, now enforced).
@@ -139,10 +154,16 @@ class SchedulingService:
         :class:`~ctf_generator.domain.scheduling.models.QuotaExceededError` when
         a *shared* pool is saturated (no worker choice can help).
         """
-        # A prior successful reserve for this instance id -> idempotent replay.
+        # A prior reserve for this instance id: a still-*held* reservation is an
+        # idempotent replay (return it, no candidate scan, no double count); a
+        # *released* header being reused (a relaunch/reset) is transparently
+        # re-held in place against its original placement.
         existing = self.get_reservation(reservation_id)
         if existing is not None:
-            return existing, existing.worker_key
+            if existing.state == "held":
+                return existing, existing.worker_key
+            reactivated = self._reactivate(reservation_id, expires_at, now)
+            return reactivated, reactivated.worker_key
 
         candidates = self.list_candidates(
             requirements,
@@ -195,8 +216,15 @@ class SchedulingService:
                 if exc.scope_type == _WORKER_SCOPE:
                     continue
                 raise
-            except IntegrityError:
-                # A racing re-launch won the reservation_id first -> idempotent.
+            except IntegrityError as exc:
+                # ONLY a unique violation on the reservation header (a racing
+                # re-launch won the reservation_id first) is an idempotent
+                # collapse. Any other integrity error (e.g. a seed race -- now
+                # itself race-safe -- or an FK/CHECK) must propagate, never be
+                # misread as a duplicate reservation.
+                constraint = _integrity_constraint_name(exc)
+                if constraint is not None and constraint != _RESERVATION_PK:
+                    raise
                 collapsed = self.get_reservation(reservation_id)
                 if collapsed is None:  # pragma: no cover - the rival rolled back
                     raise
@@ -206,6 +234,24 @@ class SchedulingService:
             "every dispatch-eligible worker is at capacity for "
             f"architecture={requirements.architecture!r}"
         )
+
+    def _reactivate(
+        self, reservation_id: str, expires_at: datetime, now: datetime
+    ) -> QuotaReservation:
+        """Re-hold a released reservation against its original placement, in one
+        transaction that re-locks the header ``FOR UPDATE``."""
+        with self._database.session_scope() as session:
+            return self._ledger_factory(session).reactivate(
+                reservation_id, expires_at, now
+            )
+
+    def renew(
+        self, reservation_id: str, new_expires_at: datetime, now: datetime
+    ) -> None:
+        """Extend a held reservation's TTL so ``release_expired`` does not sweep
+        a still-running instance. ``LookupError`` if missing/released."""
+        with self._database.session_scope() as session:
+            self._ledger_factory(session).renew(reservation_id, new_expires_at, now)
 
     # -- release / maintenance ------------------------------------------------
 

@@ -685,6 +685,26 @@ class QuotaLedger(Protocol):
         double release is a no-op)."""
         ...
 
+    def reactivate(
+        self, reservation_id: str, new_expires_at: datetime, now: datetime
+    ) -> QuotaReservation:
+        """Re-hold a previously *released* reservation in place (a relaunch of
+        the same instance id): flip ``released -> held`` under a row lock and
+        re-increment the counters for its original append-only items, extending
+        the TTL to ``new_expires_at``. An already-``held`` reservation is
+        returned unchanged (idempotent). ``LookupError`` if it does not exist;
+        ``QuotaExceededError`` if a counter can no longer admit the hold."""
+        ...
+
+    def renew(
+        self, reservation_id: str, new_expires_at: datetime, now: datetime
+    ) -> None:
+        """Extend a *held* reservation's TTL to ``new_expires_at`` (the
+        instance-lifecycle owner keeps a running instance's hold alive so the
+        ``release_expired`` safety sweep never reclaims it). ``LookupError`` if
+        the reservation is missing or already released."""
+        ...
+
     def get(self, reservation_id: str) -> QuotaReservation | None:
         ...
 

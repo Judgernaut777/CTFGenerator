@@ -6,8 +6,11 @@ Creates the execution plane's capacity-accounting and scheduling substrate:
   a ``limit_value`` and a live ``reserved_value`` counter. Mutable (a limit
   adjustment and the reserve/release counter update are legal), so no
   ``reject_mutation``; instead a ``resource_quotas_guard()`` BEFORE DELETE
-  trigger (owned here) refuses to drop a row while ``reserved_value > 0``. The
-  unique ``(scope_type, scope_key, dimension)`` is the composite-FK target for
+  trigger (owned here) refuses to drop a row while ``reserved_value > 0``, and a
+  ``resource_quotas_within_limit()`` BEFORE UPDATE trigger (also owned here)
+  refuses an UPDATE that *raises* ``reserved_value`` above ``limit_value`` while
+  leaving grandfathered over-holds after a limit cut alone. The unique
+  ``(scope_type, scope_key, dimension)`` is the composite-FK target for
   reservation items; a ceiling dimension's counter is pinned to 0 by CHECK.
 * ``quota_reservations`` -- reservation headers keyed by ``reservation_id``
   (equal to the instance business id; a duplicate reserve -> IntegrityError, the
@@ -71,6 +74,26 @@ BEGIN
       OLD.id;
   END IF;
   RETURN OLD;
+END $$ LANGUAGE plpgsql;
+"""
+
+# Defence-in-depth over the app-level reserve check: reject an UPDATE that
+# *raises* reserved_value above limit_value. A blanket CHECK is deliberately
+# avoided -- it would break a legitimate limit reduction below current holds
+# (grandfathered). This guard only fires when reserved_value is being INCREASED
+# past the limit, so a limit cut (reserved unchanged), a release (reserved
+# decreasing), and a reconcile restoring the true held sum at/under limit all
+# stay legal.
+_QUOTA_LIMIT_GUARD_FN = """
+CREATE OR REPLACE FUNCTION resource_quotas_within_limit() RETURNS trigger AS $$
+BEGIN
+  IF NEW.reserved_value > NEW.limit_value
+     AND NEW.reserved_value > OLD.reserved_value THEN
+    RAISE EXCEPTION
+      'resource_quotas: reserved_value % would exceed limit_value % (id=%)',
+      NEW.reserved_value, NEW.limit_value, NEW.id;
+  END IF;
+  RETURN NEW;
 END $$ LANGUAGE plpgsql;
 """
 
@@ -264,8 +287,21 @@ def upgrade() -> None:
         "FOR EACH ROW EXECUTE FUNCTION resource_quotas_guard();"
     )
 
+    # Defence-in-depth: no UPDATE may push reserved_value above limit_value.
+    op.execute(_QUOTA_LIMIT_GUARD_FN)
+    op.execute(
+        "CREATE TRIGGER resource_quotas_within_limit_update "
+        "BEFORE UPDATE ON resource_quotas "
+        "FOR EACH ROW EXECUTE FUNCTION resource_quotas_within_limit();"
+    )
+
 
 def downgrade() -> None:
+    op.execute(
+        "DROP TRIGGER IF EXISTS resource_quotas_within_limit_update "
+        "ON resource_quotas;"
+    )
+    op.execute("DROP FUNCTION IF EXISTS resource_quotas_within_limit();")
     op.execute("DROP TRIGGER IF EXISTS resource_quotas_guard_delete ON resource_quotas;")
     op.execute("DROP FUNCTION IF EXISTS resource_quotas_guard();")
     op.execute(
