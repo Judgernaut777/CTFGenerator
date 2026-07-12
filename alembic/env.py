@@ -18,7 +18,11 @@ from ctf_generator.infrastructure.database.config import DatabaseConfig
 config = context.config
 
 if config.config_file_name is not None:
-    fileConfig(config.config_file_name)
+    # disable_existing_loggers=False: alembic.ini's [loggers] lists only
+    # root/sqlalchemy/alembic, and the default True would DISABLE every other
+    # already-configured logger (e.g. the app's ctfgen.api.audit / .access sinks)
+    # whenever migrations run in-process. Keep application loggers alive.
+    fileConfig(config.config_file_name, disable_existing_loggers=False)
 
 # Resolve the DSN from the environment (never from alembic.ini) unless a caller
 # has explicitly injected one (e.g. an isolated test database).

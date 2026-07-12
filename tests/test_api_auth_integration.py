@@ -244,8 +244,13 @@ class AuthApiIntegrationTests(unittest.TestCase):
         self.assertEqual(statuses[-1], 429, statuses)
 
     def test_token_password_and_hash_never_logged(self) -> None:
-        # REQ-INV-011: drive login + refresh with a root log capture and assert
-        # the raw token, the password, and the token's sha256 hash never appear.
+        # REQ-INV-011: drive login + refresh + logout with a log capture and
+        # assert the raw token, the password, and the token's sha256 hash never
+        # appear. The capture is attached AFTER _app()'s in-setup alembic upgrade
+        # (which used to call fileConfig with disable_existing_loggers=True and
+        # silently disable the ctfgen loggers, making this test vacuous -- every
+        # assertNotIn passed against an empty capture). A POSITIVE CONTROL below
+        # proves the sink is live before any absence is asserted.
         records: list[str] = []
 
         class _Capture(logging.Handler):
@@ -256,26 +261,57 @@ class AuthApiIntegrationTests(unittest.TestCase):
                     records.append(str(record.msg))
 
         handler = _Capture()
-        root = logging.getLogger()
-        prev_level = root.level
-        root.addHandler(handler)
-        root.setLevel(logging.DEBUG)
-        try:
-            with _app() as (client, _service):
+        with _app() as (client, _service):
+            # Attach to root + the concrete ctfgen sinks AFTER the migration ran,
+            # and force them enabled + verbose so nothing is filtered out.
+            captured = [
+                logging.getLogger(),
+                logging.getLogger("ctfgen"),
+                logging.getLogger("ctfgen.api.audit"),
+                logging.getLogger("ctfgen.api.access"),
+            ]
+            saved = [(lg, lg.disabled, lg.level) for lg in captured]
+            for lg in captured:
+                lg.disabled = False
+                lg.setLevel(logging.DEBUG)
+                lg.addHandler(handler)
+            try:
+                # POSITIVE CONTROL: emit a sentinel through the real audit sink
+                # logger and prove the capture recorded it. If the sink is dead
+                # (loggers disabled), the absence assertions below would be
+                # vacuous -- fail loudly here instead.
+                sentinel = f"positive-control-{uuid.uuid4().hex}"
+                logging.getLogger("ctfgen.api.audit").warning(sentinel)
+                self.assertIn(
+                    sentinel,
+                    "\n".join(records),
+                    "log capture is not live -- the never-log assertions would be vacuous",
+                )
+
                 token = _login(client).json()["token"]
                 refreshed = client.post(
                     "/api/v1/auth/refresh",
                     headers={"Authorization": f"Bearer {token}"},
                 ).json()["token"]
-        finally:
-            root.removeHandler(handler)
-            root.setLevel(prev_level)
+                out = client.post(
+                    "/api/v1/auth/logout",
+                    headers={"Authorization": f"Bearer {refreshed}"},
+                )
+                self.assertEqual(out.status_code, 204, out.text)
+            finally:
+                for lg in captured:
+                    lg.removeHandler(handler)
+                for lg, disabled, level in saved:
+                    lg.disabled = disabled
+                    lg.setLevel(level)
 
         blob = "\n".join(records)
         self.assertNotIn(token, blob)
         self.assertNotIn(refreshed, blob)
         self.assertNotIn(_PASSWORD, blob)
         self.assertNotIn(hashlib.sha256(token.encode()).hexdigest(), blob)
+        self.assertNotIn(hashlib.sha256(refreshed.encode()).hexdigest(), blob)
+
 
 if __name__ == "__main__":  # pragma: no cover
     unittest.main()
