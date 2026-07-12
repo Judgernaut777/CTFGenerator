@@ -49,9 +49,9 @@ class SqlAlchemyChallengeVersionRepository:
         return result
 
     def _version_row(
-        self, definition_slug: str, version_no: int
+        self, definition_slug: str, version_no: int, *, for_update: bool = False
     ) -> ChallengeVersionRow | None:
-        return self._session.scalars(
+        stmt = (
             select(ChallengeVersionRow)
             .join(
                 ChallengeDefinitionRow,
@@ -61,7 +61,12 @@ class SqlAlchemyChallengeVersionRepository:
                 ChallengeDefinitionRow.slug == definition_slug,
                 ChallengeVersionRow.version_no == version_no,
             )
-        ).one_or_none()
+        )
+        if for_update:
+            # Lock only the version row (not the joined definition) so a guarded
+            # state transition serializes read-check-write under READ COMMITTED.
+            stmt = stmt.with_for_update(of=ChallengeVersionRow)
+        return self._session.scalars(stmt).one_or_none()
 
     def add(self, version: ChallengeVersion) -> None:
         """Insert a version under an existing definition. Duplicate
@@ -125,7 +130,7 @@ class SqlAlchemyChallengeVersionRepository:
         with a raw IntegrityError instead of a clean domain error)."""
         if published_at is None:
             raise ValueError("published_at is required to publish a version")
-        row = self._version_row(definition_slug, version_no)
+        row = self._version_row(definition_slug, version_no, for_update=True)
         if row is None:
             raise LookupError(
                 f"challenge version not found: {definition_slug!r} v{version_no}"

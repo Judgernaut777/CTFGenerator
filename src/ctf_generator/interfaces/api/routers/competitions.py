@@ -28,7 +28,6 @@ from ..envelopes import (
 from ..exceptions import (
     PreconditionFailedError,
     PreconditionRequiredError,
-    ValidationFailedError,
 )
 from ..pagination import clamp_limit, paginate
 from ..schemas.common import ERROR_RESPONSES
@@ -38,7 +37,6 @@ from ..schemas.competitions import (
     CompetitionResponse,
     competition_concurrency_payload,
     competition_to_response,
-    validate_window,
 )
 from ._support import record_audit, remember, replay, respond
 
@@ -63,7 +61,8 @@ def create_competition(
     service=Depends(get_competition_service),
 ):
     body_json = body.model_dump(mode="json")
-    replayed = replay(request, _CREATE_SCOPE, body_json)
+    scope = f"{principal.subject}:{_CREATE_SCOPE}"
+    replayed = replay(request, scope, body_json)
     if replayed is not None:
         return replayed
 
@@ -76,7 +75,7 @@ def create_competition(
         request, principal, action="competition.create", target=config.competition_id
     )
     remember(
-        request, _CREATE_SCOPE, body_json, status_code=201, envelope=envelope, etag=etag
+        request, scope, body_json, status_code=201, envelope=envelope, etag=etag
     )
     return respond(201, envelope, etag=etag)
 
@@ -155,16 +154,9 @@ def patch_competition(
     changes = body.model_dump(exclude_unset=True)
     merged = dataclasses.replace(current, **changes)
 
-    problems = validate_window(
-        merged.start_time,
-        merged.end_time,
-        merged.scoring_start_time,
-        merged.freeze_time,
-    )
-    if problems:
-        raise ValidationFailedError(
-            "invalid competition timing window", detail=problems
-        )
+    # The timing-window invariant is enforced authoritatively in the service
+    # (CompetitionService.update -> 422 validation_failed), so a non-HTTP caller
+    # cannot bypass it and the handler stays free of the business rule.
 
     def guard(fresh) -> None:
         if not etags_match(

@@ -13,8 +13,6 @@ from datetime import UTC, datetime
 
 from fastapi import APIRouter, Depends, Query, Request
 
-from ctf_generator.schema import SPEC_SCHEMA, current_version
-
 from ..concurrency import compute_etag
 from ..deps import (
     Permission,
@@ -60,7 +58,8 @@ def create_version(
     service=Depends(get_challenge_version_service),
 ):
     body_json = body.model_dump(mode="json")
-    replayed = replay(request, _CREATE_SCOPE, body_json)
+    scope = f"{principal.subject}:{_CREATE_SCOPE}"
+    replayed = replay(request, scope, body_json)
     if replayed is not None:
         return replayed
 
@@ -69,7 +68,7 @@ def create_version(
         seed=body.seed,
         family_version=body.family_version,
         spec=body.spec,
-        spec_version=body.spec_version or current_version(SPEC_SCHEMA),
+        spec_version=body.spec_version,
         mode=body.mode,
         cve_refs=tuple(body.cve_refs),
         cve_content_hash=body.cve_content_hash,
@@ -85,7 +84,7 @@ def create_version(
         target=f"{version.definition_slug}/v{version.version_no}",
     )
     remember(
-        request, _CREATE_SCOPE, body_json, status_code=201, envelope=envelope, etag=etag
+        request, scope, body_json, status_code=201, envelope=envelope, etag=etag
     )
     return respond(201, envelope, etag=etag)
 
