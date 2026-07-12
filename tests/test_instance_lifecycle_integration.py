@@ -26,6 +26,7 @@ try:
     from alembic.config import Config as AlembicConfig
     from sqlalchemy.engine import make_url
 
+    from ctf_generator.application.instances.corrective import build_corrective_job
     from ctf_generator.application.instances.reconciler import InstanceReconciler
     from ctf_generator.application.instances.service import InstanceLifecycleService
     from ctf_generator.application.jobs.service import JobService
@@ -140,11 +141,21 @@ class _FakeObserved:
 
 
 class _FakeLiveness:
-    def __init__(self, dispatchable: set[str] | None = None) -> None:
+    def __init__(
+        self,
+        dispatchable: set[str] | None = None,
+        adverse: set[str] | None = None,
+    ) -> None:
         self.dispatchable = dispatchable if dispatchable is not None else {"w1"}
+        # A GENUINE adverse condition (draining/quarantined/untrusted/gone),
+        # distinct from pure heartbeat staleness.
+        self.adverse = adverse if adverse is not None else set()
 
     def is_dispatchable(self, worker_name: str, now: datetime) -> bool:
         return worker_name in self.dispatchable
+
+    def is_adverse(self, worker_name: str, now: datetime) -> bool:
+        return worker_name in self.adverse
 
 
 def _seed_parents(db) -> None:
@@ -347,7 +358,35 @@ class ReservationIntegrationTests(unittest.TestCase):
             iid = _seed_instance(db, state="active")
             inst = lifecycle.request_reset(iid, _LATER, _NOW)
             self.assertEqual(inst.generation, 2)
-            self.assertIsNotNone(jobs.get_by_idempotency_key(_key(iid, 2, "reset")))
+            # ONE corrective action per (instance, generation): reset enqueues the
+            # SAME 'launch' the reconciler's recovery would, keyed on the new
+            # generation, so the two collapse idempotently instead of racing.
+            self.assertIsNotNone(jobs.get_by_idempotency_key(_key(iid, 2, "launch")))
+
+    def test_request_reset_of_released_hold_re_reserves(self) -> None:
+        # A reset landing on an instance whose hold was released (e.g. by the
+        # expiry sweep) must re-establish quota accounting before relaunching.
+        with _migrated_database() as db:
+            _seed_parents(db)
+            scheduling, jobs, lifecycle, _rec = _components(db)
+            iid = str(uuid.uuid4())
+            lifecycle.request_instance(
+                instance_id=iid,
+                competition_id="cup",
+                team_name="Red",
+                definition_slug="sql",
+                version_no=1,
+                requirements=_requirements(),
+                pooled_items=(_platform_item(),),
+                expires_at=_LATER,
+                now=_NOW,
+            )
+            self.assertTrue(scheduling.release(iid, _NOW))  # hold released
+            self.assertEqual(scheduling.get_reservation(iid).state, "released")
+            lifecycle.request_reset(iid, _LATER, _NOW)
+            # Re-held (not left released) so the relaunch is quota-accounted.
+            self.assertEqual(scheduling.get_reservation(iid).state, "held")
+            self.assertIsNotNone(jobs.get_by_idempotency_key(_key(iid, 2, "launch")))
 
 
 @unittest.skipUnless(_ENABLED, _SKIP_REASON)
@@ -361,12 +400,13 @@ class GenerationGatingTests(unittest.TestCase):
             # A HEALTHY observation, but for the OLD generation -> must be ignored.
             observed.set(HealthObservation(iid, "healthy", True, "w1", 1, _NOW))
             actions = reconciler.reconcile_once(_NOW)
-            # Treated as absent: degrade + enqueue launch on gen 2 (the healthy
-            # gen-1 report did NOT keep it healthy/active).
+            # Treated as absent (no live gen-2 launch job existed): degrade, fence
+            # gen 2, and enqueue the fresh-generation (gen 3) launch.
             with db.session_scope() as s:
                 inst = SqlAlchemyInstanceRepository(s).get(iid)
             self.assertEqual(inst.state, "degraded")
-            self.assertIsNotNone(jobs.get_by_idempotency_key(_key(iid, 2, "launch")))
+            self.assertEqual(inst.generation, 3)
+            self.assertIsNotNone(jobs.get_by_idempotency_key(_key(iid, 3, "launch")))
             self.assertTrue(any(a.case == "1-missing-container" for a in actions))
 
 
@@ -389,15 +429,24 @@ class ReconcilerDriftCaseTests(unittest.TestCase):
             actions = rec.reconcile_once(_NOW)
             with db.session_scope() as s:
                 inst = SqlAlchemyInstanceRepository(s).get(iid)
+            # No live gen-1 launch existed -> degrade, fence to gen 2, relaunch on
+            # the FRESH generation (a re-used gen-1 key would collapse to a
+            # completed launch and never relaunch).
             self.assertEqual(inst.state, "degraded")
-            launch = self._launch_created(actions, iid, 1)
+            self.assertEqual(inst.generation, 2)
+            launch = self._launch_created(actions, iid, 2)
             self.assertEqual(len(launch), 1)
             self.assertTrue(launch[0].job_created)
-            # Second pass: launch collapses (no double), no re-degrade.
+            self.assertTrue(any(a.action == "bump_generation" for a in actions))
+            # Second pass: the gen-2 launch is now in-flight -> reuse (collapse),
+            # no further generation bump.
             actions2 = rec.reconcile_once(_NOW)
-            launch2 = self._launch_created(actions2, iid, 1)
+            launch2 = self._launch_created(actions2, iid, 2)
             self.assertEqual(len(launch2), 1)
             self.assertFalse(launch2[0].job_created)
+            self.assertFalse(any(a.action == "bump_generation" for a in actions2))
+            with db.session_scope() as s:
+                self.assertEqual(SqlAlchemyInstanceRepository(s).get(iid).generation, 2)
 
     def test_case2_unexpected_container(self) -> None:
         with _migrated_database() as db:
@@ -507,8 +556,10 @@ class ReconcilerDriftCaseTests(unittest.TestCase):
             observed.set(HealthObservation(iid, "absent", False, "w1", 1, _NOW))
             first = rec.reconcile_once(_NOW)
             second = rec.reconcile_once(_NOW)
-            f = self._launch_created(first, iid, 1)
-            s2 = self._launch_created(second, iid, 1)
+            # Pass 1 fences to gen 2 and mints the launch; pass 2 finds it
+            # in-flight and collapses onto it.
+            f = self._launch_created(first, iid, 2)
+            s2 = self._launch_created(second, iid, 2)
             self.assertTrue(f and f[0].job_created)
             self.assertTrue(s2 and s2[0].job_created is False)  # duplicate collapses
 
@@ -517,19 +568,28 @@ class ReconcilerDriftCaseTests(unittest.TestCase):
             _seed_parents(db)
             observed = _FakeObserved()
             _sch, jobs, _life, rec = _components(db, observed=observed)
-            # Post-reset: generation 2, a stale gen-1 resource lingers, nothing up.
+            # Post-reset: generation 2, its gen-2 launch already queued (as the
+            # reset path enqueues), a stale gen-1 resource lingers, nothing up.
             iid = _seed_instance(db, state="starting", desired="active", generation=2)
             with db.session_scope() as s:
-                SqlAlchemyInstanceRepository(s).record_runtime_resource(
+                repo = SqlAlchemyInstanceRepository(s)
+                inst = repo.get(iid)
+                repo.record_runtime_resource(
                     RuntimeResource(iid, "container", "old-cid", "w1", generation=1)
                 )
+            jobs.enqueue_idempotent(build_corrective_job(inst, 2, "launch", _NOW), _NOW)
+            observed.set(HealthObservation(iid, "absent", False, "w1", 2, _NOW))
             actions = rec.reconcile_once(_NOW)
-            # old-gen resource marked releasing + delete enqueued; new-gen launch.
+            # old-gen resource marked releasing + delete enqueued; the in-flight
+            # gen-2 launch is REUSED, not bumped to gen 3.
             self.assertTrue(any(a.case == "8-partial-reset" for a in actions))
             self.assertIsNotNone(jobs.get_by_idempotency_key(_key(iid, 2, "delete")))
             self.assertIsNotNone(jobs.get_by_idempotency_key(_key(iid, 2, "launch")))
+            self.assertFalse(any(a.action == "bump_generation" for a in actions))
             with db.session_scope() as s:
-                res = SqlAlchemyInstanceRepository(s).list_runtime_resources(iid)
+                repo = SqlAlchemyInstanceRepository(s)
+                self.assertEqual(repo.get(iid).generation, 2)
+                res = repo.list_runtime_resources(iid)
             self.assertEqual(res[0].state, "releasing")
             # Second pass: no new releasing action (resource already releasing).
             actions2 = rec.reconcile_once(_NOW)
@@ -591,6 +651,208 @@ class ReconcilerDriftCaseTests(unittest.TestCase):
             iid = _seed_instance(db, state="active", desired="active")
             observed.set(HealthObservation(iid, "active", True, "w1", 1, _NOW))
             self.assertEqual(rec.reconcile_once(_NOW), [])
+
+
+@unittest.skipUnless(_ENABLED, _SKIP_REASON)
+class ReconcilerFixTests(unittest.TestCase):
+    """Regression tests for the M8 1b reconciler-safety / lifecycle fixes."""
+
+    def _launch_created(self, actions, iid, gen):
+        return [
+            a
+            for a in actions
+            if a.action == "launch" and a.idempotency_key == _key(iid, gen, "launch")
+        ]
+
+    # -- M2: a heartbeat blip must not tear down a healthy instance ----------
+
+    def test_heartbeat_blip_does_not_tear_down_healthy(self) -> None:
+        with _migrated_database() as db:
+            _seed_parents(db)
+            observed = _FakeObserved()
+            # w1 heartbeat-stale (not dispatchable) but NOT adverse.
+            liveness = _FakeLiveness(dispatchable=set(), adverse=set())
+            _sch, _jobs, _life, rec = _components(
+                db, observed=observed, liveness=liveness
+            )
+            iid = _seed_instance(db, state="active", desired="active", assigned="w1")
+            observed.set(HealthObservation(iid, "healthy", True, "w1", 1, _NOW))
+            actions = rec.reconcile_once(_NOW)
+            with db.session_scope() as s:
+                inst = SqlAlchemyInstanceRepository(s).get(iid)
+            # Healthy + generation-matched: a stale heartbeat alone must NOT
+            # evacuate -- no teardown, no generation bump, assignment intact.
+            self.assertEqual(inst.state, "active")
+            self.assertEqual(inst.generation, 1)
+            self.assertIsNotNone(inst.assigned_worker)
+            self.assertEqual(actions, [])
+
+    def test_adverse_worker_evacuates_even_if_healthy(self) -> None:
+        with _migrated_database() as db:
+            _seed_parents(db)
+            observed = _FakeObserved()
+            # w1 dispatchable but ADVERSE (draining/quarantined/untrusted).
+            liveness = _FakeLiveness(dispatchable={"w1"}, adverse={"w1"})
+            _sch, jobs, _life, rec = _components(
+                db, observed=observed, liveness=liveness
+            )
+            iid = _seed_instance(db, state="active", desired="active", assigned="w1")
+            observed.set(HealthObservation(iid, "healthy", True, "w1", 1, _NOW))
+            actions = rec.reconcile_once(_NOW)
+            with db.session_scope() as s:
+                inst = SqlAlchemyInstanceRepository(s).get(iid)
+            self.assertIsNone(inst.assigned_worker)
+            self.assertEqual(inst.generation, 2)
+            self.assertTrue(any(a.case == "3-stale-worker" for a in actions))
+            self.assertIsNotNone(jobs.get_by_idempotency_key(_key(iid, 2, "launch")))
+
+    # -- H2: concurrent-pass idempotency via the locked re-check -------------
+
+    def test_stale_worker_corrective_is_concurrency_idempotent(self) -> None:
+        with _migrated_database() as db:
+            _seed_parents(db)
+            observed = _FakeObserved()
+            liveness = _FakeLiveness(dispatchable=set())  # w1 down
+            _sch, _jobs, _life, rec = _components(
+                db, observed=observed, liveness=liveness
+            )
+            iid = _seed_instance(db, state="active", desired="active", assigned="w1")
+            # Pass 1 wins the atomic re-check: clears assignment, bumps to gen 2.
+            rec.reconcile_once(_NOW)
+            with db.session_scope() as s:
+                inst = SqlAlchemyInstanceRepository(s).get(iid)
+            self.assertEqual(inst.generation, 2)
+            self.assertIsNone(inst.assigned_worker)
+            # A rival pass that observed the STALE (pre-bump) snapshot: the locked
+            # precondition refuses to bump/clear a second time.
+            self.assertIsNone(rec._fence_stale_worker(iid, "w1", 1, _NOW))
+            self.assertIsNone(rec._fence_missing_container(iid, 1, _NOW))
+            with db.session_scope() as s:
+                self.assertEqual(
+                    SqlAlchemyInstanceRepository(s).get(iid).generation, 2
+                )
+
+    # -- H3 + capacity leak: reconciler stop RELEASES the reservation --------
+
+    def test_reconciler_stop_releases_reservation(self) -> None:
+        with _migrated_database() as db:
+            _seed_parents(db)
+            observed = _FakeObserved()
+            scheduling, _jobs, lifecycle, rec = _components(db, observed=observed)
+            iid = str(uuid.uuid4())
+            lifecycle.request_instance(
+                instance_id=iid,
+                competition_id="cup",
+                team_name="Red",
+                definition_slug="sql",
+                version_no=1,
+                requirements=_requirements(),
+                pooled_items=(_platform_item(),),
+                expires_at=_LATER,
+                now=_NOW,
+            )
+            lifecycle.request_stop(iid, _NOW)  # desired stopped
+            self.assertEqual(scheduling.get_reservation(iid).state, "held")
+            observed.set(HealthObservation(iid, "absent", False, "w1", 1, _NOW))
+            rec.reconcile_once(_NOW)  # queued -> stopping -> stopped, releases hold
+            with db.session_scope() as s:
+                inst = SqlAlchemyInstanceRepository(s).get(iid)
+            self.assertEqual(inst.state, "stopped")
+            self.assertEqual(scheduling.get_reservation(iid).state, "released")
+
+    # -- H4: any early live state drains all the way to stopped --------------
+
+    def test_early_state_drains_to_stopped(self) -> None:
+        with _migrated_database() as db:
+            _seed_parents(db)
+            observed = _FakeObserved()
+            _sch, _jobs, _life, rec = _components(db, observed=observed)
+            # 'requested' -> stopping is a newly-legal edge (both matrix + guard).
+            iid = _seed_instance(db, state="requested", desired="stopped", assigned="w1")
+            observed.set(HealthObservation(iid, "absent", False, "w1", 1, _NOW))
+            rec.reconcile_once(_NOW)
+            with db.session_scope() as s:
+                self.assertEqual(
+                    SqlAlchemyInstanceRepository(s).get(iid).state, "stopped"
+                )
+
+    # -- M1 + M5: deleted path, archive only when resources are released -----
+
+    def test_deleted_convergence_and_archive_only_when_released(self) -> None:
+        with _migrated_database() as db:
+            _seed_parents(db)
+            observed = _FakeObserved()
+            _sch, jobs, _life, rec = _components(db, observed=observed)
+            iid = _seed_instance(db, state="active", desired="deleted", assigned="w1")
+            with db.session_scope() as s:
+                repo = SqlAlchemyInstanceRepository(s)
+                repo.record_endpoint(
+                    InstanceEndpoint(iid, "web", "h", 80, "http", "http://h")
+                )
+                repo.record_runtime_resource(
+                    RuntimeResource(iid, "container", "cid", "w1")
+                )
+            # Pass 1: container present -> BOTH stop and delete jobs enqueued.
+            observed.set(HealthObservation(iid, "active", True, "w1", 1, _NOW))
+            rec.reconcile_once(_NOW)
+            self.assertIsNotNone(jobs.get_by_idempotency_key(_key(iid, 1, "stop")))
+            self.assertIsNotNone(jobs.get_by_idempotency_key(_key(iid, 1, "delete")))
+            # Pass 2: container gone -> endpoint deleted, resource releasing,
+            # drained to stopped; NOT archived while a resource is 'releasing'.
+            observed.set(HealthObservation(iid, "absent", False, "w1", 1, _NOW))
+            rec.reconcile_once(_NOW)
+            with db.session_scope() as s:
+                repo = SqlAlchemyInstanceRepository(s)
+                inst = repo.get(iid)
+                self.assertEqual(repo.list_endpoints(iid), [])
+                res = repo.list_runtime_resources(iid)
+            self.assertEqual(inst.state, "stopped")
+            self.assertEqual(res[0].state, "releasing")
+            # Pass 3: still 'releasing' -> still not archived.
+            rec.reconcile_once(_NOW)
+            with db.session_scope() as s:
+                self.assertEqual(
+                    SqlAlchemyInstanceRepository(s).get(iid).state, "stopped"
+                )
+            # Worker confirms release -> archival becomes possible.
+            with db.session_scope() as s:
+                SqlAlchemyInstanceRepository(s).set_resource_state(
+                    iid, "container", "cid", "released", _NOW
+                )
+            rec.reconcile_once(_NOW)
+            with db.session_scope() as s:
+                self.assertEqual(
+                    SqlAlchemyInstanceRepository(s).get(iid).state, "archived"
+                )
+
+    # -- L2: a stuck 'ready' instance advances toward healthy ----------------
+
+    def test_failed_ack_advances_ready_toward_healthy(self) -> None:
+        with _migrated_database() as db:
+            _seed_parents(db)
+            observed = _FakeObserved()
+            _sch, _jobs, lifecycle, rec = _components(db, observed=observed)
+            iid = str(uuid.uuid4())
+            _seed_instance(db, state="requested", instance_id=iid, assigned="w1")
+            past = _NOW - timedelta(hours=1)
+            for state in ("queued", "building", "ready"):
+                lifecycle.apply_transition(
+                    iid, state, reason="x", actor="system", now=past
+                )
+            observed.set(HealthObservation(iid, "healthy", True, "w1", 1, _NOW))
+            # 'ready' used to stall; now it advances one rung (ready -> starting).
+            rec.reconcile_once(_NOW, stuck_after_seconds=300)
+            with db.session_scope() as s:
+                self.assertEqual(
+                    SqlAlchemyInstanceRepository(s).get(iid).state, "starting"
+                )
+            later = _NOW + timedelta(hours=1)
+            observed.set(HealthObservation(iid, "healthy", True, "w1", 1, later))
+            rec.reconcile_once(later, stuck_after_seconds=300)
+            with db.session_scope() as s:
+                self.assertEqual(
+                    SqlAlchemyInstanceRepository(s).get(iid).state, "healthy"
+                )
 
 
 if __name__ == "__main__":
