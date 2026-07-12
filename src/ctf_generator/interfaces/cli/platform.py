@@ -31,69 +31,20 @@ import sys
 
 from . import output
 from .client import ApiClient, build_http_client
+from .commands import AREA_NAMES, register_all
+from .commands._common import add_global_options as _add_global_options
+from .commands._common import guard_stored_origin as _guard_stored_origin
+from .commands._common import resolve_api_url as _resolve_api_url
+from .commands._common import token_override as _token_override
 from .config import Session, TokenStore
 from .errors import CliError, run
 
-DEFAULT_API_URL = "http://127.0.0.1:8000"
-_API_URL_ENV = "CTFGEN_API_URL"
 _TOKEN_ENV = "CTFGEN_API_TOKEN"  # noqa: S105 - env var name, not a secret
 _PASSWORD_ENV = "CTFGEN_PASSWORD"  # noqa: S105 - env var name, not a secret
 
-PLATFORM_AREAS = frozenset({"auth"})
-
-
-# -- shared plumbing ---------------------------------------------------------
-
-
-def _add_global_options(parser: argparse.ArgumentParser) -> None:
-    parser.add_argument(
-        "--api-url",
-        default=None,
-        help=f"Platform API base URL (env {_API_URL_ENV}, default {DEFAULT_API_URL})",
-    )
-    parser.add_argument(
-        "--json",
-        action="store_true",
-        help="Emit raw JSON instead of a table",
-    )
-    # NOTE: there is deliberately NO --token flag. A bearer on the command line
-    # leaks via `ps`/`/proc/<pid>/cmdline`/shell history -- the same reason the
-    # password is never a flag. The CI escape hatch is the CTFGEN_API_TOKEN env
-    # var only (see _token_override).
-
-
-def _token_override(args: argparse.Namespace) -> str | None:
-    # Env-only (never argv): a CI token supplied out-of-band, bypassing the stored
-    # session. Its holder chose the target explicitly, so no origin guard applies.
-    return os.environ.get(_TOKEN_ENV)
-
-
-def _guard_stored_origin(
-    args: argparse.Namespace, stored: Session | None, override: str | None, api_url: str
-) -> None:
-    """Refuse to send the STORED session bearer to an origin other than the one it
-    was issued for. Only relevant when the stored token is what will be sent (no
-    env override); an explicit --api-url that differs from the stored origin is a
-    hard error, so a live credential is never shipped to another host."""
-    if override is not None or stored is None or not args.api_url:
-        return
-    if api_url.rstrip("/") != (stored.api_url or "").rstrip("/"):
-        raise CliError(
-            f"the stored session is for {stored.api_url}; refusing to send it to "
-            f"{api_url}. Run 'ctfgen auth login --api-url {api_url}' there first, "
-            f"or supply {_TOKEN_ENV} for that host."
-        )
-
-
-def _resolve_api_url(args: argparse.Namespace, *, stored: Session | None = None) -> str:
-    """Resolve the API URL: an explicit ``--api-url`` wins, then the stored
-    session's URL (so ``whoami``/``logout`` target the server you logged into),
-    then ``$CTFGEN_API_URL``, then the built-in default."""
-    if args.api_url:
-        return args.api_url.rstrip("/")
-    if stored is not None and stored.api_url:
-        return stored.api_url.rstrip("/")
-    return os.environ.get(_API_URL_ENV, DEFAULT_API_URL).rstrip("/")
+# The ``auth`` area (slice 13a) plus every resource area (slice 13b). MUST stay in
+# sync with ``entry._PLATFORM_AREAS`` (the first-token dispatch set).
+PLATFORM_AREAS = frozenset({"auth"}) | AREA_NAMES
 
 
 def _store() -> TokenStore:
@@ -230,6 +181,9 @@ def build_parser() -> argparse.ArgumentParser:
     whoami = verbs.add_parser("whoami", help="Show the current principal.")
     _add_global_options(whoami)
     whoami.set_defaults(func=_cmd_whoami)
+
+    # Resource areas (slice 13b): competition/team/user/challenge-def/...
+    register_all(areas)
 
     return parser
 

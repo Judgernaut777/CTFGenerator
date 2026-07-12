@@ -23,9 +23,28 @@ from __future__ import annotations
 import sys
 
 # The platform areas whose first token routes to the HTTP CLI. Kept in sync with
-# ``platform.PLATFORM_AREAS`` but declared here WITHOUT importing platform (which
-# pulls in httpx) so the legacy path never triggers that import.
-_PLATFORM_AREAS = frozenset({"auth"})
+# ``platform.PLATFORM_AREAS`` (asserted by a unit test) but declared here as
+# LITERALS -- WITHOUT importing platform/commands (which pull in httpx) -- so the
+# legacy generator path never triggers that import. None of these may collide
+# with a legacy generator command name (verified against cli.py; note the legacy
+# ``scoreboard`` command, so scoreboard is a verb under ``competition``, not an
+# area of its own).
+_PLATFORM_AREAS = frozenset(
+    {
+        "auth",
+        "competition",
+        "team",
+        "user",
+        "challenge-def",
+        "challenge-version",
+        "publication",
+        "submission",
+        "instance",
+        "job",
+        "build",
+        "system",
+    }
+)
 
 
 def main(argv: list[str] | None = None) -> int:
