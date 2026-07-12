@@ -12,8 +12,13 @@ These are the POINT of the slice. Against real PostgreSQL they prove:
 * SYSTEM POSITIVE CONTROL: an admin / support system role CAN act across
   competitions.
 * INSTANCE-BY-ID: a caller with instance:operate in A cannot stop/reset/delete an
-  instance belonging to B (403), and GET /instances does not leak B's instances to
-  an A-only caller.
+  instance belonging to B -- and, because those routes resolve tenancy from the
+  loaded row (no {competition_id} in the path), a cross-tenant denial surfaces as a
+  generic 404 (no existence/competition-id leak), not a 403. GET /instances does
+  not leak B's instances to an A-only caller.
+* PER-PERMISSION SCOPING: a B member that LACKS a specific competition permission is
+  denied on THAT route because of the missing permission (not merely "no authority
+  in B"), while its reads that B-membership does grant still succeed.
 * DENIED AUDIT: a 403 attempt yields exactly one 'denied' audit record with the
   right actor/target and no secret.
 
@@ -78,6 +83,15 @@ _ORG_A = "orgAtoken"  # noqa: S105 - test fixture token, not a real secret
 _ORG_B = "orgBtoken"  # noqa: S105 - test fixture token, not a real secret
 _RED_A = "redAtoken"  # noqa: S105 - test fixture token, not a real secret
 _RED_B = "redBtoken"  # noqa: S105 - test fixture token, not a real secret
+# An observer of B: a REAL member of B (holds competition/team/challenge/scoreboard
+# READ there) that LACKS every competition WRITE/privileged permission -- so a
+# denial on those routes is attributable to the SPECIFIC missing permission, not to
+# "no authority in B at all".
+_OBS_B = "obsBtoken"  # noqa: S105 - test fixture token, not a real secret
+# An authenticated caller with NO roles and NO memberships: holds competition:read
+# in no competition, so the per-competition-scoped GET /competitions must 403 it
+# (parity with GET /instances), NOT hand back an empty 200.
+_NOBODY = "nobodytoken"  # noqa: S105 - test fixture token, not a real secret
 
 
 class _RecordingAuditSink:
@@ -136,6 +150,12 @@ def _authenticator() -> StubAuthenticator:
                 "red-b", {"player"}, team="Red",
                 memberships={_B: ("player", "Red")},
             ),
+            # Observer in B only: valid B member, read-only, no write/privileged perms.
+            _OBS_B: principal_for(
+                "obs-b", {"observer"}, memberships={_B: ("observer", None)}
+            ),
+            # No roles, no memberships, no system roles: authorized nowhere.
+            _NOBODY: principal_for("nobody", set()),
         }
     )
 
@@ -269,12 +289,13 @@ class CrossCompetitionDenialTests(unittest.TestCase):
                 ("get", f"/api/v1/competitions/{_B}/scoreboard", {}, None),
                 ("get", f"/api/v1/competitions/{_B}/scoreboard/lag", {}, None),
                 ("get", f"/api/v1/competitions/{_B}/submissions", {}, None),
-                ("get", f"/api/v1/submissions/{sub_b_id}", {}, None),
                 ("get", f"/api/v1/competitions/{_B}/instances", {}, None),
                 ("post", "/api/v1/instances", {},
                  {"competition_id": _B, "team": "Red",
                   "definition_slug": _SLUG, "version_no": 1}),
             ]
+            # These are PATH-competition routes: the {competition_id} is already in
+            # the caller's own request, so a 403 leaks nothing new.
             for method, path, extra, body in probes:
                 kwargs = {"headers": {**_auth(_ORG_A), **extra}}
                 if body is not None:
@@ -282,6 +303,18 @@ class CrossCompetitionDenialTests(unittest.TestCase):
                 r = getattr(client, method)(path, **kwargs)
                 self.assertEqual(r.status_code, 403, f"{method} {path}: {r.text}")
                 self.assertEqual(r.json()["error"]["code"], "forbidden")
+
+            # GET /submissions/{id} is a NON-path-competition route (tenancy resolved
+            # from the loaded row): an unauthorized caller must not learn the row
+            # exists or which competition owns it, so the denial is a GENERIC 404
+            # (no-existence-leak contract), NOT a 403 that names the resource.
+            byid = client.get(
+                f"/api/v1/submissions/{sub_b_id}", headers=_auth(_ORG_A)
+            )
+            self.assertEqual(byid.status_code, 404, byid.text)
+            self.assertEqual(byid.json()["error"]["code"], "not_found")
+            self.assertNotIn(_B, byid.text)  # owning competition_id not disclosed
+            self.assertNotIn(_FLAG, byid.text)
 
     def test_organizer_of_a_still_authorized_in_a(self) -> None:
         # Positive control: the SAME organizer succeeds against its OWN competition.
@@ -366,7 +399,9 @@ class CrossTeamAndCrossCompetitionContestantTests(unittest.TestCase):
 
     def test_same_named_team_in_other_competition_does_not_leak(self) -> None:
         # Red-of-B submits in B; Red-of-A (same team NAME, different competition)
-        # cannot read B's Red submission by id -> 403 (no submission:read in B).
+        # cannot read B's Red submission by id. On this non-path-competition route a
+        # cross-tenant denial is a GENERIC 404 (no-existence-leak): the caller cannot
+        # distinguish "exists in a competition I can't see" from "does not exist".
         with _client_and_db() as (client, db):
             _seed_both(client, db)
             made = client.post(
@@ -378,9 +413,10 @@ class CrossTeamAndCrossCompetitionContestantTests(unittest.TestCase):
             self.assertEqual(made.status_code, 201, made.text)
             b_id = made.json()["submission_id"]
             r = client.get(f"/api/v1/submissions/{b_id}", headers=_auth(_RED_A))
-            self.assertEqual(r.status_code, 403, r.text)
-            self.assertEqual(r.json()["error"]["code"], "forbidden")
+            self.assertEqual(r.status_code, 404, r.text)
+            self.assertEqual(r.json()["error"]["code"], "not_found")
             self.assertNotIn(_FLAG, r.text)
+            self.assertNotIn(_B, r.text)  # owning competition_id not disclosed
 
 
 @unittest.skipUnless(_ENABLED, _SKIP_REASON)
@@ -421,21 +457,23 @@ class InstanceByIdScopingTests(unittest.TestCase):
             _seed_both(client, db)
             iid_b = _seed_instance(db, _B)
 
-            # Org A holds instance:operate in A, NOT in B: every by-id action on an
-            # instance that belongs to B is 403.
+            # Org A holds instance:operate in A, NOT in B. The by-id actions resolve
+            # tenancy from the loaded row (no {competition_id} in the path), so a
+            # cross-tenant denial is a GENERIC 404 -- identical to a nonexistent id --
+            # NOT a 403 that names the instance/competition (no existence oracle).
             for verb in ("stop", "reset", "delete"):
                 r = client.post(
                     f"/api/v1/instances/{iid_b}/{verb}", headers=_auth(_ORG_A)
                 )
-                self.assertEqual(r.status_code, 403, f"{verb}: {r.text}")
-                self.assertEqual(r.json()["error"]["code"], "forbidden")
-            # GET the B instance by id is likewise denied to the A-only organizer.
-            self.assertEqual(
-                client.get(
-                    f"/api/v1/instances/{iid_b}", headers=_auth(_ORG_A)
-                ).status_code,
-                403,
-            )
+                self.assertEqual(r.status_code, 404, f"{verb}: {r.text}")
+                self.assertEqual(r.json()["error"]["code"], "not_found")
+                self.assertNotIn(_B, r.text)  # owning competition_id not disclosed
+            # GET the B instance by id is likewise a generic 404 to the A-only
+            # organizer (no-existence-leak, no competition disclosure).
+            got = client.get(f"/api/v1/instances/{iid_b}", headers=_auth(_ORG_A))
+            self.assertEqual(got.status_code, 404, got.text)
+            self.assertEqual(got.json()["error"]["code"], "not_found")
+            self.assertNotIn(_B, got.text)
             # The organizer of B (rightful owner) CAN stop it.
             self.assertEqual(
                 client.post(
@@ -468,6 +506,137 @@ class InstanceByIdScopingTests(unittest.TestCase):
                 client.get("/api/v1/instances", headers=_auth(_RED_A)).status_code,
                 403,
             )
+
+
+@unittest.skipUnless(_ENABLED, _SKIP_REASON)
+class CompetitionListScopingTests(unittest.TestCase):
+    """GET /competitions is per-competition scoped exactly like GET /instances: a
+    caller sees ONLY the competitions it may read (a system role -> ALL), never every
+    competition's config, and a caller authorized in NO competition is 403 (not an
+    empty 200) -- so competition:read held from ONE competition no longer leaks the
+    full config of every other competition."""
+
+    def test_organizer_of_a_sees_only_a_not_b(self) -> None:
+        with _client_and_db() as (client, db):
+            _seed_both(client, db)
+            r = client.get("/api/v1/competitions", headers=_auth(_ORG_A))
+            self.assertEqual(r.status_code, 200, r.text)
+            ids = {c["competition_id"] for c in r.json()["data"]}
+            self.assertIn(_A, ids)
+            self.assertNotIn(_B, ids)  # B's config does not leak to an A-only caller
+
+    def test_system_admin_sees_all_competitions(self) -> None:
+        with _client_and_db() as (client, db):
+            _seed_both(client, db)
+            r = client.get("/api/v1/competitions", headers=_auth(_ADMIN))
+            self.assertEqual(r.status_code, 200, r.text)
+            ids = {c["competition_id"] for c in r.json()["data"]}
+            self.assertTrue({_A, _B} <= ids)
+
+    def test_caller_authorized_in_no_competition_is_forbidden(self) -> None:
+        # Parity with GET /instances: competition:read in NO competition -> 403, not
+        # an empty 200 that silently hides the deny.
+        with _client_and_db() as (client, db):
+            _seed_both(client, db)
+            self.assertEqual(
+                client.get(
+                    "/api/v1/competitions", headers=_auth(_NOBODY)
+                ).status_code,
+                403,
+            )
+
+
+@unittest.skipUnless(_ENABLED, _SKIP_REASON)
+class PerPermissionScopingTests(unittest.TestCase):
+    """Denial is attributable to a SPECIFIC competition permission, not merely to
+    "the caller has no authority in B at all".
+
+    The observer is a genuine B member (its membership grants competition/team/
+    challenge/scoreboard READ in B), so every WRITE/privileged denial below can only
+    be explained by the route requiring its OWN permission -- a route checking the
+    wrong permission would still let the observer through. Complemented by the
+    5-route no-membership coverage suite (still-valid "no authority" control)."""
+
+    def test_observer_of_b_has_real_authority_in_b(self) -> None:
+        # Positive control: the observer really IS a member of B (reads succeed), so
+        # the write/privileged denials in the next test are NOT "no standing in B".
+        with _client_and_db() as (client, db):
+            _seed_both(client, db)
+            for path in (
+                f"/api/v1/competitions/{_B}",
+                f"/api/v1/teams?competition_id={_B}",
+                f"/api/v1/competitions/{_B}/scoreboard",
+            ):
+                r = client.get(path, headers=_auth(_OBS_B))
+                self.assertEqual(r.status_code, 200, f"{path}: {r.text}")
+
+    def test_observer_of_b_denied_only_the_permissions_it_lacks(self) -> None:
+        # A valid B member that LACKS the tested permission -> 403 BECAUSE of that
+        # specific permission (proves each route enforces its own competition perm).
+        with _client_and_db() as (client, db):
+            _seed_both(client, db)
+            etag_b = _competition_etag(client, _B)
+            # (permission-under-test, method, path, extra headers, body)
+            probes = [
+                ("competition:write", "patch", f"/api/v1/competitions/{_B}",
+                 {"If-Match": etag_b}, {"name": "hijacked"}),
+                ("team:write", "post", "/api/v1/teams", {},
+                 {"competition_id": _B, "name": "Green"}),
+                ("publication:write", "post",
+                 f"/api/v1/competitions/{_B}/publications", {},
+                 {"definition_slug": _SLUG, "version_no": 1}),
+                ("publication:read", "get",
+                 f"/api/v1/competitions/{_B}/publications", {}, None),
+                ("submission:read", "get",
+                 f"/api/v1/competitions/{_B}/submissions", {}, None),
+                ("submission:create", "post",
+                 f"/api/v1/competitions/{_B}/submissions", {},
+                 {"team": "Red", "definition_slug": _SLUG, "version_no": 1,
+                  "answer": "nope"}),
+                ("scoreboard:lag", "get",
+                 f"/api/v1/competitions/{_B}/scoreboard/lag", {}, None),
+                ("instance:read", "get",
+                 f"/api/v1/competitions/{_B}/instances", {}, None),
+                ("instance:operate", "post", "/api/v1/instances", {},
+                 {"competition_id": _B, "team": "Red",
+                  "definition_slug": _SLUG, "version_no": 1}),
+            ]
+            for perm, method, path, extra, body in probes:
+                kwargs = {"headers": {**_auth(_OBS_B), **extra}}
+                if body is not None:
+                    kwargs["json"] = body
+                r = getattr(client, method)(path, **kwargs)
+                self.assertEqual(
+                    r.status_code, 403, f"{perm} via {method} {path}: {r.text}"
+                )
+                self.assertEqual(r.json()["error"]["code"], "forbidden")
+
+    def test_no_membership_denied_on_previously_uncovered_scoped_routes(self) -> None:
+        # Coverage completion for the 5 competition-scoped routes the organizer
+        # write-suite did not probe cross-competition. Org A holds NO membership in
+        # B -> each is denied (still-valid "no authority at all" control). Every one
+        # carries {competition_id} in the PATH/query, so a 403 leaks nothing new.
+        with _client_and_db() as (client, db):
+            _seed_both(client, db)
+            probes = [
+                # competition:read
+                ("get", f"/api/v1/competitions/{_B}", None),
+                # team:read (query form)
+                ("get", f"/api/v1/teams?competition_id={_B}", None),
+                # team:read (path form)
+                ("get", f"/api/v1/teams/{_B}/Red", None),
+                # publication:read
+                ("get", f"/api/v1/competitions/{_B}/publications", None),
+                # publication:write (detach)
+                ("delete", f"/api/v1/competitions/{_B}/publications/{_SLUG}/1", None),
+            ]
+            for method, path, body in probes:
+                kwargs = {"headers": _auth(_ORG_A)}
+                if body is not None:
+                    kwargs["json"] = body
+                r = getattr(client, method)(path, **kwargs)
+                self.assertEqual(r.status_code, 403, f"{method} {path}: {r.text}")
+                self.assertEqual(r.json()["error"]["code"], "forbidden")
 
 
 @unittest.skipUnless(_ENABLED, _SKIP_REASON)
