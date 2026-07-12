@@ -18,6 +18,7 @@ from ctf_generator.domain.authoring.models import (
 )
 from ctf_generator.domain.challenges.models import CompetitionConfig
 from ctf_generator.domain.identity.models import Membership, Team, User
+from ctf_generator.domain.ledger.models import LedgerSubmission, ScoreEvent, Solve
 
 from .models import ChallengeBuild as ChallengeBuildRow
 from .models import ChallengeDefinition as ChallengeDefinitionRow
@@ -25,8 +26,16 @@ from .models import ChallengeVersion as ChallengeVersionRow
 from .models import Competition
 from .models import CompetitionChallenge as CompetitionChallengeRow
 from .models import Membership as MembershipRow
+from .models import ScoreEvent as ScoreEventRow
+from .models import Solve as SolveRow
+from .models import Submission as SubmissionRow
 from .models import Team as TeamRow
 from .models import User as UserRow
+
+
+def _as_uuid(value: str) -> uuid.UUID:
+    """Coerce a business id string to a uuid (ledger PKs/refs are uuids)."""
+    return value if isinstance(value, uuid.UUID) else uuid.UUID(value)
 
 
 def to_utc(value: datetime | None) -> datetime | None:
@@ -382,4 +391,130 @@ def challenge_publication_from_orm(
         first_blood_enabled=row.first_blood_enabled,
         first_blood_bonus_points=row.first_blood_bonus_points,
         first_blood_bonus_percent=row.first_blood_bonus_percent,
+    )
+
+
+# --- Ledger aggregates ---------------------------------------------------
+#
+# Submissions/solves/score_events reference competition, team and challenge
+# version by surrogate uuid (resolved by the repository via _resolve). Their
+# business ids (submission_id, solve_id) are uuid strings that map directly to
+# the row PKs. ``*_from_orm`` take the parent business keys read alongside the
+# row. Append-only: there is no existing-row (update) branch.
+
+
+def submission_to_orm(
+    submission: LedgerSubmission,
+    competition_uuid: uuid.UUID,
+    team_uuid: uuid.UUID,
+    version_uuid: uuid.UUID,
+    user_uuid: uuid.UUID | None,
+) -> SubmissionRow:
+    return SubmissionRow(
+        id=_as_uuid(submission.submission_id),
+        competition_id=competition_uuid,
+        team_id=team_uuid,
+        challenge_version_id=version_uuid,
+        user_id=user_uuid,
+        submitted_at=to_utc(submission.submitted_at),
+        correct=submission.correct,
+        instance_seed=submission.instance_seed,
+    )
+
+
+def submission_from_orm(
+    row: SubmissionRow,
+    competition_slug: str,
+    team_name: str,
+    definition_slug: str,
+    version_no: int,
+    submitter_email: str | None,
+) -> LedgerSubmission:
+    return LedgerSubmission(
+        submission_id=str(row.id),
+        competition_id=competition_slug,
+        team_name=team_name,
+        definition_slug=definition_slug,
+        version_no=version_no,
+        submitted_at=row.submitted_at,
+        correct=row.correct,
+        submitter_email=submitter_email,
+        instance_seed=row.instance_seed,
+    )
+
+
+def solve_to_orm(
+    solve: Solve,
+    competition_uuid: uuid.UUID,
+    team_uuid: uuid.UUID,
+    version_uuid: uuid.UUID,
+) -> SolveRow:
+    return SolveRow(
+        id=_as_uuid(solve.solve_id),
+        competition_id=competition_uuid,
+        team_id=team_uuid,
+        challenge_version_id=version_uuid,
+        submission_id=_as_uuid(solve.submission_id),
+        solved_at=to_utc(solve.solved_at),
+        instance_seed=solve.instance_seed,
+    )
+
+
+def solve_from_orm(
+    row: SolveRow,
+    competition_slug: str,
+    team_name: str,
+    definition_slug: str,
+    version_no: int,
+) -> Solve:
+    return Solve(
+        solve_id=str(row.id),
+        competition_id=competition_slug,
+        team_name=team_name,
+        definition_slug=definition_slug,
+        version_no=version_no,
+        submission_id=str(row.submission_id),
+        solved_at=row.solved_at,
+        instance_seed=row.instance_seed,
+    )
+
+
+def score_event_to_orm(
+    event: ScoreEvent,
+    competition_uuid: uuid.UUID,
+    team_uuid: uuid.UUID,
+    version_uuid: uuid.UUID,
+) -> ScoreEventRow:
+    return ScoreEventRow(
+        competition_id=competition_uuid,
+        team_id=team_uuid,
+        challenge_version_id=version_uuid,
+        type=event.type,
+        ts=event.ts,
+        payload=dict(event.payload),
+        submission_id=(
+            _as_uuid(event.submission_id) if event.submission_id is not None else None
+        ),
+        solve_id=_as_uuid(event.solve_id) if event.solve_id is not None else None,
+    )
+
+
+def score_event_from_orm(
+    row: ScoreEventRow,
+    competition_slug: str,
+    team_name: str,
+    definition_slug: str,
+    version_no: int,
+) -> ScoreEvent:
+    return ScoreEvent(
+        competition_id=competition_slug,
+        team_name=team_name,
+        definition_slug=definition_slug,
+        version_no=version_no,
+        type=row.type,
+        ts=row.ts,
+        payload=dict(row.payload),
+        submission_id=str(row.submission_id) if row.submission_id is not None else None,
+        solve_id=str(row.solve_id) if row.solve_id is not None else None,
+        seq=row.seq,
     )

@@ -23,6 +23,7 @@ from sqlalchemy.orm import Mapped, mapped_column
 
 from ...domain.authoring.models import VALID_DECAY_FUNCTIONS, VALID_VERSION_STATES
 from ...domain.identity.models import VALID_ROLES
+from ...domain.ledger.models import VALID_SCORE_EVENT_TYPES
 from .base import Base
 
 # Allowed lifecycle states for a competition row. ``status`` is ORM-managed and
@@ -36,6 +37,9 @@ _ROLE_IN_LIST = ", ".join(f"'{r}'" for r in sorted(VALID_ROLES))
 # Likewise for challenge-version lifecycle states and scoring decay functions.
 _VERSION_STATE_IN_LIST = ", ".join(f"'{s}'" for s in sorted(VALID_VERSION_STATES))
 _DECAY_FUNCTION_IN_LIST = ", ".join(f"'{d}'" for d in sorted(VALID_DECAY_FUNCTIONS))
+_SCORE_EVENT_TYPE_IN_LIST = ", ".join(
+    f"'{t}'" for t in sorted(VALID_SCORE_EVENT_TYPES)
+)
 
 
 class Competition(Base):
@@ -423,4 +427,173 @@ class CompetitionChallenge(Base):
             "first_blood_bonus_percent >= 0", name="first_blood_percent_non_negative"
         ),
         Index("ix_competition_challenges_competition_id", "competition_id"),
+    )
+
+
+class Submission(Base):
+    """Persistent form of the domain ``LedgerSubmission`` -- an append-only
+    answer attempt. ``id`` is the business ``submission_id``. The composite FK
+    ``(team_id, competition_id) -> teams`` guarantees the team belongs to the
+    submission's competition; ``UNIQUE (id, competition_id, team_id,
+    challenge_version_id)`` is the composite-FK target for ``solves`` (so a solve
+    can only reference a submission with a matching tuple). Append-only (a
+    trigger is the backstop)."""
+
+    __tablename__ = "submissions"
+
+    id: Mapped[uuid.UUID] = mapped_column(sa.Uuid, primary_key=True)
+    competition_id: Mapped[uuid.UUID] = mapped_column(
+        sa.Uuid, ForeignKey("competitions.id", ondelete="RESTRICT"), nullable=False
+    )
+    team_id: Mapped[uuid.UUID] = mapped_column(sa.Uuid, nullable=False)
+    challenge_version_id: Mapped[uuid.UUID] = mapped_column(
+        sa.Uuid,
+        ForeignKey("challenge_versions.id", ondelete="RESTRICT"),
+        nullable=False,
+    )
+    user_id: Mapped[uuid.UUID | None] = mapped_column(
+        sa.Uuid, ForeignKey("users.id", ondelete="RESTRICT"), nullable=True
+    )
+    submitted_at: Mapped[datetime] = mapped_column(
+        sa.DateTime(timezone=True), nullable=False
+    )
+    correct: Mapped[bool] = mapped_column(sa.Boolean, nullable=False)
+    instance_seed: Mapped[str | None] = mapped_column(sa.Text, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(
+        sa.DateTime(timezone=True), nullable=False, server_default=sa.func.now()
+    )
+
+    __table_args__ = (
+        UniqueConstraint(
+            "id",
+            "competition_id",
+            "team_id",
+            "challenge_version_id",
+            name="uq_submissions_id_competition_id_team_id_challenge_version_id",
+        ),
+        ForeignKeyConstraint(
+            ["team_id", "competition_id"],
+            ["teams.id", "teams.competition_id"],
+            ondelete="RESTRICT",
+        ),
+        Index(
+            "ix_submissions_competition_id_team_id_submitted_at",
+            "competition_id",
+            "team_id",
+            "submitted_at",
+        ),
+        Index("ix_submissions_challenge_version_id", "challenge_version_id"),
+        Index(
+            "ix_submissions_correct",
+            "competition_id",
+            "challenge_version_id",
+            postgresql_where=sa.text("correct"),
+        ),
+    )
+
+
+class Solve(Base):
+    """Persistent form of the domain ``Solve`` -- the at-most-once accepted
+    result. ``UNIQUE (competition_id, team_id, challenge_version_id)`` is the
+    schema encoding of "one solve per team per challenge per competition";
+    ``UNIQUE (submission_id)`` ties one solve to one submission. The composite FK
+    to ``submissions`` guarantees the referenced submission matches on
+    ``(competition, team, version)``; a trigger additionally requires it to be
+    ``correct``. Append-only."""
+
+    __tablename__ = "solves"
+
+    id: Mapped[uuid.UUID] = mapped_column(sa.Uuid, primary_key=True)
+    competition_id: Mapped[uuid.UUID] = mapped_column(
+        sa.Uuid, ForeignKey("competitions.id", ondelete="RESTRICT"), nullable=False
+    )
+    team_id: Mapped[uuid.UUID] = mapped_column(
+        sa.Uuid, ForeignKey("teams.id", ondelete="RESTRICT"), nullable=False
+    )
+    challenge_version_id: Mapped[uuid.UUID] = mapped_column(
+        sa.Uuid,
+        ForeignKey("challenge_versions.id", ondelete="RESTRICT"),
+        nullable=False,
+    )
+    submission_id: Mapped[uuid.UUID] = mapped_column(sa.Uuid, nullable=False)
+    solved_at: Mapped[datetime] = mapped_column(
+        sa.DateTime(timezone=True), nullable=False
+    )
+    instance_seed: Mapped[str | None] = mapped_column(sa.Text, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(
+        sa.DateTime(timezone=True), nullable=False, server_default=sa.func.now()
+    )
+
+    __table_args__ = (
+        UniqueConstraint(
+            "competition_id",
+            "team_id",
+            "challenge_version_id",
+            name="uq_solves_competition_id_team_id_challenge_version_id",
+        ),
+        UniqueConstraint("submission_id", name="uq_solves_submission_id"),
+        # The referenced submission must match on the whole identity tuple.
+        ForeignKeyConstraint(
+            ["submission_id", "competition_id", "team_id", "challenge_version_id"],
+            [
+                "submissions.id",
+                "submissions.competition_id",
+                "submissions.team_id",
+                "submissions.challenge_version_id",
+            ],
+            ondelete="RESTRICT",
+            name="fk_solves_submission_tuple_submissions",
+        ),
+        Index(
+            "ix_solves_competition_id_challenge_version_id_solved_at",
+            "competition_id",
+            "challenge_version_id",
+            "solved_at",
+        ),
+    )
+
+
+class ScoreEvent(Base):
+    """Persistent form of the domain ``ScoreEvent`` -- the append-only,
+    event-sourced ledger. ``seq`` (identity/bigserial) supplies the strictly
+    monotonic ordering that the in-process store produced with a lock.
+    Append-only (INSERT only; a trigger rejects UPDATE/DELETE)."""
+
+    __tablename__ = "score_events"
+
+    seq: Mapped[int] = mapped_column(
+        sa.BigInteger, sa.Identity(always=True), primary_key=True
+    )
+    competition_id: Mapped[uuid.UUID] = mapped_column(
+        sa.Uuid, ForeignKey("competitions.id", ondelete="RESTRICT"), nullable=False
+    )
+    team_id: Mapped[uuid.UUID] = mapped_column(
+        sa.Uuid, ForeignKey("teams.id", ondelete="RESTRICT"), nullable=False
+    )
+    challenge_version_id: Mapped[uuid.UUID] = mapped_column(
+        sa.Uuid,
+        ForeignKey("challenge_versions.id", ondelete="RESTRICT"),
+        nullable=False,
+    )
+    type: Mapped[str] = mapped_column(sa.Text, nullable=False)
+    ts: Mapped[str] = mapped_column(sa.Text, nullable=False)
+    payload: Mapped[dict] = mapped_column(
+        JSONB, nullable=False, server_default=sa.text("'{}'")
+    )
+    submission_id: Mapped[uuid.UUID | None] = mapped_column(
+        sa.Uuid, ForeignKey("submissions.id", ondelete="RESTRICT"), nullable=True
+    )
+    solve_id: Mapped[uuid.UUID | None] = mapped_column(
+        sa.Uuid, ForeignKey("solves.id", ondelete="RESTRICT"), nullable=True
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        sa.DateTime(timezone=True), nullable=False, server_default=sa.func.now()
+    )
+
+    __table_args__ = (
+        CheckConstraint(
+            f"type IN ({_SCORE_EVENT_TYPE_IN_LIST})", name="type_valid"
+        ),
+        Index("ix_score_events_competition_id_seq", "competition_id", "seq"),
+        Index("ix_score_events_type", "type"),
     )
