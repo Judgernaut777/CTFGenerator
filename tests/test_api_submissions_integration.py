@@ -6,8 +6,12 @@ Covers the contestant loop end to end against real PostgreSQL:
 * a CORRECT answer -> outcome shows solved, and after driving the projector the
   scoreboard GET reflects the solve;
 * an INCORRECT answer -> not solved, no scoreboard change;
-* an idempotent submit replay returns the same outcome;
-* a player CANNOT list/read another team's submissions (403 / 404);
+* an idempotent submit replay returns the same outcome, and the replay is proven
+  to short-circuit at the HTTP layer (a single ``submission.create`` audit event);
+* the same Idempotency-Key + body across two competitions records two distinct
+  submissions (no cross-competition replay);
+* a player CANNOT list/read another team's submissions (403 / 404), and a player
+  with no team is denied on every path (403 submit / 403 list / 404 read);
 * the expected flag never appears in any response body.
 
 SKIPS cleanly without the ``[api]``/``[db]`` extras or ``CTFGEN_TEST_DATABASE_URL``.
@@ -57,10 +61,24 @@ _ENABLED = _IMPORT_ERROR is None and bool(_TEST_URL)
 _ADMIN = "admintoken"  # noqa: S105 - test fixture token, not a real secret
 _RED = "redplayertoken"  # noqa: S105 - test fixture token, not a real secret
 _BLUE = "blueplayertoken"  # noqa: S105 - test fixture token, not a real secret
+_NOTEAM = "noteamplayertoken"  # noqa: S105 - test fixture token, not a real secret
 
 _FLAG = "CTF{the-secret-flag}"
 _CID = "spring-ctf-2026"
+_CID_B = "autumn-ctf-2026"
 _SLUG = "sqli-1"
+
+
+class _RecordingAuditSink:
+    """An in-memory audit sink so tests can assert exactly which privileged
+    actions reached the audit hook (used to prove the HTTP idempotency
+    short-circuit happens BEFORE the service, not just the domain PK dedup)."""
+
+    def __init__(self) -> None:
+        self.events: list[dict[str, str]] = []
+
+    def record(self, event: dict[str, str]) -> None:
+        self.events.append(dict(event))
 
 
 @contextmanager
@@ -93,18 +111,25 @@ def _authenticator() -> StubAuthenticator:
             _ADMIN: principal_for("admin-user", {"admin"}),
             _RED: principal_for("red-player", {"player"}, team="Red"),
             _BLUE: principal_for("blue-player", {"player"}, team="Blue"),
+            # A contestant with the player role but NOT placed on a team: has the
+            # submission permissions, so any denial is the fail-closed tenancy
+            # check, not require_permission.
+            _NOTEAM: principal_for("no-team-player", {"player"}),
         }
     )
 
 
 @contextmanager
-def _client_and_db():
+def _client_and_db(audit_sink=None):
     with _isolated_database() as url:
         command.upgrade(_alembic_config(url), "head")
         db = Database(DatabaseConfig(url=url))
         try:
             app = create_app(
-                ApiSettings(), database=db, authenticator=_authenticator()
+                ApiSettings(),
+                database=db,
+                authenticator=_authenticator(),
+                audit_sink=audit_sink,
             )
             yield TestClient(app), db
         finally:
@@ -161,6 +186,32 @@ def _seed(client: TestClient, db: Database) -> None:
         SqlAlchemyChallengePublicationRepository(session).add(
             ChallengePublication(
                 competition_id=_CID, definition_slug=_SLUG, version_no=1
+            )
+        )
+
+
+def _seed_extra_competition(
+    client: TestClient, db: Database, cid: str, name: str
+) -> None:
+    """A SECOND competition + Red/Blue teams, sharing the already-published
+    challenge from :func:`_seed` (definition/version are global) by attaching a
+    fresh publication for this competition."""
+    body = _competition_body()
+    body["competition_id"] = cid
+    body["name"] = name
+    assert client.post(
+        "/api/v1/competitions", headers=_auth(), json=body
+    ).status_code == 201
+    for team in ("Red", "Blue"):
+        assert client.post(
+            "/api/v1/teams",
+            headers=_auth(),
+            json={"competition_id": cid, "name": team},
+        ).status_code == 201
+    with db.session_scope() as session:
+        SqlAlchemyChallengePublicationRepository(session).add(
+            ChallengePublication(
+                competition_id=cid, definition_slug=_SLUG, version_no=1
             )
         )
 
@@ -320,6 +371,105 @@ class SubmissionsApiIntegrationTests(unittest.TestCase):
             r = _submit(client, _RED, _FLAG, team="Blue")
             self.assertEqual(r.status_code, 403, r.text)
             self.assertEqual(r.json()["error"]["code"], "forbidden")
+
+    def test_teamless_player_is_denied_fail_closed(self) -> None:
+        # FIX-A regression: a player principal with no team must be denied on
+        # EVERY submission path (403 submit, 403 list, 404 cross-read) -- never
+        # fall through to "unrestricted" and read/submit for arbitrary teams.
+        with _client_and_db() as (client, db):
+            _seed(client, db)
+            # A real Red submission the teamless player must not be able to reach.
+            red = _submit(client, _RED, _FLAG)
+            self.assertEqual(red.status_code, 201, red.text)
+            red_id = red.json()["submission_id"]
+
+            # POST submit -> 403 (not placed on a team).
+            post = _submit(client, _NOTEAM, _FLAG)
+            self.assertEqual(post.status_code, 403, post.text)
+            self.assertEqual(post.json()["error"]["code"], "forbidden")
+
+            # GET list -> 403 (cannot see any team's rows).
+            listing = client.get(
+                f"/api/v1/competitions/{_CID}/submissions", headers=_auth(_NOTEAM)
+            )
+            self.assertEqual(listing.status_code, 403, listing.text)
+            self.assertEqual(listing.json()["error"]["code"], "forbidden")
+
+            # GET another team's submission by id -> 404 (never confirm existence).
+            cross = client.get(
+                f"/api/v1/submissions/{red_id}", headers=_auth(_NOTEAM)
+            )
+            self.assertEqual(cross.status_code, 404, cross.text)
+            self.assertEqual(cross.json()["error"]["code"], "not_found")
+
+            # The expected flag never leaks on any denied path.
+            self.assertNotIn(_FLAG, listing.text)
+            self.assertNotIn(_FLAG, cross.text)
+
+    def test_cross_competition_idempotency_isolation(self) -> None:
+        # FIX-B regression: the SAME principal + SAME Idempotency-Key + identical
+        # body POSTed to two DIFFERENT competitions must record two distinct
+        # submissions -- B must NOT replay A's stored 201.
+        with _client_and_db() as (client, db):
+            _seed(client, db)
+            _seed_extra_competition(client, db, _CID_B, "Autumn CTF 2026")
+
+            body = {
+                "team": "Red",
+                "definition_slug": _SLUG,
+                "version_no": 1,
+                "answer": _FLAG,
+            }
+            a = client.post(
+                f"/api/v1/competitions/{_CID}/submissions",
+                headers={**_auth(_RED), "Idempotency-Key": "shared-key"},
+                json=body,
+            )
+            self.assertEqual(a.status_code, 201, a.text)
+            b = client.post(
+                f"/api/v1/competitions/{_CID_B}/submissions",
+                headers={**_auth(_RED), "Idempotency-Key": "shared-key"},
+                json=body,
+            )
+            self.assertEqual(b.status_code, 201, b.text)
+
+            # Two distinct submissions, each under its own competition.
+            self.assertNotEqual(
+                a.json()["submission_id"], b.json()["submission_id"]
+            )
+            self.assertEqual(a.json()["competition_id"], _CID)
+            self.assertEqual(b.json()["competition_id"], _CID_B)
+
+            # B's row is recorded under competition B (not silently dropped).
+            listing = client.get(
+                f"/api/v1/competitions/{_CID_B}/submissions", headers=_auth(_RED)
+            )
+            self.assertEqual(listing.status_code, 200, listing.text)
+            self.assertEqual(
+                [s["submission_id"] for s in listing.json()["data"]],
+                [b.json()["submission_id"]],
+            )
+            self.assertNotIn(_FLAG, b.text)
+
+    def test_idempotent_replay_is_http_layer_not_pk_dedup(self) -> None:
+        # FIX-D: prove the second identical call short-circuits at the HTTP replay
+        # layer BEFORE the service -- so only ONE submission.create audit event is
+        # emitted for two identical calls. If replay() were removed, the second
+        # call would reach the service (and the audit hook) and record twice.
+        sink = _RecordingAuditSink()
+        with _client_and_db(audit_sink=sink) as (client, db):
+            _seed(client, db)
+            first = _submit(client, _RED, _FLAG, idem="only-once")
+            self.assertEqual(first.status_code, 201, first.text)
+            second = _submit(client, _RED, _FLAG, idem="only-once")
+            self.assertEqual(second.status_code, 201, second.text)
+            self.assertEqual(
+                second.json()["submission_id"], first.json()["submission_id"]
+            )
+            creates = [
+                e for e in sink.events if e.get("action") == "submission.create"
+            ]
+            self.assertEqual(len(creates), 1, sink.events)
 
 
 if __name__ == "__main__":  # pragma: no cover
