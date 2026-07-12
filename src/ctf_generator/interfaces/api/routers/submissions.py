@@ -42,7 +42,6 @@ from ..pagination import clamp_limit, paginate
 from ..schemas.common import ERROR_RESPONSES
 from ..schemas.submissions import (
     SubmissionCreateRequest,
-    SubmissionListItem,
     SubmissionResponse,
     submission_concurrency_payload,
     submission_detail_to_response,
@@ -89,13 +88,20 @@ def submit_answer(
     principal: Principal = Depends(require_permission(Permission.SUBMISSION_CREATE)),
     service=Depends(get_submission_processing_service),
 ):
-    # Tenancy: a team-scoped principal may submit only for its own team.
-    scope = submission_team_scope(principal)
-    if scope is not None and body.team != scope:
-        raise AuthorizationError("may only submit for your own team")
+    # Tenancy: a team-scoped principal may submit only for its own team; a
+    # team-scoped principal not placed on a team is denied (fail closed).
+    access = submission_team_scope(principal)
+    if not access.unrestricted:
+        if access.team is None:
+            raise AuthorizationError("not placed on a team")
+        if body.team != access.team:
+            raise AuthorizationError("may only submit for your own team")
 
     body_json = body.model_dump(mode="json")
-    idem_scope = f"{principal.subject}:{_CREATE_SCOPE}"
+    # Scope the HTTP-layer idempotency by competition so it aligns with the
+    # domain submission_id (which also folds in competition_id): the same key +
+    # body POSTed to two different competitions must NOT replay across them.
+    idem_scope = f"{principal.subject}:{_CREATE_SCOPE}:{competition_id}"
     replayed = replay(request, idem_scope, body_json)
     if replayed is not None:
         return replayed
@@ -135,7 +141,6 @@ def submit_answer(
     "/competitions/{competition_id}/submissions",
     response_model=None,
     responses={
-        200: {"model": SubmissionListItem, "description": "OK"},
         **{k: ERROR_RESPONSES[k] for k in (400, 401, 403, 404, 422, 429)},
     },
 )
@@ -149,8 +154,8 @@ def list_submissions(
     principal: Principal = Depends(require_permission(Permission.SUBMISSION_READ)),
     service=Depends(get_submission_query_service),
 ):
-    scope = submission_team_scope(principal)
-    if scope is None:
+    access = submission_team_scope(principal)
+    if access.unrestricted:
         # Tenancy-unrestricted: an optional team filter, else the whole competition.
         submissions = (
             service.list_for_team(competition_id, team)
@@ -158,12 +163,13 @@ def list_submissions(
             else service.list_for_competition(competition_id)
         )
     else:
-        # Team-scoped: confined to the principal's own team.
-        if not scope:
+        # Team-scoped: confined to the principal's own team; a principal not
+        # placed on a team is denied (fail closed).
+        if access.team is None:
             raise AuthorizationError("principal is not placed on a team")
-        if team is not None and team != scope:
+        if team is not None and team != access.team:
             raise AuthorizationError("may only list your own team's submissions")
-        submissions = service.list_for_team(competition_id, scope)
+        submissions = service.list_for_team(competition_id, access.team)
 
     submissions = sorted(submissions, key=_list_sort_key)
     page = paginate(submissions, key=_list_sort_key, limit=limit, cursor=cursor)
@@ -194,9 +200,12 @@ def get_submission(
     if detail is None:
         raise LookupError(f"submission not found: {submission_id!r}")
     submission, solve = detail
-    scope = submission_team_scope(principal)
-    if scope is not None and submission.team_name != scope:
-        # Cross-tenant: 404 (never confirm existence to a principal not entitled).
+    access = submission_team_scope(principal)
+    if not access.unrestricted and (
+        access.team is None or submission.team_name != access.team
+    ):
+        # Cross-tenant (or teamless): 404 -- never confirm existence to a
+        # principal not entitled to see the row.
         raise LookupError(f"submission not found: {submission_id!r}")
     envelope = resource_envelope(
         SUBMISSION_SCHEMA, submission_detail_to_response(submission, solve)
