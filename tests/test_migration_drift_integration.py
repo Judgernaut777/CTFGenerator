@@ -127,9 +127,14 @@ class MigrationDriftTests(unittest.TestCase):
                 self.assertEqual(tables, ["alembic_version"])
                 self.assertEqual(functions, [])  # no leftover trigger functions
                 command.upgrade(cfg, "head")
-                self.assertIn(
-                    "jobs", sa.inspect(engine).get_table_names()
-                )
+                head_tables = set(sa.inspect(engine).get_table_names())
+                self.assertIn("jobs", head_tables)
+                # M10a auth tables are present at head and dropped cleanly on
+                # downgrade (they must not appear in the "clean database" set
+                # above -- proven by the ["alembic_version"] assertion).
+                self.assertIn("auth_credentials", head_tables)
+                self.assertIn("sessions", head_tables)
+                self.assertIn("user_system_roles", head_tables)
             finally:
                 engine.dispose()
 
