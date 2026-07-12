@@ -6,20 +6,20 @@ principal-scoped idempotency, rate limiting, and an audit hook. The following ar
 **intentionally deferred** and recorded here so they are not silent gaps. None of
 them is closed by weakening a design — each is an additive M10 wiring change.
 
-- **Tenancy / resource-ownership authorization (IDOR-class) — deferred to M10.**
-  `require_permission` enforces only the coarse role→permission matrix (see
-  `deps.ROLE_PERMISSIONS`). Per-org / per-team ownership of a specific resource is
-  **not** yet enforced: any principal with `competition:write` can PATCH any
-  competition. The `Principal` already carries `org` / `team`; only the
-  enforcement wiring (scoping each query/mutation to the caller's tenant) is
-  deferred to the M10 auth milestone.
+- **Tenancy / resource-ownership authorization (IDOR-class) — RESOLVED (M10b).**
+  Competition-tier permissions are now authorized against the TARGET competition
+  via the caller's per-competition membership, not the flat role union: an
+  `organizer` of competition A is `403` on `competition:write` (and `team:write`,
+  `publication:write`, `submission:read`, `scoreboard`, `instance:operate`)
+  against competition B. See the *M10 slice b* section below; the check lives in
+  `deps.require_competition_permission` / `deps.assert_competition_permission`.
 
-- **Audit of DENIED / errored privileged attempts — deferred to M10.** Only
-  successful mutations are audited today (`record_audit(..., outcome="success")`
-  on the happy path). The `AuditSink` contract already accepts `"denied"` /
-  `"error"` outcomes; emitting an audit event on an authz denial or a failed
-  mutation becomes first-class in M10, where authorization denial is a modelled
-  event.
+- **Audit of DENIED / errored privileged attempts — RESOLVED (M10b).** A thin
+  seam in the exception handlers (`errors._emit_denied_audit`) now records an
+  `AuditSink` event with `outcome="denied"` on every `AuthorizationError` (403)
+  and `AuthenticationError` (401) — `actor` is the resolved principal subject
+  (else `anonymous`), `action` the HTTP method, `target` the request PATH. It
+  never records the query string, request body, or token. See *M10 slice b*.
 
 - **ETag is a content validator, not a row version — intentional for slice-a.**
   The catalog tables carry no monotonic `version` / `updated_at` column, so the
@@ -36,18 +36,17 @@ scoreboard) on the same foundation. Its authorization is still coarse; the
 following are recorded so they are not silent gaps, and each closes with M10 auth
 wiring, not by weakening a design.
 
-- **Submission tenancy is team-scope only (name-based) — hardened in M10.**
-  `submission_team_scope` confines a `player`/`captain` principal to its own
-  `Principal.team` (a team *name*); organizer/admin/staff are unrestricted. A
-  team-scoped principal that is not placed on a team is **denied entirely** (fail
-  closed): it cannot submit (403), cannot list (403), and cannot read another
-  team's submission by id (404) — it is never treated as unrestricted. The
-  team name is not yet validated to belong to the competition in the path (the
-  `Principal` carries a bare team string, not a `(competition, team)` pair), so a
-  player whose `Principal.team` matches a same-named team in a different
-  competition could read that competition's team submissions. Full
-  `(org, competition, team)` resource-ownership scoping lands in M10; the coarse
-  team-name confinement here is what the current `Principal` can express.
+- **Submission tenancy is now per-competition — RESOLVED (M10b).**
+  `submission_team_scope(principal, competition_id)` derives the caller's team
+  from its membership IN THAT COMPETITION (`memberships[competition_id]`), not a
+  flat `Principal.team`. A `player`/`captain` is confined to its team in that
+  competition; an organizer-of-this-competition / admin / staff is unrestricted
+  within it; a team-scoped caller not placed on a team there is **denied
+  entirely** (fail closed: 403 submit, 403 list, 404 read-by-id). The same-named
+  team leak is closed: a player of team Red in competition X has NO standing in
+  competition Y (a same-named Y team is unreachable — `403` cross-competition,
+  before the per-team check). Cross-team WITHIN a competition still returns `404`
+  on read-by-id (never confirm existence to a same-competition non-owner).
 
 - **User registration `role` is validated, not persisted — by design this slice.**
   `POST /users` validates the requested `role` against `VALID_ROLES` (422 on an
@@ -145,20 +144,19 @@ this closed and what it explicitly did **not**:
   survives only behind the explicit `CTFGEN_API_INSECURE_STUB_AUTH=1` dev flag.
   `/auth/login`, `/auth/refresh`, `/auth/logout`, `/auth/me` ship.
 
-- **Authorization is still the coarse flat role→permission matrix — DEFERRED to
-  M10b.** The `Principal` now also carries `system_roles` and a `memberships`
-  mapping (`competition_id → (role, team_name)`), populated best-effort. But
-  `require_permission` still resolves over the **flat union** of all the caller's
-  roles (unchanged `ROLE_PERMISSIONS`): a user who is `organizer` in competition A
-  can still exercise `competition:write` against competition B. Per-competition
-  role scoping + cross-resource tenancy enforcement (IDOR-class, the bullet
-  above) is **M10 slice b**, which consumes `Principal.memberships` — no wire
-  change.
+- **Per-competition authorization — RESOLVED (M10b).** The `Principal`'s
+  `system_roles` + `memberships` (`competition_id → (role, team_name)`) are now
+  the inputs a COMPETITION-tier authorization decision is resolved over. The flat
+  `require_permission` still gates SYSTEM (`user:*` / `job:*`) and AUTHORING
+  (`challenge:*` / `build:*`) permissions (deliberately unchanged); COMPETITION
+  permissions go through `require_competition_permission`, which consults the
+  caller's effective role IN the target competition (its membership there ∪ its
+  system roles) — so an `organizer` of A can no longer exercise `competition:write`
+  against B. No wire change.
 
-- **Submission tenancy still reads `Principal.team` (single best-effort team) —
-  hardened in M10b.** `DbAuthenticator` populates `Principal.team` from the
-  caller's first team-placed membership. Full per-competition team scoping lands
-  with M10b tenancy.
+- **Submission tenancy is per-competition — RESOLVED (M10b).** See the slice-b
+  residual-gaps section above; `submission_team_scope` now derives the team from
+  the membership in the target competition, not `Principal.team`.
 
 - **Federated identity (OIDC/SSO) — DEFERRED to M10c.** Only local password
   credentials exist this slice. SAML is a permanent non-goal (REQ-PLAT-012); OIDC
@@ -168,3 +166,53 @@ this closed and what it explicitly did **not**:
   enforces a minimum length; composition rules, breach-list checks, lockout /
   throttling beyond the shared rate-limit middleware, and password-reset flows are
   out of scope for slice a.
+
+## M10 slice b (per-competition tenancy / authorization) — landed, and what remains
+
+Slice b closes the two IDOR-class deferrals above by consuming
+`Principal.memberships`. Authorization is now classified into three tiers
+(`deps.PERMISSION_SCOPE`, kept total + fail-closed at import):
+
+- **SYSTEM** (`user:*`, `job:*`) — deployment-global; a system role
+  (`admin`/`support`). Enforced by the flat `require_permission` (unchanged).
+- **AUTHORING** (`challenge:*`, `build:*`) — platform-global challenge authoring,
+  independent of any competition. Also enforced by the flat `require_permission`
+  (unchanged): an author/organizer authors challenges without a competition
+  context.
+- **COMPETITION** (`competition:*`, `team:*`, `submission:*`, `scoreboard:*`,
+  `publication:*`, `instance:*`) — scoped to the TARGET competition via
+  `require_competition_permission` / `assert_competition_permission`, which
+  resolve the caller's effective role IN that competition (its membership there ∪
+  its system roles). A system role is authorized in every competition; everyone
+  else only where it holds a membership.
+
+Design choices worth recording:
+
+- **Create / list of a competition stay flat — by design.** `POST /competitions`
+  and `GET /competitions` carry no `{competition_id}` path param (the competition
+  does not exist yet / the list spans all), so they remain on the flat
+  `require_permission(competition:*)`: creating a NEW competition cannot be scoped
+  to a pre-existing membership. Membership assignment (who becomes the organizer of
+  a freshly created competition) is the membership surface (M9c/M11).
+
+- **Body/query-scoped routes authorize in the handler.** Where the target
+  competition is in the body (`POST /teams`, `POST /instances`) or a query param
+  (`GET /teams?competition_id=…`), the thin handler calls the shared
+  `assert_competition_permission` on that competition id. Where it is a property of
+  a resource addressed by its own id (`GET /submissions/{id}`, the instance-by-id
+  actions), the handler loads the resource, resolves its `competition_id`, and
+  authorizes BEFORE returning/mutating.
+
+- **Cross-competition operator LIST is filtered, not blanket-allowed — SAFE
+  choice.** `GET /instances` (the only cross-competition list) filters its result
+  to `deps.authorized_competitions(...)`: a system role sees every instance; anyone
+  else sees only the competitions where a membership grants `instance:read`, so no
+  other competition's rows leak. A caller with the permission NOWHERE gets `403`
+  (not an empty `200`).
+
+- **Denied/errored attempts are audited.** `errors._emit_denied_audit` records one
+  `outcome="denied"` `AuditSink` event per 401/403, carrying only
+  actor/action(method)/target(path) — never a secret. The persistent audit-event
+  READ API remains DEFERRED-TO-M16 (see slice-c above); slice b only emits.
+
+- **Federated identity (OIDC/SSO) — still DEFERRED to M10c.** Unchanged by slice b.

@@ -80,7 +80,10 @@ def _alembic_config(url) -> AlembicConfig:
 def _authenticator() -> StubAuthenticator:
     return StubAuthenticator(
         {
-            _ADMIN: principal_for("admin-user", {"admin"}),
+            # Builds are an AUTHORING surface (flat require_permission, unchanged in
+            # M10b): an author/organizer builds challenges independent of any
+            # competition, so no membership is needed here.
+            _ADMIN: principal_for("admin-user", {"admin"}, system_roles={"admin"}),
             _ORGANIZER: principal_for("org-user", {"organizer"}),
             _PLAYER: principal_for("player-user", {"player"}, team="Red"),
         }

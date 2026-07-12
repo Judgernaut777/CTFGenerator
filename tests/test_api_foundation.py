@@ -22,10 +22,17 @@ try:  # the [api] extra (and the [db] layer it imports) are optional
     from ctf_generator.interfaces.api.app import create_app
     from ctf_generator.interfaces.api.concurrency import compute_etag, etags_match
     from ctf_generator.interfaces.api.deps import (
+        PERMISSION_SCOPE,
         Permission,
+        PermissionScope,
         StubAuthenticator,
+        assert_competition_permission,
+        authorized_competitions,
+        competition_permissions,
         principal_for,
+        require_competition_permission,
         require_permission,
+        submission_team_scope,
     )
     from ctf_generator.interfaces.api.envelopes import error_envelope
     from ctf_generator.interfaces.api.errors import register_exception_handlers
@@ -353,6 +360,107 @@ class RequirePermissionTests(unittest.TestCase):
             auth.authenticate(None)
         with self.assertRaises(AuthenticationError):
             auth.authenticate("bogus")
+
+
+@unittest.skipIf(_SKIP, _REASON)
+class PermissionScopeMapTests(unittest.TestCase):
+    def test_scope_map_is_total_over_every_permission(self) -> None:
+        # Fail-closed: a newly added Permission with no scope classification must
+        # make this test (and the import-time guard in deps) fail, so it can never
+        # silently default to a weaker check.
+        self.assertEqual(set(PERMISSION_SCOPE), set(Permission))
+        for scope in PERMISSION_SCOPE.values():
+            self.assertIsInstance(scope, PermissionScope)
+
+    def test_system_and_authoring_and_competition_partition(self) -> None:
+        by_scope: dict[PermissionScope, set[Permission]] = {s: set() for s in PermissionScope}
+        for perm, scope in PERMISSION_SCOPE.items():
+            by_scope[scope].add(perm)
+        self.assertEqual(
+            by_scope[PermissionScope.SYSTEM],
+            {Permission.USER_READ, Permission.USER_WRITE,
+             Permission.JOB_READ, Permission.JOB_OPERATE},
+        )
+        self.assertIn(Permission.CHALLENGE_WRITE, by_scope[PermissionScope.AUTHORING])
+        self.assertIn(Permission.BUILD_CREATE, by_scope[PermissionScope.AUTHORING])
+        self.assertIn(
+            Permission.COMPETITION_WRITE, by_scope[PermissionScope.COMPETITION]
+        )
+        self.assertIn(Permission.INSTANCE_OPERATE, by_scope[PermissionScope.COMPETITION])
+
+
+@unittest.skipIf(_SKIP, _REASON)
+class ScopedAuthorizationTests(unittest.TestCase):
+    def _organizer_of(self, cid: str):
+        return principal_for("org", {"organizer"}, memberships={cid: ("organizer", None)})
+
+    def test_organizer_of_a_denied_scoped_permission_in_b(self) -> None:
+        org = self._organizer_of("A")
+        # Allowed in its own competition...
+        assert_competition_permission(org, "A", Permission.COMPETITION_WRITE)
+        # ...denied in another (its flat role no longer leaks authority).
+        with self.assertRaises(AuthorizationError):
+            assert_competition_permission(org, "B", Permission.COMPETITION_WRITE)
+
+    def test_system_role_authorized_in_every_competition(self) -> None:
+        admin = principal_for("a", {"admin"}, system_roles={"admin"})
+        for cid in ("A", "B", "anything"):
+            assert_competition_permission(admin, cid, Permission.COMPETITION_WRITE)
+            self.assertIn(
+                Permission.INSTANCE_OPERATE, competition_permissions(admin, cid)
+            )
+
+    def test_missing_competition_id_fails_closed(self) -> None:
+        admin = principal_for("a", {"admin"}, system_roles={"admin"})
+        with self.assertRaises(AuthorizationError):
+            assert_competition_permission(admin, None, Permission.COMPETITION_READ)
+
+    def test_require_competition_permission_reads_path_param(self) -> None:
+        dep = require_competition_permission(Permission.TEAM_WRITE)
+        org = self._organizer_of("A")
+
+        class _Req:
+            path_params = {"competition_id": "A"}
+
+        self.assertIs(dep(_Req(), principal=org), org)
+
+        class _ReqB:
+            path_params = {"competition_id": "B"}
+
+        with self.assertRaises(AuthorizationError):
+            dep(_ReqB(), principal=org)
+
+    def test_authorized_competitions_none_for_system_else_membership_set(self) -> None:
+        admin = principal_for("a", {"admin"}, system_roles={"admin"})
+        self.assertIsNone(authorized_competitions(admin, Permission.INSTANCE_READ))
+        org = self._organizer_of("A")
+        self.assertEqual(
+            authorized_competitions(org, Permission.INSTANCE_READ), frozenset({"A"})
+        )
+        player = principal_for("p", {"player"}, memberships={"A": ("player", "Red")})
+        # A player holds instance:read nowhere.
+        self.assertEqual(
+            authorized_competitions(player, Permission.INSTANCE_READ), frozenset()
+        )
+
+    def test_submission_team_scope_is_per_competition(self) -> None:
+        player = principal_for(
+            "p", {"player"},
+            memberships={"A": ("player", "Red"), "B": ("player", "Blue")},
+        )
+        self.assertEqual(submission_team_scope(player, "A").team, "Red")
+        self.assertEqual(submission_team_scope(player, "B").team, "Blue")
+        # No membership in C -> team-scoped with no team (fail closed).
+        c = submission_team_scope(player, "C")
+        self.assertFalse(c.unrestricted)
+        self.assertIsNone(c.team)
+        # Organizer of A is unrestricted within A, but has no standing in B.
+        org = self._organizer_of("A")
+        self.assertTrue(submission_team_scope(org, "A").unrestricted)
+        self.assertFalse(submission_team_scope(org, "B").unrestricted)
+        # Admin (system) is unrestricted anywhere.
+        admin = principal_for("a", {"admin"}, system_roles={"admin"})
+        self.assertTrue(submission_team_scope(admin, "Z").unrestricted)
 
 
 @unittest.skipIf(_SKIP, _REASON)
