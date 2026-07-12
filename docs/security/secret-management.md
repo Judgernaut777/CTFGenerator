@@ -42,7 +42,7 @@ secret store in prod). Domain and application layers see references, never value
 | **Public scoreboard token** | `serve --public-token`, or randomly generated and **printed once** to stdout when omitted. Read-only scoreboard access. | Reference-backed, rotatable token record. |
 | **Database credentials** | `postgres_events.py` uses a psycopg DSN (lazy import). The DSN carries credentials and is supplied via the environment/connection config, not persisted by the app. | DSN/credentials via `SecretReference`; SQLAlchemy 2.x engine config resolves the reference at startup. |
 | **Challenge flag** | Injected into containers at runtime via `${CTFGEN_FLAG:-}` in `docker-compose.yml`. Never written to `public/`; only reachable by exploiting the service. Lives in `private/variant.json` as instance ground truth (operator side only). | Per-instance flag issued by the control plane; injected on the isolated execution worker only. |
-| **Worker registration tokens** | *Not present* — no worker plane exists yet. | *Planned:* isolated workers authenticate to the control plane with a scoped registration token stored as a `SecretReference`; never logged. |
+| **Worker credentials** (M7) | Implemented: sha256-at-rest scoped bearer credentials (`ctfw1.<credential_id>.<secret>`). The secret is a server-generated 256-bit random value; only its sha256 hex is persisted (`worker_credentials.token_hash`, whose 64-hex CHECK makes storing a plaintext `ctfw1.` token structurally impossible). Default 24h TTL, atomically rotated (revoke-old + insert-new in one transaction; a partial UNIQUE guarantees at most one live credential per worker), centrally revocable. The plaintext exists only in the one-time `IssuedCredential` return value (`secret` field is repr-suppressed). The service never accepts a caller-chosen token value. The bootstrap *enrollment* token authorizing `register_worker` remains env-only and is never persisted. | Per-job scoped artifact handles layered on the same scheme. |
 | **Artifact-store credentials** (S3-compatible) | *Not present* — current artifact storage is local-filesystem report/bundle writes only. | *Planned:* S3-compatible credentials via `SecretReference`; published artifacts are immutable + content-addressed. |
 
 Note on the MCP workspace: `CTFGEN_MCP_WORKSPACE` is an env var but it is a
@@ -76,7 +76,7 @@ error messages, stack traces, or stdout/stderr diagnostics:
 | **Provider API keys** (Anthropic/OpenAI) | Credential exfiltration. |
 | **Database credentials / DSN** | Full data-plane compromise. |
 | **Admin passwords** | Account takeover. |
-| Worker registration tokens *(planned)* | Worker impersonation. |
+| Worker credential secrets (the `ctfw1.` bearer token / its secret part) | Worker impersonation; only the sha256 hash is ever at rest. |
 | Artifact-store credentials *(planned)* | Artifact tampering / exfiltration. |
 
 Structured JSON logging (target baseline) must redact by field name; secret-bearing
@@ -94,7 +94,7 @@ not the value.
 | Provider API keys | Rotate at the provider, update the environment / secret store; no code or committed file changes needed (env-only). |
 | Database credentials | Rotate in the store/DSN source; the app reads at startup. *Target:* rotate the `SecretReference` and reconnect. |
 | Admin credentials | *Current:* restart `serve` with new `--admin-user`/`--admin-password`. *Target:* rotate the hashed credential in the domain model. |
-| Worker registration tokens *(planned)* | Short-lived, scoped, re-issued per worker enrollment; revocable centrally. |
+| Worker credentials | Short-lived (24h default TTL), scoped; `rotate_credential()` revokes the old and issues the new in one transaction (no zero- or two-valid window); `revoke_worker()` kills the worker and its live credential together. |
 | Artifact-store credentials *(planned)* | Rotate in the store; content-addressed immutable artifacts are unaffected by key change. |
 
 General rule: rotating a secret should require changing only the environment or the
