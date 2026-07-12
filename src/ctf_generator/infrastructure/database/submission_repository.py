@@ -110,6 +110,18 @@ class SqlAlchemyLedgerSubmissionRepository:
         rows = self._session.execute(
             _hydrate_query()
             .where(Competition.slug == competition_id, Team.name == team_name)
-            .order_by(SubmissionRow.submitted_at)
+            .order_by(SubmissionRow.submitted_at, SubmissionRow.id)
+        ).all()
+        return [self._map(row) for row in rows]
+
+    def list_for_competition(self, competition_id: str) -> list[LedgerSubmission]:
+        """Every attempt in a competition (organizer/admin read; a team-scoped
+        caller is confined to ``list_for_team``). Ordered by ``(submitted_at,
+        id)`` for a stable, tie-broken sort the API can page over. Empty if the
+        competition is unknown or has no submissions."""
+        rows = self._session.execute(
+            _hydrate_query()
+            .where(Competition.slug == competition_id)
+            .order_by(SubmissionRow.submitted_at, SubmissionRow.id)
         ).all()
         return [self._map(row) for row in rows]
