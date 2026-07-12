@@ -1,0 +1,34 @@
+{% extends "base.html" %}
+{% block title %}Teams - {{ competition_id }}{% endblock %}
+{% block content %}
+<div class="card">
+  <p class="muted"><a href="{{ mount_path }}/competitions/{{ competition_id }}">&larr; Competition</a></p>
+  <h1>Teams</h1>
+  <p class="muted mono">{{ competition_id }}</p>
+  {% if teams %}
+  <table>
+    <thead><tr><th>Name</th></tr></thead>
+    <tbody>
+      {% for t in teams %}
+      <tr><td>{{ t.name }}</td></tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  {% else %}
+  <p class="muted">No teams yet.</p>
+  {% endif %}
+</div>
+<div class="card">
+  <h2>Add a team</h2>
+  <form method="post" action="{{ mount_path }}/competitions/{{ competition_id }}/teams">
+    {% if csrf_token %}<input type="hidden" name="csrf_token" value="{{ csrf_token }}">{% endif %}
+    <div class="form-row">
+      <label for="name">Team name</label><br>
+      <input id="name" name="name" type="text" class="field-full"
+             value="{{ values.get('name', '') }}" required>
+      {% if errors.get("name") %}<div class="field-error">{{ errors["name"] }}</div>{% endif %}
+    </div>
+    <button type="submit" class="btn">Add team</button>
+  </form>
+</div>
+{% endblock %}
