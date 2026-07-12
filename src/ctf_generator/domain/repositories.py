@@ -40,6 +40,13 @@ from .ledger.models import (
     ScoreEvent,
     Solve,
 )
+from .scheduling.models import (
+    QuotaReservation,
+    ResourceDemand,
+    ResourceQuota,
+    WorkerCandidate,
+    WorkerRequirements,
+)
 from .work.models import Job, JobLease
 
 
@@ -618,6 +625,106 @@ class ScoreProjectionQueue(Protocol):
         ...
 
     def pending_stats(self) -> ProjectionLag:
+        ...
+
+
+class QuotaPolicyRepository(Protocol):
+    """Stores resource-quota *limits* keyed by ``(scope_type, scope_key,
+    dimension)``. The ``reserved_value`` counter is owned by the
+    :class:`QuotaLedger` (reserve/release increment it under a row lock); this
+    repository sets and reads limits only.
+
+    ``upsert_limit`` seeds or adjusts a limit without ever touching the live
+    counter (so a limit reduction grandfathers current holds and simply blocks
+    new reserves until the pool drains). A ceiling dimension's row is created
+    with ``reserved_value`` fixed at 0.
+    """
+
+    def upsert_limit(self, quota: ResourceQuota) -> None:
+        """Create the quota row or update its ``limit_value`` in place, keyed by
+        ``(scope_type, scope_key, dimension)``. Never writes ``reserved_value``
+        on an existing row."""
+        ...
+
+    def get(
+        self, scope_type: str, scope_key: str, dimension: str
+    ) -> ResourceQuota | None:
+        ...
+
+    def list_for_scope(
+        self, scope_type: str, scope_key: str
+    ) -> list[ResourceQuota]:
+        ...
+
+
+class QuotaLedger(Protocol):
+    """The atomic reservation ledger over ``resource_quotas`` (counters) +
+    ``quota_reservations`` (headers) + ``quota_reservation_items`` (append-only
+    per-counter amounts).
+
+    Error contract: a reserve that would push a pooled counter past its limit,
+    or a ceiling request over its cap, raises
+    :class:`~ctf_generator.domain.scheduling.models.QuotaExceededError` and
+    changes nothing (the caller's unit of work rolls back). A duplicate
+    ``reservation_id`` raises the underlying ``IntegrityError`` (the idempotent
+    re-launch guard). A reserve against a missing quota row raises
+    :class:`LookupError`. All ``now`` values are caller-passed.
+    """
+
+    def reserve(self, demand: ResourceDemand, now: datetime) -> QuotaReservation:
+        """Atomically reserve every pooled amount in ``demand`` (each counter
+        row ``SELECT ... FOR UPDATE`` locked in sorted order and incremented)
+        and validate every ceiling. All-or-nothing: any overrun aborts the whole
+        reservation with no partial increment."""
+        ...
+
+    def release(self, reservation_id: str, now: datetime) -> bool:
+        """Idempotently release a held reservation: decrement each held
+        counter and flip the header to ``released``. Returns True if it released
+        a still-held reservation, False if it was already released / absent (a
+        double release is a no-op)."""
+        ...
+
+    def get(self, reservation_id: str) -> QuotaReservation | None:
+        ...
+
+    def list_expired(self, now: datetime, limit: int = 100) -> list[QuotaReservation]:
+        """Held reservations whose ``expires_at`` is before ``now`` -- the
+        leaked-hold sweep input for ``release_expired``."""
+        ...
+
+    def reconcile_counters(self) -> int:
+        """Recompute every quota's ``reserved_value`` as the sum of held
+        reservation-item amounts (self-healing drift repair). Returns the number
+        of quota rows whose counter changed."""
+        ...
+
+
+class SchedulerRepository(Protocol):
+    """Read side of capability-aware worker selection.
+
+    ``candidate_workers`` returns dispatch-eligible workers -- ``trusted`` AND
+    not quarantined AND ``drain_requested_at`` null (this is what finally
+    enforces that dead M7 state) AND heartbeat fresh -- that match the
+    architecture / capabilities / runtime requirements AND have free capacity,
+    ranked by image-cache affinity, then most free capacity, then oldest
+    heartbeat. Interface-only: no state change.
+    """
+
+    def candidate_workers(
+        self,
+        requirements: WorkerRequirements,
+        now: datetime,
+        heartbeat_max_age_seconds: int,
+        image_ref: str | None = None,
+        limit: int = 20,
+    ) -> list[WorkerCandidate]:
+        ...
+
+    def free_capacity(self, worker_name: str) -> int:
+        """The worker's remaining concurrency (its ``(worker, active_instances)``
+        quota ``limit - reserved``), or its declared capacity if no quota row
+        exists yet. LookupError if the worker is unknown."""
         ...
 
 
