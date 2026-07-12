@@ -180,9 +180,30 @@ class SqlAlchemyJobQueue:
         error_detail: str | None,
     ) -> None:
         """Shared retry path for retryable failures and lease expiry: requeue
-        with backoff, or dead-letter when the attempt budget is exhausted."""
+        with backoff, or dead-letter when the attempt budget is exhausted.
+
+        If a cancel was requested while the job was claimed/running, the cancel
+        wins over any requeue/dead-letter (claimed->cancelled and
+        running->cancelled are both legal): a cancel-requested job whose lease
+        expires must not be re-dispatched."""
         from_status = row.status
         worker_id = row.claimed_by
+        if row.cancel_requested_at is not None:
+            row.status = "cancelled"
+            row.finished_at = to_utc(now)
+            row.error_class = error_class
+            row.error_detail = error_detail
+            self._clear_lease(row)
+            self._record(
+                row,
+                from_status,
+                "cancelled",
+                now,
+                worker_id=worker_id,
+                error_class=error_class,
+                error_detail=error_detail,
+            )
+            return
         if row.attempt_count >= row.max_attempts:
             row.status = "dead_letter"
             row.finished_at = to_utc(now)
@@ -220,9 +241,15 @@ class SqlAlchemyJobQueue:
 
     # -- protocol ------------------------------------------------------------
 
-    def enqueue(self, job: Job) -> Job:
+    def enqueue(self, job: Job, now: datetime | None = None) -> Job:
         """Insert a ``queued`` job (duplicate ``idempotency_key`` ->
-        IntegrityError at flush) and its enqueue transition."""
+        IntegrityError at flush) and its enqueue transition.
+
+        The enqueue transition is recorded at the caller-passed ``now`` (the
+        instant the job was enqueued); ``available_at`` is only the dispatch
+        gate, not the enqueue instant, so a future-dated ``available_at`` no
+        longer back-dates the audit trail. ``now`` defaults to ``available_at``
+        for backward compatibility."""
         competition_uuid = _resolve.competition_uuid_optional(
             self._session, job.competition_id
         )
@@ -232,7 +259,7 @@ class SqlAlchemyJobQueue:
         row = job_to_orm(job, competition_uuid, version_uuid)
         self._session.add(row)
         self._session.flush()
-        self._record(row, None, "queued", job.available_at)
+        self._record(row, None, "queued", now if now is not None else job.available_at)
         self._session.flush()
         return job_from_orm(
             row, job.competition_id, job.definition_slug, job.version_no
@@ -277,6 +304,9 @@ class SqlAlchemyJobQueue:
                 JobRow.status == "queued",
                 JobRow.available_at <= to_utc(now),
                 JobRow.required_capabilities.contained_by(caps_param),
+                # Defense in depth: a cancel-requested queued job (a requeue
+                # that raced a cancel stamp) must never be re-dispatched.
+                JobRow.cancel_requested_at.is_(None),
             )
             .order_by(JobRow.priority.asc(), JobRow.available_at.asc(), JobRow.created_at.asc())
             .limit(1)
@@ -359,14 +389,19 @@ class SqlAlchemyJobQueue:
                 f"got {error_class!r}"
             )
         row = self._fenced_row(job_id, lease_token)
-        if row.status != "running":
-            raise LookupError(
-                f"job {job_id!r} is {row.status!r}, not running; cannot fail"
-            )
         worker_id = row.claimed_by
         if error_class == "cancelled":
             # The cooperative-cancel acknowledgment: the worker observed the
-            # cancel request (via heartbeat) and stopped.
+            # cancel request (via heartbeat) and stopped. A worker that learns
+            # of the cancel while still 'claimed' (before start) can also
+            # acknowledge it, so both claimed->cancelled and running->cancelled
+            # are accepted (matching the domain transition matrix).
+            if row.status not in ("claimed", "running"):
+                raise LookupError(
+                    f"job {job_id!r} is {row.status!r}, not claimed/running; "
+                    "cannot cancel"
+                )
+            from_status = row.status
             row.status = "cancelled"
             row.finished_at = to_utc(now)
             row.error_class = error_class
@@ -374,14 +409,20 @@ class SqlAlchemyJobQueue:
             self._clear_lease(row)
             self._record(
                 row,
-                "running",
+                from_status,
                 "cancelled",
                 now,
                 worker_id=worker_id,
                 error_class=error_class,
                 error_detail=error_detail,
             )
-        elif not retryable:
+            self._session.flush()
+            return self._to_domain(row)
+        if row.status != "running":
+            raise LookupError(
+                f"job {job_id!r} is {row.status!r}, not running; cannot fail"
+            )
+        if not retryable:
             row.status = "failed"
             row.finished_at = to_utc(now)
             row.error_class = error_class
@@ -457,6 +498,10 @@ class SqlAlchemyJobQueue:
         row.finished_at = None
         row.error_class = None
         row.error_detail = None
+        # The operator requeue also clears any prior cancel signal, so a
+        # requeued job is genuinely re-dispatchable rather than silently
+        # cancel-blocked.
+        row.cancel_requested_at = None
         self._record(row, "dead_letter", "queued", now)
         self._session.flush()
         return self._to_domain(row)
