@@ -141,7 +141,9 @@ def _harness(
                 authenticator=DbAuthenticator(auth),
                 oidc_service=oidc_service,
             )
-            yield TestClient(app), oidc_service, db
+            # https base URL so the Secure browser-binding cookie set at /login
+            # is carried back to /callback (an http client drops Secure cookies).
+            yield TestClient(app, base_url="https://testserver"), oidc_service, db
         finally:
             if oidc_service is not None:
                 oidc_service.close()
@@ -154,13 +156,14 @@ def _harness(
 
 def _drive(svc, fake, now, *, id_token=None, mutate_txn=None):
     """Build the auth URL, have the fake IdP issue a code, optionally mutate the
-    stored transaction, and return ``(code, state)`` ready for handle_callback."""
+    stored transaction, and return ``(code, state, binding)`` ready for
+    handle_callback."""
     redirect = svc.build_authorization_url(now)
     ctx = fake.parse_auth(redirect.url)
     code = fake.register_code(ctx, id_token=id_token)
     if mutate_txn is not None:
         mutate_txn(ctx)
-    return code, redirect.state
+    return code, redirect.state, redirect.binding_secret
 
 
 @unittest.skipUnless(_ENABLED, _SKIP_REASON)
@@ -242,6 +245,54 @@ class OidcFlowIntegrationTests(unittest.TestCase):
             with db.session_scope() as s:
                 self.assertIsNotNone(SqlAlchemyUserRepository(s).get(DEFAULT_EMAIL))
 
+    def test_login_sets_binding_cookie_and_callback_succeeds(self) -> None:
+        fake = FakeIdp()
+        with _harness(fake, seed_oidc_email=DEFAULT_EMAIL) as (client, _svc, _db):
+            r = client.get("/api/v1/auth/oidc/login", follow_redirects=False)
+            self.assertEqual(r.status_code, 302, r.text)
+            set_cookie = r.headers.get("set-cookie", "")
+            self.assertIn("ctfgen_oidc_txn=", set_cookie)
+            self.assertIn("HttpOnly", set_cookie)
+            self.assertIn("Secure", set_cookie)
+            # The client carries the binding cookie back to the callback -> 200.
+            code = fake.authorize(r.headers["location"])
+            state = fake.parse_auth(r.headers["location"])["state"]
+            cb = client.get(
+                "/api/v1/auth/oidc/callback", params={"code": code, "state": state}
+            )
+            self.assertEqual(cb.status_code, 200, cb.text)
+            self.assertTrue(cb.json()["token"])
+
+    def test_callback_without_binding_cookie_rejected(self) -> None:
+        fake = FakeIdp()
+        with _harness(fake, seed_oidc_email=DEFAULT_EMAIL) as (client, _svc, _db):
+            r = client.get("/api/v1/auth/oidc/login", follow_redirects=False)
+            code = fake.authorize(r.headers["location"])
+            state = fake.parse_auth(r.headers["location"])["state"]
+            # Drop the browser-binding cookie -> a valid (state, code) alone must
+            # NOT complete the login (login-CSRF / fixation).
+            client.cookies.clear()
+            cb = client.get(
+                "/api/v1/auth/oidc/callback", params={"code": code, "state": state}
+            )
+            self.assertEqual(cb.status_code, 401, cb.text)
+            self.assertEqual(cb.json()["error"]["code"], "unauthorized")
+
+    def test_callback_with_wrong_binding_cookie_rejected(self) -> None:
+        fake = FakeIdp()
+        with _harness(fake, seed_oidc_email=DEFAULT_EMAIL) as (client, _svc, _db):
+            r = client.get("/api/v1/auth/oidc/login", follow_redirects=False)
+            code = fake.authorize(r.headers["location"])
+            state = fake.parse_auth(r.headers["location"])["state"]
+            # Attacker-supplied binding value -> rejected.
+            client.cookies.clear()
+            client.cookies.set("ctfgen_oidc_txn", "attacker-supplied-value")
+            cb = client.get(
+                "/api/v1/auth/oidc/callback", params={"code": code, "state": state}
+            )
+            self.assertEqual(cb.status_code, 401, cb.text)
+            self.assertEqual(cb.json()["error"]["code"], "unauthorized")
+
     def test_unknown_email_without_auto_provision_is_rejected(self) -> None:
         fake = FakeIdp()
         with _harness(fake, auto_provision=False) as (client, _svc, db):
@@ -286,7 +337,7 @@ class OidcSecurityTests(unittest.TestCase):
             tampered = fake.tamper(fake.mint_id_token(nonce=ctx["nonce"]))
             code = fake.register_code(ctx, id_token=tampered)
             with self.assertRaises(OidcAuthError):
-                svc.handle_callback(code, red.state, now)
+                svc.handle_callback(code, red.state, red.binding_secret, now)
 
     def test_alg_none_token_rejected(self) -> None:
         with self._svc() as (svc, fake, _db):
@@ -297,7 +348,7 @@ class OidcSecurityTests(unittest.TestCase):
                 ctx, id_token=fake.none_token(nonce=ctx["nonce"])
             )
             with self.assertRaises(OidcAuthError):
-                svc.handle_callback(code, red.state, now)
+                svc.handle_callback(code, red.state, red.binding_secret, now)
 
     def test_hs256_key_confusion_rejected(self) -> None:
         with self._svc() as (svc, fake, _db):
@@ -308,7 +359,7 @@ class OidcSecurityTests(unittest.TestCase):
                 ctx, id_token=fake.hs256_confusion_token(nonce=ctx["nonce"])
             )
             with self.assertRaises(OidcAuthError):
-                svc.handle_callback(code, red.state, now)
+                svc.handle_callback(code, red.state, red.binding_secret, now)
 
     def test_wrong_audience_rejected(self) -> None:
         with self._svc() as (svc, fake, _db):
@@ -320,7 +371,7 @@ class OidcSecurityTests(unittest.TestCase):
                 id_token=fake.mint_id_token(nonce=ctx["nonce"], aud="some-other-client"),
             )
             with self.assertRaises(OidcAuthError):
-                svc.handle_callback(code, red.state, now)
+                svc.handle_callback(code, red.state, red.binding_secret, now)
 
     def test_wrong_issuer_rejected(self) -> None:
         with self._svc() as (svc, fake, _db):
@@ -334,7 +385,7 @@ class OidcSecurityTests(unittest.TestCase):
                 ),
             )
             with self.assertRaises(OidcAuthError):
-                svc.handle_callback(code, red.state, now)
+                svc.handle_callback(code, red.state, red.binding_secret, now)
 
     def test_expired_id_token_rejected(self) -> None:
         with self._svc() as (svc, fake, _db):
@@ -349,7 +400,7 @@ class OidcSecurityTests(unittest.TestCase):
                 ),
             )
             with self.assertRaises(OidcAuthError):
-                svc.handle_callback(code, red.state, now)
+                svc.handle_callback(code, red.state, red.binding_secret, now)
 
     def test_missing_nonce_rejected(self) -> None:
         with self._svc() as (svc, fake, _db):
@@ -360,7 +411,7 @@ class OidcSecurityTests(unittest.TestCase):
                 ctx, id_token=fake.mint_id_token(omit=("nonce",))
             )
             with self.assertRaises(OidcAuthError):
-                svc.handle_callback(code, red.state, now)
+                svc.handle_callback(code, red.state, red.binding_secret, now)
 
     def test_wrong_nonce_replay_rejected(self) -> None:
         with self._svc() as (svc, fake, _db):
@@ -371,31 +422,35 @@ class OidcSecurityTests(unittest.TestCase):
                 ctx, id_token=fake.mint_id_token(nonce="attacker-controlled-nonce")
             )
             with self.assertRaises(OidcAuthError):
-                svc.handle_callback(code, red.state, now)
+                svc.handle_callback(code, red.state, red.binding_secret, now)
 
     def test_unknown_state_rejected(self) -> None:
         with self._svc() as (svc, _fake, _db):
+            # No transaction exists for this state, so the state lookup rejects
+            # before the binding is ever checked (the binding value is moot here).
             with self.assertRaises(OidcAuthError):
-                svc.handle_callback("some-code", "never-issued-state", self._now())
+                svc.handle_callback(
+                    "some-code", "never-issued-state", "no-binding", self._now()
+                )
 
     def test_expired_state_rejected(self) -> None:
         with self._svc() as (svc, fake, _db):
             now = self._now()
-            code, state = _drive(svc, fake, now)
+            code, state, binding = _drive(svc, fake, now)
             # Consume far in the future -- past the transaction TTL.
             future = now + timedelta(minutes=30)
             with self.assertRaises(OidcAuthError):
-                svc.handle_callback(code, state, future)
+                svc.handle_callback(code, state, binding, future)
 
     def test_replayed_state_is_one_time_use(self) -> None:
         with self._svc() as (svc, fake, _db):
             now = self._now()
-            code, state = _drive(svc, fake, now)
-            issued = svc.handle_callback(code, state, now)
+            code, state, binding = _drive(svc, fake, now)
+            issued = svc.handle_callback(code, state, binding, now)
             self.assertTrue(issued.token)
             # Second use of the same state must fail (transaction consumed).
             with self.assertRaises(OidcAuthError):
-                svc.handle_callback(code, state, now)
+                svc.handle_callback(code, state, binding, now)
 
     def test_pkce_verifier_mismatch_rejected(self) -> None:
         with self._svc() as (svc, fake, db):
@@ -412,9 +467,11 @@ class OidcSecurityTests(unittest.TestCase):
                         {OidcTxnRow.code_verifier: _secrets.token_urlsafe(64)}
                     )
 
-            code, state = _drive(svc, fake, now, mutate_txn=_corrupt_verifier)
+            code, state, binding = _drive(
+                svc, fake, now, mutate_txn=_corrupt_verifier
+            )
             with self.assertRaises(OidcAuthError):
-                svc.handle_callback(code, state, now)
+                svc.handle_callback(code, state, binding, now)
 
     def test_disallowed_email_domain_rejected(self) -> None:
         with self._svc(allowed_domains=("corp.test",)) as (svc, fake, _db):
@@ -426,7 +483,7 @@ class OidcSecurityTests(unittest.TestCase):
                 ctx, id_token=fake.mint_id_token(nonce=ctx["nonce"])
             )
             with self.assertRaises(OidcAuthError):
-                svc.handle_callback(code, red.state, now)
+                svc.handle_callback(code, red.state, red.binding_secret, now)
 
     def test_email_not_verified_rejected(self) -> None:
         with self._svc() as (svc, fake, _db):
@@ -438,15 +495,15 @@ class OidcSecurityTests(unittest.TestCase):
                 id_token=fake.mint_id_token(nonce=ctx["nonce"], email_verified=False),
             )
             with self.assertRaises(OidcAuthError):
-                svc.handle_callback(code, red.state, now)
+                svc.handle_callback(code, red.state, red.binding_secret, now)
 
     def test_token_exchange_failure_rejected(self) -> None:
         with self._svc() as (svc, fake, _db):
             now = self._now()
             fake.fail_token_exchange = True
-            code, state = _drive(svc, fake, now)
+            code, state, binding = _drive(svc, fake, now)
             with self.assertRaises(OidcAuthError):
-                svc.handle_callback(code, state, now)
+                svc.handle_callback(code, state, binding, now)
 
 
 @unittest.skipUnless(_ENABLED, _SKIP_REASON)

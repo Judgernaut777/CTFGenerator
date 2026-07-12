@@ -164,8 +164,10 @@ class OidcLoginTransaction:
     """A short-lived, one-time-use OIDC authorization-code login transaction
     (M10c). Created when the login redirect is built and CONSUMED (deleted) when
     the callback returns, it binds the anti-forgery ``state`` to the ``nonce``
-    (ID-token replay defense) and the PKCE ``code_verifier`` (code-interception
-    defense) so the callback can validate them.
+    (ID-token replay defense), the PKCE ``code_verifier`` (code-interception
+    defense), and a ``binding_hash`` (sha256 of a browser-cookie secret, tying
+    the flow to the initiating user-agent -- login-CSRF / fixation defense) so
+    the callback can validate them.
 
     Only the **sha256 hex** of the state is modelled (``state_hash``, 64-hex --
     the exact ``AuthSession.token_hash`` discipline): the raw state travels only
@@ -178,6 +180,7 @@ class OidcLoginTransaction:
     state_hash: str
     nonce: str
     code_verifier: str
+    binding_hash: str
     redirect_uri: str
     created_at: datetime
     expires_at: datetime
@@ -186,6 +189,9 @@ class OidcLoginTransaction:
         _require_token_hash(self.state_hash, "state_hash")
         _require_nonempty(self.nonce, "nonce")
         _require_nonempty(self.code_verifier, "code_verifier")
+        # sha256 hex of the browser-binding secret (the raw secret lives only in
+        # the login cookie); same 64-hex discipline as ``state_hash``.
+        _require_token_hash(self.binding_hash, "binding_hash")
         # RFC 7636: a PKCE code_verifier is 43..128 chars of the unreserved set.
         # A stricter length floor here keeps a trivially weak verifier out of the
         # store (the generator produces a 256-bit S256 verifier).

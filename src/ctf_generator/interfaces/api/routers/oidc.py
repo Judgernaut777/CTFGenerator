@@ -8,10 +8,13 @@ normal M10a local session and returns the SAME ``{token, expires_at}`` shape as
 ``/auth/login`` -- no OIDC/ID token ever becomes an API bearer.
 
 * ``GET /auth/oidc/login``    -- 302 redirect to the IdP authorization endpoint
-  (with response_type=code, scope, redirect_uri, state, nonce, PKCE S256). The
-  URL carries only the anti-forgery state; nothing secret is returned.
-* ``GET /auth/oidc/callback`` -- ``?code=&state=`` -> validate + issue the local
-  session -> ``{token, expires_at}``. A bad/expired/replayed state, a
+  (with response_type=code, scope, redirect_uri, state, nonce, PKCE S256), plus an
+  httpOnly + Secure + SameSite=Lax browser-binding cookie the callback requires
+  back (login-CSRF / fixation defense). The URL carries only the anti-forgery
+  state; nothing secret is returned in it.
+* ``GET /auth/oidc/callback`` -- ``?code=&state=`` (+ the binding cookie) ->
+  validate + issue the local session -> ``{token, expires_at}``. A missing/wrong
+  binding cookie, a bad/expired/replayed state, a
   token-exchange failure, an invalid ID token, or a disallowed email surfaces as a
   generic ``401`` (:class:`OidcAuthError`); a missing ``code``/``state`` is a
   ``400`` (``ValueError``). The id-token / client_secret / code are NEVER echoed.
@@ -38,6 +41,13 @@ from ..schemas.common import ERROR_RESPONSES
 from ._support import audit_sink, respond
 
 router = APIRouter(tags=["auth"])
+
+# The browser-binding cookie: a high-entropy secret set at /login and required at
+# /callback so the login transaction is bound to the initiating user-agent
+# (login-CSRF / session-fixation defense). httpOnly + Secure + SameSite=Lax, and
+# path-scoped to the OIDC routes. Its hash is what the transaction stores.
+_TXN_COOKIE = "ctfgen_oidc_txn"
+_TXN_COOKIE_PATH = "/api/v1/auth/oidc"
 
 
 def get_oidc_service(request: Request):
@@ -69,7 +79,20 @@ def oidc_login(request: Request, service=Depends(get_oidc_service)):
     )
     # 302 + Location: the standard authorization-request redirect. The URL carries
     # only the anti-forgery state (already public in the redirect), no secret.
-    return RedirectResponse(url=redirect.url, status_code=302)
+    response = RedirectResponse(url=redirect.url, status_code=302)
+    # Bind the flow to THIS browser: an httpOnly + Secure + SameSite=Lax cookie
+    # whose hash the transaction stores; the callback requires it back. The cookie
+    # secret itself is never logged.
+    response.set_cookie(
+        key=_TXN_COOKIE,
+        value=redirect.binding_secret,
+        max_age=int(service.config.transaction_ttl.total_seconds()),
+        httponly=True,
+        secure=True,
+        samesite="lax",
+        path=_TXN_COOKIE_PATH,
+    )
+    return response
 
 
 @router.get(
@@ -86,7 +109,10 @@ def oidc_callback(
     state: str | None = Query(default=None),
     service=Depends(get_oidc_service),
 ):
-    issued = service.handle_callback(code, state, datetime.now(UTC))
+    binding_secret = request.cookies.get(_TXN_COOKIE)
+    issued = service.handle_callback(
+        code, state, binding_secret, datetime.now(UTC)
+    )
     audit(
         audit_sink(request),
         actor=issued.user_email,
@@ -94,4 +120,7 @@ def oidc_callback(
         target=issued.user_email,
         outcome="success",
     )
-    return respond(200, token_response(issued))
+    response = respond(200, token_response(issued))
+    # One-time-use: clear the binding cookie once the transaction is consumed.
+    response.delete_cookie(_TXN_COOKIE, path=_TXN_COOKIE_PATH)
+    return response
