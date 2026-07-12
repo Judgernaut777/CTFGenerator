@@ -10,7 +10,10 @@ is modelled here -- authentication storage is a separate axis owned by M10.
 
 from __future__ import annotations
 
-from ctf_generator.domain.identity.models import User
+from ctf_generator.domain.identity.models import Membership, User
+from ctf_generator.infrastructure.database.membership_repository import (
+    SqlAlchemyMembershipRepository,
+)
 from ctf_generator.infrastructure.database.session import Database
 from ctf_generator.infrastructure.database.user_repository import (
     SqlAlchemyUserRepository,
@@ -40,3 +43,19 @@ class IdentityService:
     def list_users(self) -> list[User]:
         with self._database.session_scope() as session:
             return SqlAlchemyUserRepository(session).list()
+
+    def list_memberships_for_competition(
+        self, competition_id: str
+    ) -> list[Membership]:
+        """Every membership in ``competition_id`` (empty if the competition is
+        unknown or has none). This is the application-layer read the contestant
+        web roster consumes so an interface handler never touches the membership
+        repository directly. Returns the frozen domain
+        :class:`~ctf_generator.domain.identity.models.Membership` aggregates
+        (``user_email`` / ``role`` / ``team_name`` -- no credential/secret); the
+        caller is responsible for confining the result to the caller's tenancy
+        scope (own team only) before rendering."""
+        with self._database.session_scope() as session:
+            return SqlAlchemyMembershipRepository(session).list_for_competition(
+                competition_id
+            )
