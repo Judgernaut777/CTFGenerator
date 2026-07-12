@@ -41,7 +41,14 @@ from .auth import (
     logout_session,
     set_session_cookie,
 )
-from .csrf import require_csrf
+from .csrf import (
+    clear_login_csrf_cookie,
+    current_login_csrf_token,
+    issue_login_csrf_token,
+    require_csrf,
+    require_login_csrf,
+    set_login_csrf_cookie,
+)
 from .deps import (
     get_web_auth_service,
     get_web_competition_service,
@@ -83,8 +90,16 @@ def _visible_competitions(principal: Principal, service: CompetitionService):
 def login_form(
     request: Request,
     renderer: TemplateRenderer = Depends(get_renderer),
+    settings: WebSettings = Depends(get_web_settings),
 ) -> Response:
-    return renderer.render(request, "login.html", {"error": None})
+    # Mint the login-CSRF token: echo it into BOTH the (httpOnly) cookie and the
+    # hidden field so POST /login can verify the double-submit pair.
+    token = issue_login_csrf_token()
+    response = renderer.render(
+        request, "login.html", {"error": None, "login_csrf_token": token}
+    )
+    set_login_csrf_cookie(response, token, settings)
+    return response
 
 
 @router.post("/login", name="web_login_submit")
@@ -93,7 +108,10 @@ async def login_submit(
     renderer: TemplateRenderer = Depends(get_renderer),
     settings: WebSettings = Depends(get_web_settings),
     auth_service: AuthService = Depends(get_web_auth_service),
+    _login_csrf: None = Depends(require_login_csrf),
 ) -> Response:
+    # ``require_login_csrf`` has already rejected a missing/forged login-CSRF token
+    # (403) BEFORE we reach here, so login-CSRF / session fixation is closed.
     form = await read_form(request)
     email = form.get("email", "")
     password = form.get("password", "")
@@ -101,11 +119,17 @@ async def login_submit(
     try:
         issued = auth_service.authenticate(email, password, now)
     except InvalidCredentialsError:
-        # Generic error, NO cookie set, no disclosure of which field was wrong.
+        # Generic error, NO cookie touched (the failure response stays byte-for-byte
+        # the same shape it always had -- no Set-Cookie), no disclosure of which
+        # field was wrong. The existing login-CSRF cookie (verified present by the
+        # dependency) is re-rendered into the form so it stays submittable.
         return renderer.render(
             request,
             "login.html",
-            {"error": "Invalid email or password."},
+            {
+                "error": "Invalid email or password.",
+                "login_csrf_token": current_login_csrf_token(request),
+            },
             status_code=401,
         )
     response = RedirectResponse(
@@ -114,6 +138,8 @@ async def login_submit(
     set_session_cookie(
         response, issued.token, settings, now=now, expires_at=issued.expires_at
     )
+    # The login-CSRF token is single-use: drop it once the session is established.
+    clear_login_csrf_cookie(response, settings)
     return response
 
 

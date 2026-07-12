@@ -164,10 +164,14 @@ def grant_membership(db: Database, email: str, cid: str, role: str) -> None:
 
 
 def login(client: TestClient, email: str, password: str = PASSWORD):
-    """POST the login form; returns the (non-followed) response."""
+    """GET the login form to obtain the double-submit login-CSRF pair (cookie +
+    hidden field), then POST the credentials with the matching token. Returns the
+    (non-followed) POST response, exactly as a browser flow would produce it."""
+    form = client.get("/app/login")
+    token = extract_login_csrf(form.text)
     return client.post(
         "/app/login",
-        data={"email": email, "password": password},
+        data={"email": email, "password": password, "login_csrf_token": token},
         follow_redirects=False,
     )
 
@@ -177,8 +181,14 @@ def session_cookie(client: TestClient) -> str | None:
 
 
 _CSRF_RE = re.compile(r'name="csrf_token" value="([^"]+)"')
+_LOGIN_CSRF_RE = re.compile(r'name="login_csrf_token" value="([^"]+)"')
 
 
 def extract_csrf(html: str) -> str | None:
     match = _CSRF_RE.search(html)
+    return match.group(1) if match else None
+
+
+def extract_login_csrf(html: str) -> str | None:
+    match = _LOGIN_CSRF_RE.search(html)
     return match.group(1) if match else None

@@ -19,6 +19,12 @@ SESSION_COOKIE_NAME = "ctfgen_web_session"
 # The form field + hidden-input name for the signed CSRF token.
 CSRF_FIELD_NAME = "csrf_token"  # noqa: S105 - a field NAME, not a secret value
 
+# Pre-session (login) CSRF: a plain double-submit token. Because no session exists
+# yet at the login POST, the session-bound CSRF above cannot protect it, so the
+# login form uses a random token echoed in BOTH a cookie and a hidden field.
+LOGIN_CSRF_COOKIE_NAME = "ctfgen_web_login_csrf"  # noqa: S105 - a cookie NAME
+LOGIN_CSRF_FIELD_NAME = "login_csrf_token"  # noqa: S105 - a field NAME
+
 
 @dataclass(frozen=True)
 class WebSettings:
