@@ -617,7 +617,10 @@ class IdentityMigrationTests(unittest.TestCase):
             cfg = _alembic_config(url)
             engine = sa.create_engine(url, future=True)
             try:
-                command.upgrade(cfg, "head")
+                # Upgrade to THIS aggregate's revision explicitly (not "head") so
+                # the test stays about the identity migration as later migrations
+                # stack on top of it.
+                command.upgrade(cfg, "0003_identity")
                 insp = sa.inspect(engine)
                 for table in ("users", "teams", "memberships"):
                     self.assertIn(table, insp.get_table_names())
