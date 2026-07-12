@@ -20,6 +20,11 @@ from collections.abc import Mapping, Sequence
 from datetime import datetime
 from typing import Protocol
 
+from .auth.models import (
+    AuthCredential,
+    AuthSession,
+    SystemRoleAssignment,
+)
 from .authoring.models import (
     ChallengeBuild,
     ChallengeDefinition,
@@ -144,6 +149,13 @@ class MembershipRepository(Protocol):
         ...
 
     def list_for_competition(self, competition_id: str) -> list[Membership]:
+        ...
+
+    def list_for_user(self, user_email: str) -> list[Membership]:
+        """Every membership the user holds, across ALL competitions (empty if the
+        user is unknown or unteamed everywhere). This is the read the auth
+        principal-resolution path uses to assemble a caller's competition roles;
+        it is intentionally NOT competition-scoped."""
         ...
 
     def update(self, membership: Membership) -> None:
@@ -585,6 +597,78 @@ class WorkerCredentialRepository(Protocol):
 
     def revoke(self, credential_id: str, revoked_at: datetime) -> None:
         """Stamp ``revoked_at``. LookupError if missing or already revoked."""
+        ...
+
+
+class AuthCredentialRepository(Protocol):
+    """Stores one local password credential per user, keyed by ``user_email``
+    (case-insensitive, resolved against the ``users`` row). Carries only the
+    *encoded* password hash -- never a plaintext password. A password change is
+    an in-place ``update`` of the mutable ``password_hash`` (there is no history
+    table and no delete)."""
+
+    def add(self, credential: AuthCredential) -> None:
+        """Insert the user's credential. A second credential for the same user
+        raises the underlying ``IntegrityError`` (the ``UNIQUE (user_id)``); a
+        missing user raises :class:`LookupError`."""
+        ...
+
+    def get(self, user_email: str) -> AuthCredential | None:
+        ...
+
+    def update(self, credential: AuthCredential) -> None:
+        """Rotate the encoded ``password_hash`` (and ``updated_at``) in place,
+        keyed by the immutable ``user_email``. Raises :class:`LookupError` if no
+        credential exists."""
+        ...
+
+
+class AuthSessionRepository(Protocol):
+    """Stores server-side sessions (near-append-only: the single legal mutation
+    is stamping ``revoked_at`` on logout / refresh; the store's triggers enforce
+    it, DELETE/TRUNCATE are rejected). A session is looked up by the sha256 hex
+    of the presented bearer token (``token_hash``, UNIQUE)."""
+
+    def add(self, session: AuthSession) -> None:
+        """Insert a fresh session. A duplicate ``token_hash`` raises the
+        underlying ``IntegrityError``; a missing user raises
+        :class:`LookupError`."""
+        ...
+
+    def get(self, session_id: str) -> AuthSession | None:
+        ...
+
+    def get_by_token_hash(self, token_hash: str) -> AuthSession | None:
+        """Resolve a session by the sha256 hex of the presented token (the live
+        lookup the authenticator uses). Liveness (expiry / revocation) is the
+        caller's check -- this returns the row regardless of state, or ``None``."""
+        ...
+
+    def revoke(self, session_id: str, revoked_at: datetime) -> None:
+        """Stamp ``revoked_at`` (logout / rotation). Idempotent on an
+        already-revoked session; :class:`LookupError` if the session is
+        missing."""
+        ...
+
+
+class SystemRoleRepository(Protocol):
+    """Stores deployment-global (system) role grants on a user's auth account,
+    keyed by ``(user_email, role)`` with ``role`` in the domain's
+    :data:`~ctf_generator.domain.auth.models.VALID_SYSTEM_ROLES`. Unlike the
+    other auth aggregates, a grant is revocable (a plain delete)."""
+
+    def grant(self, assignment: SystemRoleAssignment) -> None:
+        """Grant a system role (idempotent: re-granting an existing role is a
+        no-op). A missing user raises :class:`LookupError`."""
+        ...
+
+    def revoke(self, user_email: str, role: str) -> bool:
+        """Revoke a system role. Returns ``True`` if a grant was removed,
+        ``False`` if it was not held."""
+        ...
+
+    def list_for_user(self, user_email: str) -> frozenset[str]:
+        """The set of system roles the user holds (empty if none / unknown)."""
         ...
 
 
