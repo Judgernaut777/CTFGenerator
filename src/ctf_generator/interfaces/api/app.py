@@ -37,7 +37,10 @@ from .routers import (
     challenge_definitions,
     challenge_versions,
     competitions,
+    scoreboard,
+    submissions,
     teams,
+    users,
 )
 from .settings import ApiSettings
 
@@ -90,7 +93,15 @@ def create_app(
             allow_headers=["*"],
         )
 
-    for module in (competitions, teams, challenge_definitions, challenge_versions):
+    for module in (
+        competitions,
+        teams,
+        challenge_definitions,
+        challenge_versions,
+        users,
+        submissions,
+        scoreboard,
+    ):
         app.include_router(module.router, prefix=API_V1_PREFIX)
 
     return app
