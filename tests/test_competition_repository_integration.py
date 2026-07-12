@@ -300,7 +300,10 @@ class CompetitionRepositoryIntegrationTests(unittest.TestCase):
             cfg = _alembic_config(url)
             engine = sa.create_engine(url, future=True)
             try:
-                command.upgrade(cfg, "head")
+                # Upgrade to THIS aggregate's revision explicitly (not "head") so
+                # the test stays about the competitions migration as later
+                # migrations are stacked on top of it.
+                command.upgrade(cfg, "0002_competitions")
                 insp = sa.inspect(engine)
                 self.assertIn("competitions", insp.get_table_names())
                 with engine.connect() as conn:
