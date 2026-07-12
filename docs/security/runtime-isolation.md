@@ -139,3 +139,57 @@ and it is opt-in and covers only the healthcheck/solver step (ephemeral read-onl
 not the full workload. The target state moves all execution behind the Execution Plane worker
 contract, makes isolation mandatory and non-bypassable, and rejects bundles that cannot satisfy
 this policy rather than falling back to host execution.
+
+---
+
+## 6. Slice-2 implementation status (concrete adapter + worker)
+
+M8 slice 2 lands the concrete runtime backend and the worker executable that enforce §2–§4:
+
+| Component | Where | What it enforces |
+|---|---|---|
+| `DockerRuntimeBackend` | `src/.../infrastructure/runtime/docker_backend.py` | Drives the `docker` CLI via `subprocess` with **argv lists** (never a shell, never string-interpolated input). `policy_to_run_flags` maps every `ContainerPolicy` field to a flag. |
+| `Worker` run loop | `src/.../workers/worker.py` | authenticate → claim → dispatch to the backend → report health/resources + complete/fail; SIGTERM drain; restart recovery; honours the launch re-placement contract. |
+| `LocalControlPlaneClient` | `src/.../workers/local_client.py` | The **single-host** in-process transport. The networked HTTP client is **deferred to M9**; the loop depends only on the `WorkerControlPlaneClient` Protocol so M9 swaps the transport with zero loop changes. |
+
+`ContainerPolicy` → `docker run` flags actually verified on a **real container** (see
+`tests/test_docker_backend_integration.py`, asserted via `docker inspect`/`docker exec`):
+`--user <non-root>` (exec `id -u` = 65534), `--cap-drop=ALL` (`CapEff` = 0), `--security-opt
+no-new-privileges`, seccomp filter active (`/proc/self/status` `Seccomp: 2`), `--read-only` +
+size-capped `noexec,nosuid,nodev` `--tmpfs`, `--memory`/`--memory-swap`/`--cpus`/`--pids-limit`,
+a dedicated per-instance network, and **no** host PID/IPC/UTS/network namespaces, **not**
+privileged. Team isolation is proven with real containers in
+`tests/test_team_isolation_integration.py`: two instances on two dedicated networks cannot reach
+each other, and a challenge container cannot reach the host PostgreSQL, `169.254.169.254`, or the
+public internet.
+
+### 6.1 Secure-by-default refusal
+
+`build_image` runs **only on the worker** with `--network=none` (base image must be present
+locally), `--force-rm`, `--pull=false`, an image-size ceiling, a build timeout, and **no
+build-args / secrets**. `detect_capabilities()` refuses (`UnsupportedRuntimeError`) to certify a
+**rootful** daemon, because ADR-004 requires a rootless runtime and `RuntimeCapabilities` cannot
+represent a non-rootless one. `launch()` with the secure defaults (`require_rootless=True`,
+empty `acknowledged_gaps`) **refuses to launch on a rootful daemon** and refuses any hardening it
+cannot apply (e.g. a disabled seccomp) — it never silently runs a less-isolated container.
+
+### 6.2 Unverified live paths on THIS host (honest capability gates)
+
+The verification host runs **rootful** Docker 20.10.24 (cgroup v2, seccomp default profile
+active, **no** AppArmor, **no** user-namespace remap, `overlay2` on `extfs`). The per-container
+hardening above is enforced and proven identically to how a rootless host would apply it, but the
+following OUTER-LAYER controls could **not** be proven on this host and are capability-gated, not
+faked:
+
+| Control | Status on this host | How it is gated |
+|---|---|---|
+| Rootless daemon (ADR-004) | **Unverified** — daemon is rootful. | `detect_capabilities()` raises; the real-container mechanics tests run only with an EXPLICIT, logged `acknowledged_gaps={rootless, user_namespace, apparmor}` (a single-host/verification allowance, never a silent relaxation). |
+| Kernel user-namespace isolation | **Unverified** — no rootless engine, no userns-remap. | Same explicit acknowledgment; a default backend refuses. |
+| AppArmor MAC profile | **Unverified** — host has no AppArmor. | `runtime-default` apparmor is skipped (docker also would); a *named* apparmor profile is **refused**. SELinux likewise absent. |
+| Custom seccomp profile | **Unverified** — no custom-profile registry in slice 2. | The daemon **default** seccomp is applied and proven active; a *named* custom profile is **refused** (never downgraded). |
+| Rootless BuildKit | **Unverified** — rootful host. | `build_image` runs the classic builder with the isolation flags above as a documented fallback. |
+| Disk/overlay quota | **Unverified** — `--storage-opt size` needs overlay-over-xfs+pquota; host is `extfs`. | Not applied; writable space is bounded by the size-capped `tmpfs`. Egress-mode fine-grained firewalling (beyond per-instance network isolation) is likewise a partial/unverified path. |
+
+Re-running the full slice-2 verification on a **rootless** host (rootless Docker/Podman with
+AppArmor or SELinux) would exercise every gated control; until then these rows are the honest
+residual risk, and the secure default is to **refuse**, not degrade.
