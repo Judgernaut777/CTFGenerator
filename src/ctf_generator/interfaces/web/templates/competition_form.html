@@ -1,0 +1,55 @@
+{% extends "base.html" %}
+{% block title %}{{ heading }} - CTFGenerator{% endblock %}
+{% block content %}
+<div class="card">
+  <h1>{{ heading }}</h1>
+  {% if errors.get("__all__") %}<div class="error-banner">{{ errors["__all__"] }}</div>{% endif %}
+  <form method="post" action="{{ form_action }}">
+    {% if csrf_token %}<input type="hidden" name="csrf_token" value="{{ csrf_token }}">{% endif %}
+    <div class="form-row">
+      <label for="competition_id">Competition ID (slug)</label><br>
+      {% if id_editable %}
+      <input id="competition_id" name="competition_id" type="text" class="field-full"
+             value="{{ values.get('competition_id', '') }}" required>
+      {% else %}
+      <div class="mono">{{ values.get('competition_id', '') }}</div>
+      {% endif %}
+      {% if errors.get("competition_id") %}<div class="field-error">{{ errors["competition_id"] }}</div>{% endif %}
+    </div>
+    <div class="form-row">
+      <label for="name">Name</label><br>
+      <input id="name" name="name" type="text" class="field-full"
+             value="{{ values.get('name', '') }}" required>
+      {% if errors.get("name") %}<div class="field-error">{{ errors["name"] }}</div>{% endif %}
+    </div>
+    <div class="form-row">
+      <label for="start_time">Start time</label><br>
+      <input id="start_time" name="start_time" type="datetime-local" class="field-full"
+             value="{{ values.get('start_time', '') }}" required>
+      {% if errors.get("start_time") %}<div class="field-error">{{ errors["start_time"] }}</div>{% endif %}
+    </div>
+    <div class="form-row">
+      <label for="end_time">End time</label><br>
+      <input id="end_time" name="end_time" type="datetime-local" class="field-full"
+             value="{{ values.get('end_time', '') }}" required>
+      {% if errors.get("end_time") %}<div class="field-error">{{ errors["end_time"] }}</div>{% endif %}
+    </div>
+    <div class="form-row">
+      <label for="scoring_start_time">Scoring start (optional)</label><br>
+      <input id="scoring_start_time" name="scoring_start_time" type="datetime-local"
+             class="field-full" value="{{ values.get('scoring_start_time', '') }}">
+      {% if errors.get("scoring_start_time") %}<div class="field-error">{{ errors["scoring_start_time"] }}</div>{% endif %}
+    </div>
+    <div class="form-row">
+      <label for="freeze_time">Freeze time (optional)</label><br>
+      <input id="freeze_time" name="freeze_time" type="datetime-local" class="field-full"
+             value="{{ values.get('freeze_time', '') }}">
+      {% if errors.get("freeze_time") %}<div class="field-error">{{ errors["freeze_time"] }}</div>{% endif %}
+    </div>
+    <div class="actions">
+      <button type="submit" class="btn">{{ submit_label }}</button>
+      <a href="{{ cancel_url }}">Cancel</a>
+    </div>
+  </form>
+</div>
+{% endblock %}

@@ -11,7 +11,13 @@ from __future__ import annotations
 from fastapi import Request
 
 from ctf_generator.application.auth import AuthService
-from ctf_generator.application.catalog import CompetitionService
+from ctf_generator.application.catalog import (
+    ChallengeDefinitionService,
+    ChallengeVersionService,
+    CompetitionService,
+    TeamService,
+)
+from ctf_generator.application.catalog.publication_service import PublicationService
 from ctf_generator.infrastructure.database.session import Database
 
 from .settings import WebSettings
@@ -40,3 +46,21 @@ def get_web_auth_service(request: Request) -> AuthService:
 
 def get_web_competition_service(request: Request) -> CompetitionService:
     return CompetitionService(get_web_database(request))
+
+
+def get_web_team_service(request: Request) -> TeamService:
+    return TeamService(get_web_database(request))
+
+
+def get_web_publication_service(request: Request) -> PublicationService:
+    return PublicationService(get_web_database(request))
+
+
+def get_web_challenge_definition_service(
+    request: Request,
+) -> ChallengeDefinitionService:
+    return ChallengeDefinitionService(get_web_database(request))
+
+
+def get_web_challenge_version_service(request: Request) -> ChallengeVersionService:
+    return ChallengeVersionService(get_web_database(request))

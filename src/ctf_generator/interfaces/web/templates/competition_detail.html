@@ -11,6 +11,13 @@
     <dt>Scoring start</dt><dd>{{ competition.scoring_start_time or "—" }}</dd>
     <dt>Freeze</dt><dd>{{ competition.freeze_time or "—" }}</dd>
   </dl>
+  {% if can_manage %}
+  <div class="actions">
+    <a href="{{ mount_path }}/competitions/{{ competition.competition_id }}/edit">Edit</a>
+    <a href="{{ mount_path }}/competitions/{{ competition.competition_id }}/teams">Teams</a>
+    <a href="{{ mount_path }}/competitions/{{ competition.competition_id }}/publications">Publications</a>
+  </div>
+  {% endif %}
 </div>
 {% if competition.scoring %}
 <div class="card">

@@ -3,6 +3,9 @@
 {% block content %}
 <div class="card">
   <h1>Competitions</h1>
+  {% if can_create %}
+  <p><a href="{{ mount_path }}/competitions/new">+ New competition</a></p>
+  {% endif %}
   {% if competitions %}
   <table>
     <thead><tr><th>Name</th><th>ID</th><th>Starts</th><th>Ends</th></tr></thead>
