@@ -30,6 +30,9 @@ from typing import Protocol
 from fastapi import Depends, Request
 
 from ctf_generator.application.auth import AuthService
+from ctf_generator.application.authoring.artifact_download import (
+    ArtifactDownloadService,
+)
 from ctf_generator.application.authoring.build_service import BuildService
 from ctf_generator.application.catalog import (
     ChallengeDefinitionService,
@@ -605,6 +608,16 @@ def get_job_service(database: Database = Depends(get_database)) -> JobService:
 
 def get_build_service(database: Database = Depends(get_database)) -> BuildService:
     return BuildService(database, jobs=JobService(database))
+
+
+def get_artifact_download_service(
+    request: Request,
+    database: Database = Depends(get_database),
+) -> ArtifactDownloadService:
+    # The app-scoped artifact store (may be None when CTFGEN_ARTIFACT_ROOT is
+    # unset); the service then resolves every download to None -> a clean 404.
+    artifact_store = getattr(request.app.state, "artifact_store", None)
+    return ArtifactDownloadService(database, artifact_store)
 
 
 def get_publication_service(

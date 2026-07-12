@@ -52,6 +52,9 @@ from datetime import UTC, datetime
 from fastapi import APIRouter, Depends, Request
 from starlette.responses import Response
 
+from ctf_generator.application.authoring.artifact_download import (
+    ArtifactDownloadService,
+)
 from ctf_generator.application.catalog import (
     ChallengeDefinitionService,
     ChallengeVersionService,
@@ -88,6 +91,7 @@ from ctf_generator.interfaces.api.routers.submissions import _SUBMISSION_NS
 from .auth import get_web_principal
 from .csrf import require_csrf
 from .deps import (
+    get_web_artifact_download_service,
     get_web_challenge_definition_service,
     get_web_challenge_version_service,
     get_web_competition_service,
@@ -590,4 +594,83 @@ def my_submissions_view(
     }
     return renderer.render(
         request, "my_submissions.html", context, principal=principal
+    )
+
+
+# ===========================================================================
+# M14 slice 14c-2 -- contestant PUBLIC-only artifact download.
+#
+# Serves ONLY the materialized public bundle (the 14c-1 tar, already private-
+# stripped), obtained via the DB ChallengeBuild.storage_uri -> ArtifactStore. The
+# storage key is NEVER caller-controlled (no traversal): the handler passes only
+# (slug, version_no) to the download service, which reads the key from the row.
+# Authz mirrors the catalog reads EXACTLY: competition:read (existence-hiding 404
+# cross-competition) + published-in-THIS-competition (else 404). An unmaterialized
+# / unavailable artifact is a friendly 404, never a 500.
+# ===========================================================================
+
+_ARTIFACT_NOT_AVAILABLE = "This challenge's download is not available yet."
+
+
+@contestant_router.get(
+    "/competitions/{competition_id}/challenges/{definition_slug}/{version_no}/download",
+    name="web_challenge_download",
+)
+def challenge_download(
+    competition_id: str,
+    definition_slug: str,
+    version_no: int,
+    request: Request,
+    principal: Principal = Depends(get_web_principal),
+    renderer: TemplateRenderer = Depends(get_renderer),
+    pub_service: PublicationService = Depends(get_web_publication_service),
+    download_service: ArtifactDownloadService = Depends(
+        get_web_artifact_download_service
+    ),
+) -> Response:
+    """Download the PUBLIC artifact bundle for one PUBLISHED challenge.
+
+    Existence-hiding 404 for a competition the caller cannot read OR a challenge
+    not published here (identical to the catalog). An unmaterialized / unavailable
+    artifact (no build, no bytes, store unconfigured) is a friendly 404 page --
+    NEVER a 500. The response streams the private-stripped tar with a sanitized
+    ``Content-Disposition`` filename and ``Cache-Control: no-store``."""
+    assert_competition_permission_or_404(
+        principal, competition_id, Permission.COMPETITION_READ, not_found=_NOT_FOUND
+    )
+    _require_published_or_404(
+        pub_service, competition_id, definition_slug, version_no
+    )
+    artifact = download_service.resolve_public_artifact(definition_slug, version_no)
+    if artifact is None:
+        # Friendly 404 (never a 500): the challenge is published here but its public
+        # bundle has not been materialized / stored yet.
+        return _error_page_404(request, renderer, principal)
+    return Response(
+        content=artifact.data,
+        media_type=artifact.media_type,
+        headers={
+            "Content-Type": artifact.media_type,
+            "Content-Disposition": f'attachment; filename="{artifact.filename}"',
+            "Content-Length": str(artifact.content_length),
+            "Cache-Control": "no-store",
+        },
+    )
+
+
+def _error_page_404(
+    request: Request, renderer: TemplateRenderer, principal: Principal
+) -> Response:
+    """Render the shared friendly error page as a 404 (artifact not available). A
+    404 body -- not an exception -- so no traceback and no 500 can occur."""
+    return renderer.render(
+        request,
+        "error.html",
+        {
+            "title": "Not available",
+            "message": _ARTIFACT_NOT_AVAILABLE,
+            "status_code": 404,
+        },
+        principal=principal,
+        status_code=404,
     )

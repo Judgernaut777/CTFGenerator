@@ -11,6 +11,9 @@ from __future__ import annotations
 from fastapi import Request
 
 from ctf_generator.application.auth import AuthService
+from ctf_generator.application.authoring.artifact_download import (
+    ArtifactDownloadService,
+)
 from ctf_generator.application.authoring.build_service import BuildService
 from ctf_generator.application.catalog import (
     ChallengeDefinitionService,
@@ -101,6 +104,15 @@ def get_web_job_service(request: Request) -> JobService:
 def get_web_build_service(request: Request) -> BuildService:
     database = get_web_database(request)
     return BuildService(database, jobs=JobService(database))
+
+
+def get_web_artifact_download_service(
+    request: Request,
+) -> ArtifactDownloadService:
+    # The app-scoped artifact store (may be None when unconfigured -> the service
+    # resolves every download to None, a clean 404 rather than a 500).
+    artifact_store = getattr(request.app.state, "artifact_store", None)
+    return ArtifactDownloadService(get_web_database(request), artifact_store)
 
 
 def get_web_scoreboard_service(request: Request) -> ScoreboardService:
