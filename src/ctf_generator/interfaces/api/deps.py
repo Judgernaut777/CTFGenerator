@@ -80,6 +80,62 @@ class Permission(StrEnum):
     JOB_OPERATE = "job:operate"
 
 
+class PermissionScope(StrEnum):
+    """The authorization TIER a :class:`Permission` is evaluated in (M10b).
+
+    * ``SYSTEM`` -- deployment-global, satisfied by a system role (``admin`` /
+      ``support``). Evaluated by the flat :func:`require_permission`.
+    * ``AUTHORING`` -- platform-global challenge authoring, independent of any
+      competition. Also evaluated by the flat :func:`require_permission`.
+    * ``COMPETITION`` -- scoped to a TARGET competition: satisfied only by the
+      caller's effective role IN that competition (its membership there ∪ its
+      system roles). Evaluated by :func:`require_competition_permission` /
+      :func:`assert_competition_permission`.
+    """
+
+    SYSTEM = "system"
+    AUTHORING = "authoring"
+    COMPETITION = "competition"
+
+
+# Every Permission's authorization tier. MUST stay total: an unclassified
+# permission is a fail-closed error (guarded at import + by a completeness test)
+# so a newly added permission can never silently default to a weaker check.
+PERMISSION_SCOPE: dict[Permission, PermissionScope] = {
+    # SYSTEM (deployment-global; a system role).
+    Permission.USER_READ: PermissionScope.SYSTEM,
+    Permission.USER_WRITE: PermissionScope.SYSTEM,
+    Permission.JOB_READ: PermissionScope.SYSTEM,
+    Permission.JOB_OPERATE: PermissionScope.SYSTEM,
+    # AUTHORING (platform-global challenge authoring; independent of a competition).
+    Permission.CHALLENGE_READ: PermissionScope.AUTHORING,
+    Permission.CHALLENGE_WRITE: PermissionScope.AUTHORING,
+    Permission.CHALLENGE_PUBLISH: PermissionScope.AUTHORING,
+    Permission.BUILD_READ: PermissionScope.AUTHORING,
+    Permission.BUILD_CREATE: PermissionScope.AUTHORING,
+    # COMPETITION (scoped to the target competition via the caller's membership).
+    Permission.COMPETITION_READ: PermissionScope.COMPETITION,
+    Permission.COMPETITION_WRITE: PermissionScope.COMPETITION,
+    Permission.TEAM_READ: PermissionScope.COMPETITION,
+    Permission.TEAM_WRITE: PermissionScope.COMPETITION,
+    Permission.SUBMISSION_CREATE: PermissionScope.COMPETITION,
+    Permission.SUBMISSION_READ: PermissionScope.COMPETITION,
+    Permission.SCOREBOARD_READ: PermissionScope.COMPETITION,
+    Permission.SCOREBOARD_LAG_READ: PermissionScope.COMPETITION,
+    Permission.PUBLICATION_READ: PermissionScope.COMPETITION,
+    Permission.PUBLICATION_WRITE: PermissionScope.COMPETITION,
+    Permission.INSTANCE_READ: PermissionScope.COMPETITION,
+    Permission.INSTANCE_OPERATE: PermissionScope.COMPETITION,
+}
+
+_UNCLASSIFIED = frozenset(Permission) - frozenset(PERMISSION_SCOPE)
+if _UNCLASSIFIED:  # pragma: no cover - guards a future unclassified permission
+    raise RuntimeError(
+        "PERMISSION_SCOPE is not total; unclassified permissions: "
+        f"{sorted(p.value for p in _UNCLASSIFIED)}"
+    )
+
+
 _ALL = frozenset(Permission)
 _CATALOG_READ = frozenset(
     {Permission.COMPETITION_READ, Permission.TEAM_READ, Permission.CHALLENGE_READ}
@@ -157,10 +213,9 @@ ROLE_PERMISSIONS: dict[str, frozenset[Permission]] = {
 
 
 # Roles whose submission reads are NOT confined to a single team. Everyone else
-# (``player`` / ``captain``) may only see their own ``Principal.team``. This is
-# the coarse team-scope tenancy slice-b can enforce from what the Principal
-# already carries; full per-org/per-team resource ownership is deferred to M10
-# (see docs/api/slice-a-limitations.md).
+# (``player`` / ``captain``) may only see the team of their membership IN THE
+# TARGET COMPETITION (M10b: ``submission_team_scope`` derives the team from
+# ``memberships[competition_id]``, per-competition, not a flat ``Principal.team``).
 TENANCY_UNRESTRICTED_ROLES = frozenset(
     {"admin", "organizer", "judge", "support", "observer", "author"}
 )
@@ -197,6 +252,20 @@ class Principal:
         return permission in self.permissions
 
 
+def resolve_permissions(
+    roles: frozenset[str] | set[str] | list[str],
+) -> frozenset[Permission]:
+    """Union the permission grants of every role (fail-closed on unknown roles).
+
+    The single source of truth for role → permission resolution, used by both the
+    flat ``principal_for`` and the competition-scoped ``competition_permissions``.
+    """
+    perms: set[Permission] = set()
+    for role in roles:
+        perms |= ROLE_PERMISSIONS.get(role, frozenset())
+    return frozenset(perms)
+
+
 def principal_for(
     subject: str,
     roles: frozenset[str] | set[str] | list[str],
@@ -208,21 +277,79 @@ def principal_for(
 ) -> Principal:
     """Build a principal, resolving its permission set from its (flat) roles.
 
-    ``system_roles`` / ``memberships`` are optional forward-compat context; they
-    do NOT change permission resolution (which stays over the flat ``roles``
-    set), so existing callers that pass only ``roles`` are unaffected."""
+    ``system_roles`` / ``memberships`` are optional context: they do NOT change
+    the flat ``permissions`` set (which stays over ``roles`` so
+    ``require_permission`` -- SYSTEM/AUTHORING -- is unchanged), but they ARE the
+    inputs the COMPETITION-scoped checks consume (``require_competition_permission``
+    / ``submission_team_scope``). Existing callers that pass only ``roles`` are
+    unaffected."""
     role_set = frozenset(roles)
-    perms: set[Permission] = set()
-    for role in role_set:
-        perms |= ROLE_PERMISSIONS.get(role, frozenset())
     return Principal(
         subject=subject,
         roles=role_set,
-        permissions=frozenset(perms),
+        permissions=resolve_permissions(role_set),
         org=org,
         team=team,
         system_roles=frozenset(system_roles or frozenset()),
         memberships=dict(memberships or {}),
+    )
+
+
+def competition_effective_roles(
+    principal: Principal, competition_id: str
+) -> frozenset[str]:
+    """The caller's EFFECTIVE role set for one competition: its deployment-global
+    ``system_roles`` ∪ the single role of its membership in that competition (if
+    any). This -- NOT the flat ``Principal.roles`` -- is what a COMPETITION-scoped
+    authorization decision is resolved over, so a role held only in competition A
+    grants nothing in competition B."""
+    roles = set(principal.system_roles)
+    membership = principal.memberships.get(competition_id)
+    if membership is not None:
+        roles.add(membership[0])
+    return frozenset(roles)
+
+
+def competition_permissions(
+    principal: Principal, competition_id: str
+) -> frozenset[Permission]:
+    """The permissions the caller effectively holds IN one competition."""
+    return resolve_permissions(competition_effective_roles(principal, competition_id))
+
+
+def assert_competition_permission(
+    principal: Principal, competition_id: str | None, permission: Permission
+) -> None:
+    """Raise :class:`AuthorizationError` unless the caller holds ``permission`` in
+    ``competition_id`` (via its membership there or a system role). Fail closed on
+    a missing competition id. Shared by :func:`require_competition_permission` and
+    by handlers whose target competition is not a path parameter (resolved from
+    the loaded resource -- e.g. an instance / submission by id)."""
+    if not competition_id:
+        raise AuthorizationError("no competition context for authorization")
+    if permission not in competition_permissions(principal, competition_id):
+        raise AuthorizationError(
+            f"principal lacks {permission.value!r} in competition "
+            f"{competition_id!r}"
+        )
+
+
+def authorized_competitions(
+    principal: Principal, permission: Permission
+) -> frozenset[str] | None:
+    """The competitions in which the caller holds ``permission``.
+
+    Returns ``None`` when a system role grants it deployment-wide (an unrestricted
+    cross-competition view); otherwise the (possibly empty) set of competition ids
+    where a membership grants it. Used to SAFELY filter cross-competition operator
+    lists (e.g. ``GET /instances``) so a caller never sees another competition's
+    rows."""
+    if permission in resolve_permissions(principal.system_roles):
+        return None
+    return frozenset(
+        competition_id
+        for competition_id, (role, _team) in principal.memberships.items()
+        if permission in ROLE_PERMISSIONS.get(role, frozenset())
     )
 
 
@@ -241,16 +368,30 @@ class SubmissionAccess:
     team: str | None
 
 
-def submission_team_scope(principal: Principal) -> SubmissionAccess:
-    """Resolve a principal's submission tenancy scope.
+def submission_team_scope(
+    principal: Principal, competition_id: str
+) -> SubmissionAccess:
+    """Resolve a principal's submission tenancy scope WITHIN one competition.
 
-    A tenancy-unrestricted principal (organizer / admin / staff) may act on any
-    team. A team-scoped principal (``player`` / ``captain``) is confined to its own
-    :attr:`Principal.team`; a principal with no team is denied entirely until
-    placed on a team (fail closed)."""
-    if principal.roles & TENANCY_UNRESTRICTED_ROLES:
+    The team is derived from the caller's per-competition membership
+    (``memberships[competition_id]``), NOT a flat single team -- so a player of
+    team Red in competition X is confined to Red in X and has no standing in
+    competition Y (a same-named team in a different competition no longer leaks).
+
+    * A caller whose EFFECTIVE role in this competition is tenancy-unrestricted
+      (organizer of this competition / admin / staff / observer / judge / author)
+      may act on any team in it.
+    * A team-scoped role (``player`` / ``captain``) is confined to the team of its
+      membership in THIS competition.
+    * A team-scoped caller not placed on a team in this competition (no membership,
+      or a membership with no team) is denied entirely (fail closed)."""
+    if competition_effective_roles(principal, competition_id) & (
+        TENANCY_UNRESTRICTED_ROLES
+    ):
         return SubmissionAccess(unrestricted=True, team=None)
-    return SubmissionAccess(unrestricted=False, team=principal.team)
+    membership = principal.memberships.get(competition_id)
+    team = membership[1] if membership is not None else None
+    return SubmissionAccess(unrestricted=False, team=team)
 
 
 class Authenticator(Protocol):
@@ -321,6 +462,43 @@ def require_permission(permission: Permission):
         if not principal.has(permission):
             raise AuthorizationError(
                 f"principal lacks required permission {permission.value!r}"
+            )
+        return principal
+
+    return _dependency
+
+
+def require_competition_permission(permission: Permission):
+    """Return a dependency that authenticates then enforces ``permission`` IN the
+    ``{competition_id}`` from the request path (403 if the caller has no effective
+    role granting it there). This is the COMPETITION-scoped counterpart to the flat
+    :func:`require_permission`: an organizer of competition A is denied in B because
+    its membership -- not its flat role union -- is what the check consults. A
+    system role (``admin`` / ``support``) is granted in every competition."""
+
+    def _dependency(
+        request: Request, principal: Principal = Depends(get_principal)
+    ) -> Principal:
+        competition_id = request.path_params.get("competition_id")
+        assert_competition_permission(principal, competition_id, permission)
+        return principal
+
+    return _dependency
+
+
+def require_any_competition_permission(permission: Permission):
+    """Return a dependency for a cross-competition operator LIST view: authenticate
+    then require the caller holds ``permission`` in at least ONE competition (or
+    deployment-wide via a system role). The handler still filters its result set to
+    :func:`authorized_competitions` so no other competition's rows leak; this
+    dependency only fail-closes a caller (e.g. a contestant) with the permission
+    NOWHERE, so it gets a 403 rather than an empty 200."""
+
+    def _dependency(principal: Principal = Depends(get_principal)) -> Principal:
+        allowed = authorized_competitions(principal, permission)
+        if allowed is not None and not allowed:
+            raise AuthorizationError(
+                f"principal lacks {permission.value!r} in any competition"
             )
         return principal
 
