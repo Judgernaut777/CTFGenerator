@@ -133,6 +133,23 @@ class SqlAlchemyMembershipRepository:
             for membership_row, email, team_name in rows
         ]
 
+    def list_for_user(self, user_email: str) -> list[Membership]:
+        """Return every membership the user holds across ALL competitions (empty
+        if the user is unknown or holds none). Used by auth principal resolution
+        to assemble a caller's competition roles; intentionally not
+        competition-scoped."""
+        rows = self._session.execute(
+            select(MembershipRow, UserRow.email, Competition.slug, TeamRow.name)
+            .join(UserRow, MembershipRow.user_id == UserRow.id)
+            .join(Competition, MembershipRow.competition_id == Competition.id)
+            .outerjoin(TeamRow, MembershipRow.team_id == TeamRow.id)
+            .where(func.lower(UserRow.email) == user_email.lower())
+        ).all()
+        return [
+            membership_from_orm(membership_row, email, competition_slug, team_name)
+            for membership_row, email, competition_slug, team_name in rows
+        ]
+
     def update(self, membership: Membership) -> None:
         """Update the mutable fields (role, team placement) of an existing
         membership, keyed by ``(user_email, competition_id)``. Raises

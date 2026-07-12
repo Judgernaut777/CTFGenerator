@@ -21,6 +21,7 @@ from sqlalchemy import (
 from sqlalchemy.dialects.postgresql import ARRAY, JSONB
 from sqlalchemy.orm import Mapped, mapped_column
 
+from ...domain.auth.models import VALID_SYSTEM_ROLES
 from ...domain.authoring.models import VALID_DECAY_FUNCTIONS, VALID_VERSION_STATES
 from ...domain.execution.models import VALID_RUNTIME_TYPES, VALID_TRUST_STATES
 from ...domain.identity.models import VALID_ROLES
@@ -58,6 +59,11 @@ _COMPETITION_STATUSES = ("draft", "scheduled", "live", "frozen", "ended", "archi
 # Sourced from the domain's VALID_ROLES (single source of truth) and sorted so
 # the generated SQL is deterministic and matches the migration byte-for-byte.
 _ROLE_IN_LIST = ", ".join(f"'{r}'" for r in sorted(VALID_ROLES))
+
+# SQL fragment for the user_system_roles CHECK -- the deployment-global roles
+# (admin / support), sourced from the domain's VALID_SYSTEM_ROLES and sorted so
+# the generated SQL matches the migration byte-for-byte.
+_SYSTEM_ROLE_IN_LIST = ", ".join(f"'{r}'" for r in sorted(VALID_SYSTEM_ROLES))
 # Likewise for challenge-version lifecycle states and scoring decay functions.
 _VERSION_STATE_IN_LIST = ", ".join(f"'{s}'" for s in sorted(VALID_VERSION_STATES))
 _DECAY_FUNCTION_IN_LIST = ", ".join(f"'{d}'" for d in sorted(VALID_DECAY_FUNCTIONS))
@@ -1483,5 +1489,115 @@ class InstanceEvent(Base):
             "ix_instance_events_instance_id_occurred_at",
             "instance_id",
             "occurred_at",
+        ),
+    )
+
+
+class AuthCredential(Base):
+    """Persistent form of the domain ``AuthCredential`` -- one local password
+    credential per user. ``id`` is a surrogate uuid; the business identity is the
+    owning ``user_id`` (``UNIQUE`` -- exactly one credential per user). Only the
+    *encoded* password hash is stored (``pbkdf2_sha256$...`` today -- never a
+    plaintext password). MUTABLE in place: a password change updates
+    ``password_hash`` + ``updated_at`` (there is no history table)."""
+
+    __tablename__ = "auth_credentials"
+
+    id: Mapped[uuid.UUID] = mapped_column(sa.Uuid, primary_key=True, default=uuid.uuid4)
+    user_id: Mapped[uuid.UUID] = mapped_column(
+        sa.Uuid, ForeignKey("users.id", ondelete="RESTRICT"), nullable=False
+    )
+    password_hash: Mapped[str] = mapped_column(sa.Text, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        sa.DateTime(timezone=True), nullable=False, server_default=sa.func.now()
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        sa.DateTime(timezone=True), nullable=False
+    )
+
+    __table_args__ = (
+        UniqueConstraint("user_id", name="uq_auth_credentials_user_id"),
+        # Non-empty + carries the '<algorithm>$...' separator, a genuine backstop
+        # against a bare plaintext ever being stored (format-agnostic so an
+        # Argon2 hasher is a drop-in). Full KDF validation is the hasher's job.
+        CheckConstraint(
+            r"password_hash ~ '^\S+\$\S+$'",
+            name="password_hash_encoded",
+        ),
+        CheckConstraint(
+            "updated_at >= created_at", name="updated_after_created"
+        ),
+    )
+
+
+class AuthSession(Base):
+    """Persistent form of the domain ``AuthSession`` -- a server-side session.
+    ``id`` is the business ``session_id``. Only the sha256 hex of the opaque
+    bearer token is stored (``token_hash``, UNIQUE, 64-hex CHECK -- so a
+    plaintext ``token_urlsafe`` token can never satisfy the CHECK and be stored
+    by mistake). Near-append-only: the single legal UPDATE is the ``revoked_at``
+    NULL->value stamp (logout / refresh), enforced by the ``auth_sessions_freeze``
+    trigger (migration 0011); DELETE/TRUNCATE hit the shared ``reject_mutation``.
+    ``rotated_from`` self-references the predecessor session a refresh rotated
+    from. The partial ``ix_auth_sessions_user_id_live`` index scans a user's live
+    sessions."""
+
+    __tablename__ = "sessions"
+
+    id: Mapped[uuid.UUID] = mapped_column(sa.Uuid, primary_key=True)
+    user_id: Mapped[uuid.UUID] = mapped_column(
+        sa.Uuid, ForeignKey("users.id", ondelete="RESTRICT"), nullable=False
+    )
+    token_hash: Mapped[str] = mapped_column(sa.Text, nullable=False)
+    issued_at: Mapped[datetime] = mapped_column(
+        sa.DateTime(timezone=True), nullable=False
+    )
+    expires_at: Mapped[datetime] = mapped_column(
+        sa.DateTime(timezone=True), nullable=False
+    )
+    rotated_from: Mapped[uuid.UUID | None] = mapped_column(
+        sa.Uuid, ForeignKey("sessions.id", ondelete="RESTRICT"), nullable=True
+    )
+    revoked_at: Mapped[datetime | None] = mapped_column(
+        sa.DateTime(timezone=True), nullable=True
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        sa.DateTime(timezone=True), nullable=False, server_default=sa.func.now()
+    )
+
+    __table_args__ = (
+        UniqueConstraint("token_hash", name="uq_sessions_token_hash"),
+        CheckConstraint(
+            "token_hash ~ '^[0-9a-f]{64}$'", name="token_hash_format"
+        ),
+        CheckConstraint("expires_at > issued_at", name="expiry_after_issue"),
+        Index(
+            "ix_sessions_user_id_live",
+            "user_id",
+            postgresql_where=sa.text("revoked_at IS NULL"),
+        ),
+    )
+
+
+class UserSystemRole(Base):
+    """Persistent form of the domain ``SystemRoleAssignment`` -- a
+    deployment-global role grant on a user's auth account. Keyed by
+    ``(user_id, role)`` with ``role`` CHECK-constrained to the domain's
+    ``VALID_SYSTEM_ROLES`` (admin / support). Revocable (a plain delete),
+    unlike the append-only auth aggregates."""
+
+    __tablename__ = "user_system_roles"
+
+    user_id: Mapped[uuid.UUID] = mapped_column(
+        sa.Uuid, ForeignKey("users.id", ondelete="RESTRICT"), primary_key=True
+    )
+    role: Mapped[str] = mapped_column(sa.Text, primary_key=True)
+    created_at: Mapped[datetime] = mapped_column(
+        sa.DateTime(timezone=True), nullable=False, server_default=sa.func.now()
+    )
+
+    __table_args__ = (
+        CheckConstraint(
+            f"role IN ({_SYSTEM_ROLE_IN_LIST})", name="role_valid"
         ),
     )
