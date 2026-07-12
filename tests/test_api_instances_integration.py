@@ -349,19 +349,18 @@ class InstancesApiIntegrationTests(unittest.TestCase):
         with _client_and_db() as (client, db):
             _seed_parents(client)
             iid = _seed_instance_with_secrets(db)
-            probes = [
+            # List / path-competition / body-competition routes carry the tenancy
+            # context in the caller's own request, so an unauthorized contestant is
+            # a plain 403 (no new information disclosed).
+            forbidden_probes = [
                 ("get", "/api/v1/instances"),
                 ("get", f"/api/v1/competitions/{_CID}/instances"),
-                ("get", f"/api/v1/instances/{iid}"),
-                ("post", f"/api/v1/instances/{iid}/stop"),
-                ("post", f"/api/v1/instances/{iid}/reset"),
-                ("post", f"/api/v1/instances/{iid}/delete"),
             ]
-            for method, path in probes:
+            for method, path in forbidden_probes:
                 r = getattr(client, method)(path, headers=_auth(_PLAYER))
                 self.assertEqual(r.status_code, 403, f"{method} {path}: {r.text}")
                 self.assertEqual(r.json()["error"]["code"], "forbidden")
-            # Launch endpoint too.
+            # Launch endpoint too (competition_id in the body).
             r = client.post(
                 "/api/v1/instances",
                 headers=_auth(_PLAYER),
@@ -371,6 +370,19 @@ class InstancesApiIntegrationTests(unittest.TestCase):
                 },
             )
             self.assertEqual(r.status_code, 403, r.text)
+            # The instance-by-id routes resolve tenancy from the LOADED row (no
+            # {competition_id} in the path): an unauthorized caller must not learn the
+            # instance exists, so a denial is a GENERIC 404 (identical to a
+            # nonexistent id) -- NOT a 403 that names the resource. No existence leak.
+            for method, path in (
+                ("get", f"/api/v1/instances/{iid}"),
+                ("post", f"/api/v1/instances/{iid}/stop"),
+                ("post", f"/api/v1/instances/{iid}/reset"),
+                ("post", f"/api/v1/instances/{iid}/delete"),
+            ):
+                r = getattr(client, method)(path, headers=_auth(_PLAYER))
+                self.assertEqual(r.status_code, 404, f"{method} {path}: {r.text}")
+                self.assertEqual(r.json()["error"]["code"], "not_found")
 
     def test_list_pagination_walks_every_instance(self) -> None:
         # FIX 1: with the 500-row cap removed, cursor pagination over a small page

@@ -26,7 +26,7 @@ from ..concurrency import compute_etag
 from ..deps import (
     Permission,
     Principal,
-    assert_competition_permission,
+    assert_competition_permission_or_404,
     get_principal,
     get_submission_processing_service,
     get_submission_query_service,
@@ -209,9 +209,15 @@ def get_submission(
     if detail is None:
         raise LookupError(f"submission not found: {submission_id!r}")
     submission, solve = detail
-    # Cross-competition: no submission:read in the row's competition -> 403.
-    assert_competition_permission(
-        principal, submission.competition_id, Permission.SUBMISSION_READ
+    # Cross-competition: no submission:read in the row's competition -> generic 404
+    # (identical to a nonexistent id / cross-team mismatch below), NOT a 403 that
+    # would confirm the row exists and name its owning competition -- no existence
+    # oracle on this non-path-competition route.
+    assert_competition_permission_or_404(
+        principal,
+        submission.competition_id,
+        Permission.SUBMISSION_READ,
+        not_found=f"submission not found: {submission_id!r}",
     )
     access = submission_team_scope(principal, submission.competition_id)
     if not access.unrestricted and (

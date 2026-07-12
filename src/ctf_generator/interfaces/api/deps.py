@@ -334,6 +334,34 @@ def assert_competition_permission(
         )
 
 
+def assert_competition_permission_or_404(
+    principal: Principal,
+    competition_id: str | None,
+    permission: Permission,
+    *,
+    not_found: str,
+) -> None:
+    """Authorize ``permission`` on a RESOURCE-BY-ID route, surfacing a denial as a
+    generic 404 instead of a 403.
+
+    The by-id routes (e.g. ``GET /submissions/{id}``, the instance-by-id actions)
+    resolve their target competition from the LOADED row, not a path parameter, so
+    a 403 that names the resource/competition would confirm the row exists AND leak
+    its owning ``competition_id`` to a caller not entitled to see it -- and, since
+    the same handler already 404s a nonexistent id and a cross-team mismatch, it
+    would create a cross-tenant existence oracle. The authorization decision is
+    unchanged (still denied); only the SURFACED outcome becomes a ``LookupError``
+    (404) whose ``not_found`` message is generic -- identical to the nonexistent-id
+    404 -- so "exists in a competition I can't access" is indistinguishable from
+    "does not exist". PATH-competition routes must keep the plain
+    :func:`assert_competition_permission` (403): their ``competition_id`` is already
+    in the caller's request, so a 403 leaks nothing new."""
+    try:
+        assert_competition_permission(principal, competition_id, permission)
+    except AuthorizationError:
+        raise LookupError(not_found) from None
+
+
 def authorized_competitions(
     principal: Principal, permission: Permission
 ) -> frozenset[str] | None:
