@@ -30,6 +30,12 @@ class CursorError(ValueError):
     """A supplied cursor is malformed / not a token this server issued."""
 
 
+def _norm(key: Any) -> Any:
+    """Normalize a sort key through the same JSON round-trip the cursor uses, so
+    a live item's key compares consistently against a decoded cursor key."""
+    return json.loads(json.dumps(key, sort_keys=True, default=str))
+
+
 def encode_cursor(key: Any) -> str:
     """Encode a JSON-serializable sort key into an opaque token."""
     raw = json.dumps({"k": key}, separators=(",", ":"), default=str).encode("utf-8")
@@ -74,21 +80,24 @@ def paginate(
     """Return one page of ``items``.
 
     ``items`` MUST already be sorted ascending by ``key`` (ties broken stably by
-    the caller's chosen id). ``cursor`` (if given) resumes strictly *after* the
-    item whose key it encodes. ``next_cursor`` is set only when more items follow.
+    the caller's chosen id). ``cursor`` (if given) resumes at the first item whose
+    key sorts *strictly after* the cursor's key. Resuming strictly-after (rather
+    than by exact-match of the boundary key) is deletion-resilient: if the item
+    the cursor points at was removed between page fetches, the tail is still
+    returned rather than silently skipped. ``next_cursor`` is set only when more
+    items follow.
     """
     size = clamp_limit(limit)
     start = 0
     if cursor is not None:
+        # The decoded cursor key is already in normalized (JSON round-trip) form;
+        # normalize each item's key the same way so heterogeneous-but-stable keys
+        # (str / int) compare consistently with a native ``>``.
         resume_after = decode_cursor(cursor)
-        # Advance past every item up to and including the cursor's key. Keys are
-        # compared as their JSON-canonical string form so heterogeneous but
-        # stable keys (str / int / tuple) resume deterministically.
-        target = json.dumps(resume_after, sort_keys=True, default=str)
         start = len(items)
         for idx, item in enumerate(items):
-            if json.dumps(key(item), sort_keys=True, default=str) == target:
-                start = idx + 1
+            if _norm(key(item)) > resume_after:
+                start = idx
                 break
     window = items[start : start + size]
     next_cursor: str | None = None
