@@ -16,6 +16,7 @@ by-id lookups) -- enough to express the contract, not a frozen final API.
 
 from __future__ import annotations
 
+from collections.abc import Mapping, Sequence
 from datetime import datetime
 from typing import Protocol
 
@@ -29,8 +30,17 @@ from .challenges.models import (
     ChallengeSpec,
     CompetitionConfig,
 )
+from .execution.models import Worker, WorkerCredential
 from .identity.models import Membership, Team, User
-from .ledger.models import LedgerSubmission, ScoreEvent, Solve
+from .ledger.models import (
+    LedgerSubmission,
+    ProjectionLag,
+    ProjectionTask,
+    ScoreboardProjectionRecord,
+    ScoreEvent,
+    Solve,
+)
+from .work.models import Job, JobLease
 
 
 class CompetitionRepository(Protocol):
@@ -310,6 +320,12 @@ class SolveRepository(Protocol):
     ) -> Solve | None:
         ...
 
+    def get_by_submission(self, submission_id: str) -> Solve | None:
+        """The solve derived from ``submission_id``, if any (backed by the
+        store's ``UNIQUE (submission_id)``). Used by the idempotent replay path
+        of submission processing."""
+        ...
+
     def list_for_competition(self, competition_id: str) -> list[Solve]:
         ...
 
@@ -356,18 +372,249 @@ class ArtifactStore(Protocol):
         ...
 
 
-class WorkerQueue(Protocol):
-    """Dispatches and drains background work items.
+class JobQueue(Protocol):
+    """The durable PostgreSQL-backed job queue contract (ADR-003; supersedes
+    the M6 ``WorkerQueue`` stub).
 
-    Forward contract for M6/M7; concrete broker/in-process backends land in
-    infrastructure.
+    NO business logic here -- the store enforces mechanics only. Error
+    contract: a duplicate ``idempotency_key`` raises the underlying
+    ``IntegrityError`` (the application layer collapses it to the existing
+    job); a missing job, a stale/mismatched ``lease_token``, or an illegal
+    source state raises :class:`LookupError` and changes nothing. Every
+    *fenced* method (``start``/``heartbeat``/``complete``/``fail``) requires
+    the ``lease_token`` minted at ``claim`` -- this is what makes duplicate
+    delivery and zombie workers harmless. All ``now`` values are
+    caller-passed (repositories stay clock-free; tests stay deterministic).
     """
 
-    def enqueue(self, task_type: str, payload: dict) -> str:
+    def enqueue(self, job: Job) -> Job:
+        """Insert a ``queued`` job. Duplicate ``idempotency_key`` ->
+        IntegrityError. Returns the persisted job."""
         ...
 
-    def dequeue(self) -> dict | None:
+    def get(self, job_id: str) -> Job | None:
         ...
 
-    def ack(self, task_id: str) -> None:
+    def get_by_idempotency_key(self, key: str) -> Job | None:
+        ...
+
+    def claim(
+        self,
+        worker_id: str,
+        capabilities: frozenset[str],
+        lease_seconds: int,
+        now: datetime,
+    ) -> JobLease | None:
+        """Atomically claim the best available job whose
+        ``required_capabilities`` the worker satisfies (``FOR UPDATE SKIP
+        LOCKED``: at most one claimer per row, no blocking). ``None`` when
+        nothing is claimable. Increments the attempt count and mints the
+        fencing ``lease_token``."""
+        ...
+
+    def start(self, job_id: str, lease_token: str, now: datetime) -> None:
+        """``claimed`` -> ``running`` (stamps ``started_at``). Fenced."""
+        ...
+
+    def heartbeat(
+        self, job_id: str, lease_token: str, lease_seconds: int, now: datetime
+    ) -> bool:
+        """Extend the lease. Returns True iff cancellation has been requested
+        (the cooperative-cancel signal). Fenced."""
+        ...
+
+    def complete(
+        self,
+        job_id: str,
+        lease_token: str,
+        result_json: Mapping[str, object] | None,
+        result_ref: str | None,
+        log_ref: str | None,
+        now: datetime,
+    ) -> None:
+        """``running`` -> ``succeeded``. Results carry references/hashes only,
+        never secrets. Fenced."""
+        ...
+
+    def fail(
+        self,
+        job_id: str,
+        lease_token: str,
+        error_class: str,
+        error_detail: str | None,
+        retryable: bool,
+        now: datetime,
+    ) -> Job:
+        """Report a failure. ``retryable=False`` -> ``failed`` (permanent);
+        ``retryable=True`` -> ``queued`` with exponential backoff, or
+        ``dead_letter`` when the attempt budget is exhausted. As the one
+        special case, ``error_class='cancelled'`` records a cooperative
+        cancellation (-> ``cancelled``). ``error_detail`` must be sanitized --
+        never secrets. Fenced. Returns the updated job."""
+        ...
+
+    def request_cancel(self, job_id: str, now: datetime) -> Job:
+        """Cancel a ``queued`` job directly; for ``claimed``/``running`` jobs
+        stamp ``cancel_requested_at`` (the worker observes it via
+        ``heartbeat`` and cancels cooperatively). LookupError on a terminal
+        job."""
+        ...
+
+    def reap_expired(self, now: datetime, limit: int = 100) -> list[Job]:
+        """Requeue (with backoff) or dead-letter every ``claimed``/``running``
+        job whose lease expired before ``now``. Same SKIP LOCKED discipline as
+        ``claim``, so the sweeper and claimers never race on one row. Pure
+        SQL -- safe to run on the control plane."""
+        ...
+
+    def list_dead_letter(self) -> list[Job]:
+        ...
+
+    def retry_dead_letter(self, job_id: str, now: datetime) -> Job:
+        """Operator requeue of a ``dead_letter`` job with a fresh attempt
+        budget. LookupError if the job is missing or not dead-lettered."""
+        ...
+
+
+class WorkerRegistry(Protocol):
+    """Stores execution-plane worker identities, keyed by ``name``.
+
+    State moves are explicit methods (publish/archive style) -- no generic
+    state update. Each raises :class:`LookupError` on a missing worker or an
+    illegal source state (e.g. ``approve`` on a non-pending worker, any
+    transition out of ``revoked``).
+    """
+
+    def add(self, worker: Worker) -> None:
+        """Insert a ``pending`` worker. Duplicate ``name`` -> IntegrityError."""
+        ...
+
+    def get(self, name: str) -> Worker | None:
+        ...
+
+    def list(self) -> list[Worker]:
+        ...
+
+    def update_profile(self, worker: Worker) -> None:
+        """Update the mutable profile fields (runtime_type, architectures,
+        capabilities, capacity, version), keyed by the immutable ``name``.
+        Trust/drain/quarantine fields are NOT writable here."""
+        ...
+
+    def heartbeat(self, name: str, at: datetime) -> None:
+        ...
+
+    def approve(self, name: str) -> None:
+        """``pending`` -> ``trusted``."""
+        ...
+
+    def revoke(self, name: str, revoked_at: datetime) -> None:
+        """``pending``/``trusted`` -> ``revoked`` (terminal)."""
+        ...
+
+    def quarantine(self, name: str, at: datetime, reason: str) -> None:
+        ...
+
+    def clear_quarantine(self, name: str) -> None:
+        ...
+
+    def drain(self, name: str, at: datetime) -> None:
+        ...
+
+    def resume(self, name: str) -> None:
+        ...
+
+
+class WorkerCredentialRepository(Protocol):
+    """Stores hashed, scoped worker credentials (near-append-only: the single
+    legal mutation is stamping ``revoked_at``; the store's triggers enforce
+    it). At most one live credential per worker (partial UNIQUE)."""
+
+    def add(self, credential: WorkerCredential) -> None:
+        """Insert. A second live credential for the same worker ->
+        IntegrityError (the partial UNIQUE), which is what makes rotation
+        race-proof."""
+        ...
+
+    def get(self, credential_id: str) -> WorkerCredential | None:
+        ...
+
+    def get_active_for_worker(self, worker_name: str) -> WorkerCredential | None:
+        ...
+
+    def list_for_worker(self, worker_name: str) -> list[WorkerCredential]:
+        ...
+
+    def revoke(self, credential_id: str, revoked_at: datetime) -> None:
+        """Stamp ``revoked_at``. LookupError if missing or already revoked."""
+        ...
+
+
+class FlagVerifier(Protocol):
+    """Decides whether a candidate flag is correct for a challenge version.
+
+    A seam so verification policy can evolve (per-instance dynamic flags via
+    ``instance_seed`` in M8) without touching the submission transaction
+    script. Implementations must compare in constant time and must never log
+    or persist the candidate or the expected flag.
+    """
+
+    def verify(
+        self, version: ChallengeVersion, instance_seed: str | None, candidate: str
+    ) -> bool:
+        ...
+
+
+class ScoreProjectionQueue(Protocol):
+    """The transactional-outbox work queue feeding the scoreboard projector.
+
+    Rows are inserted by a DB trigger in the same transaction as each
+    ``score_events`` INSERT (never by application code), so a committed event
+    always has an unprocessed outbox row -- the projector can never skip one.
+    ``complete`` deletes rows only in the same transaction that folded them.
+    """
+
+    def pending_competitions(self, limit: int = 100) -> list[str]:
+        """Distinct competition ids (slugs) with pending work (no locks)."""
+        ...
+
+    def claim_pending(
+        self, limit: int, competition_id: str | None = None
+    ) -> list[ProjectionTask]:
+        """Lock (FOR UPDATE SKIP LOCKED) and return pending rows in seq order,
+        optionally scoped to one competition."""
+        ...
+
+    def complete(self, seqs: Sequence[int]) -> None:
+        ...
+
+    def fail(self, seqs: Sequence[int], error: str) -> int:
+        """Mark still-pending rows failed with a sanitized error (exception
+        class + message only -- never payloads, never flags). Returns the
+        number of rows marked."""
+        ...
+
+    def list_failed(self) -> list[ProjectionTask]:
+        ...
+
+    def requeue_all(self) -> int:
+        """Re-enqueue an outbox row for every ledger event (rebuild support)
+        and flip failed rows back to pending. Idempotent."""
+        ...
+
+    def pending_stats(self) -> ProjectionLag:
+        ...
+
+
+class ScoreboardProjectionRepository(Protocol):
+    """Stores the rebuildable scoreboard cache, one row per competition.
+
+    ``upsert`` is guarded monotonic on ``as_of_seq`` (an older-snapshot fold
+    can never overwrite a newer one). Never a source of truth.
+    """
+
+    def upsert(self, projection: ScoreboardProjectionRecord) -> None:
+        ...
+
+    def get(self, competition_id: str) -> ScoreboardProjectionRecord | None:
         ...
