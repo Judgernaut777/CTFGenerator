@@ -215,4 +215,38 @@ Design choices worth recording:
   actor/action(method)/target(path) — never a secret. The persistent audit-event
   READ API remains DEFERRED-TO-M16 (see slice-c above); slice b only emits.
 
-- **Federated identity (OIDC/SSO) — still DEFERRED to M10c.** Unchanged by slice b.
+- **Federated identity (OIDC/SSO) — RESOLVED (M10c).** See the slice-c section
+  below.
+
+## M10 slice c (OIDC federated login) — landed, and the one credential-blocked path
+
+Slice c adds **OpenID Connect authorization-code + PKCE login** as an alternative
+authentication method (ADR-008). It plugs into the M10a session infra: a
+successful federated login issues a **normal local session** — OIDC is a login
+method, never a new bearer type, and no ID/access token becomes an API bearer.
+
+- **Implemented + verified against a FAKE IdP double — DONE.** The full flow
+  (`application/auth/oidc`: discovery, PKCE, token exchange, JWKS ID-token
+  validation) + the `/api/v1/auth/oidc/login` (302) and `/auth/oidc/callback`
+  endpoints ship, mounted **only when configured** (else a clean `404`, never a
+  500; local auth unaffected). The whole security matrix — PKCE S256, state
+  one-time-use + expiry (CSRF), nonce (replay), JWKS asymmetric-only signature
+  (`alg:none` + HS\* confusion rejected), `iss`/`aud`/`exp`/`iat`, issuer mix-up,
+  `email_verified`, domain allow-list, and never-log (REQ-INV-011) — is driven by
+  attack tests against an in-test RSA-keypair IdP double
+  (`tests/fixtures/fake_idp.py`). See `docs/security/oidc.md`.
+
+- **LIVE verification against a real IdP is CREDENTIAL-BLOCKED — the one
+  unverified path.** No IdP (Google / Okta / Keycloak / Entra) is configured on
+  this host, so a real discovery/JWKS/token round trip against a production
+  provider has not been exercised. Enabling it is operator configuration only (the
+  `CTFGEN_OIDC_*` env in `docs/security/oidc.md`), no code change. This is stated
+  plainly rather than claimed complete.
+
+- **Provisioning is least-privilege — by design.** An auto-provisioned federated
+  user is created with NO system role and NO membership; roles are granted
+  afterwards through the membership surface. `auto_provision` off ⇒ an unknown
+  email is rejected (401).
+
+- **One IdP per deployment; SAML is a permanent non-goal (REQ-PLAT-012).**
+  Multi-IdP selection is a later concern; SAML is never in scope.
