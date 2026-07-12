@@ -893,8 +893,12 @@ def instance_detail_view(
         principal, instance.competition_id, Permission.INSTANCE_READ,
         not_found=_INSTANCE_NOT_FOUND,
     )
-    can_operate = Permission.INSTANCE_OPERATE in competition_permissions(
-        principal, instance.competition_id
+    # Operate actions are meaningless on a terminal (archived, frozen) instance
+    # and would trip the DB transition guard -- hide the buttons for it.
+    can_operate = (
+        Permission.INSTANCE_OPERATE
+        in competition_permissions(principal, instance.competition_id)
+        and not instance.is_terminal
     )
     context = {
         "instance": instance_detail(instance, endpoints, health),
@@ -914,10 +918,13 @@ async def instance_stop(
     service: InstanceLifecycleService = Depends(get_web_instance_lifecycle_service),
     _csrf: None = Depends(require_csrf),
 ) -> Response:
-    _load_instance_or_404(
+    instance = _load_instance_or_404(
         service, principal, instance_id, Permission.INSTANCE_OPERATE
     )
-    service.request_stop(instance_id, datetime.now(UTC))
+    # A terminal (archived) row is frozen by the 0010 transition guard; a stop
+    # would trip a DB error (500). It is a no-op -- redirect back, never 500.
+    if not instance.is_terminal:
+        service.request_stop(instance_id, datetime.now(UTC))
     return _redirect(request, "web_instance_detail", instance_id=instance_id)
 
 
@@ -929,11 +936,13 @@ async def instance_reset(
     service: InstanceLifecycleService = Depends(get_web_instance_lifecycle_service),
     _csrf: None = Depends(require_csrf),
 ) -> Response:
-    _load_instance_or_404(
+    instance = _load_instance_or_404(
         service, principal, instance_id, Permission.INSTANCE_OPERATE
     )
-    now = datetime.now(UTC)
-    service.request_reset(instance_id, now + timedelta(hours=1), now)
+    # Terminal rows are frozen (see instance_stop); a reset would 500. No-op.
+    if not instance.is_terminal:
+        now = datetime.now(UTC)
+        service.request_reset(instance_id, now + timedelta(hours=1), now)
     return _redirect(request, "web_instance_detail", instance_id=instance_id)
 
 

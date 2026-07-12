@@ -62,7 +62,14 @@ _PUBLIC_URL = "https://ctf.example.com/c/public-abc"
 _SECRETS = (_CRED_SECRET, _RESOURCE_HANDLE, _INTERNAL_TOKEN, _INSTANCE_SEED)
 
 
-def _seed_instance(db, competition_id: str, *, with_secrets: bool = False) -> str:
+def _seed_instance(
+    db,
+    competition_id: str,
+    *,
+    with_secrets: bool = False,
+    state: str = "active",
+    desired_state: str = "active",
+) -> str:
     iid = str(uuid.uuid4())
     # The instance repo resolves ``team_name`` + the ``(slug, version_no)`` pair to
     # surrogates, so the team + a published challenge version must exist first.
@@ -93,8 +100,8 @@ def _seed_instance(db, competition_id: str, *, with_secrets: bool = False) -> st
                 team_name="Red",
                 definition_slug="sqli",
                 version_no=1,
-                state="active",
-                desired_state="active",
+                state=state,
+                desired_state=desired_state,
                 assigned_worker="w1",
                 image_ref="registry.example/sqli@sha256:abc",
                 instance_seed=_INSTANCE_SEED,
@@ -140,6 +147,14 @@ def _desired_state(db, iid: str) -> str | None:
         ).scalar_one_or_none()
 
 
+def _generation(db, iid: str) -> int | None:
+    with db.session_scope() as s:
+        return s.execute(
+            sa.text("SELECT generation FROM instances WHERE id = :iid"),
+            {"iid": iid},
+        ).scalar_one_or_none()
+
+
 def _csrf(client, path):
     r = client.get(path)
     return r, ws.extract_csrf(r.text)
@@ -179,6 +194,62 @@ class InstanceOpsWebTests(unittest.TestCase):
             )
             self.assertEqual(resp.status_code, 303, resp.text)
             self.assertEqual(_desired_state(db, iid), "stopped")
+
+    def test_reset_bumps_generation_and_redirects(self) -> None:
+        with ws.web_client() as (client, db, _svc):
+            ws.login(client, ws.ALICE)
+            iid = _seed_instance(db, ws.COMP_A)
+            before = _generation(db, iid)
+            _r, token = _csrf(client, f"/app/instances/{iid}")
+            resp = client.post(
+                f"/app/instances/{iid}/reset",
+                data={"csrf_token": token},
+                follow_redirects=False,
+            )
+            self.assertEqual(resp.status_code, 303, resp.text)
+            # A reset bumps the fencing generation (stale observations ignored).
+            self.assertEqual(_generation(db, iid), before + 1)
+
+    def test_delete_drives_desired_state_and_redirects(self) -> None:
+        with ws.web_client() as (client, db, _svc):
+            ws.login(client, ws.ALICE)
+            iid = _seed_instance(db, ws.COMP_A)
+            _r, token = _csrf(client, f"/app/instances/{iid}")
+            resp = client.post(
+                f"/app/instances/{iid}/delete",
+                data={"csrf_token": token},
+                follow_redirects=False,
+            )
+            self.assertEqual(resp.status_code, 303, resp.text)
+            # delete redirects to the competition instance list, not the detail page.
+            self.assertIn(
+                f"/app/competitions/{ws.COMP_A}/instances",
+                resp.headers["location"],
+            )
+            self.assertEqual(_desired_state(db, iid), "deleted")
+
+    def test_stop_reset_on_archived_instance_is_no_op_not_500(self) -> None:
+        # A terminal (archived) row is frozen by the 0010 transition guard; a
+        # naive stop/reset UPDATE would trip it -> ProgrammingError -> 500. Both
+        # actions must be a clean no-op redirect (the "never a 500" invariant),
+        # leaving the frozen row untouched.
+        with ws.web_client() as (client, db, _svc):
+            ws.login(client, ws.ALICE)
+            iid = _seed_instance(
+                db, ws.COMP_A, state="archived", desired_state="deleted"
+            )
+            before = _generation(db, iid)
+            for action in ("stop", "reset"):
+                _r, token = _csrf(client, f"/app/instances/{iid}")
+                resp = client.post(
+                    f"/app/instances/{iid}/{action}",
+                    data={"csrf_token": token},
+                    follow_redirects=False,
+                )
+                self.assertEqual(resp.status_code, 303, f"{action}: {resp.text}")
+            # Nothing was written to the frozen row.
+            self.assertEqual(_desired_state(db, iid), "deleted")
+            self.assertEqual(_generation(db, iid), before)
 
     def test_organizer_cannot_view_or_operate_other_competition_instance_404(
         self,
