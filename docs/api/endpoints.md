@@ -75,7 +75,7 @@ Every non-2xx response returns a single object stamped with `schema` =
 | `error.details[].issue` | string          | What is wrong with it.                             |
 
 Canonical `error.code` values: `invalid_request`, `validation_failed`,
-`unauthorized`, `forbidden`, `not_found`, `conflict`,
+`unauthorized`, `forbidden`, `not_found`, `method_not_allowed`, `conflict`,
 `precondition_failed`, `idempotency_key_reused`, `rate_limited`,
 `unsupported_media_type`, `schema_incompatible`, `internal`.
 

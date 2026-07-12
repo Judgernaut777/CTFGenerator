@@ -86,8 +86,9 @@ components:
                 code:
                   type: string
                   enum: [invalid_request, validation_failed, unauthorized, forbidden,
-                         not_found, conflict, precondition_failed, idempotency_key_reused,
-                         rate_limited, unsupported_media_type, schema_incompatible, internal]
+                         not_found, method_not_allowed, conflict, precondition_failed,
+                         idempotency_key_reused, rate_limited, unsupported_media_type,
+                         schema_incompatible, internal]
                 message: { type: string }
                 request_id: { type: string }
                 details:
