@@ -16,7 +16,9 @@ from ..concurrency import compute_etag, etags_match
 from ..deps import (
     Permission,
     Principal,
+    authorized_competitions,
     get_competition_service,
+    require_any_competition_permission,
     require_competition_permission,
     require_permission,
 )
@@ -92,10 +94,23 @@ def create_competition(
 def list_competitions(
     limit: int | None = Query(default=None, ge=1),
     cursor: str | None = Query(default=None),
-    principal: Principal = Depends(require_permission(Permission.COMPETITION_READ)),
+    # Per-competition scoped, mirroring GET /instances: authenticate + require
+    # competition:read in at least ONE competition (a caller authorized nowhere gets
+    # 403, not an empty 200), then filter the result to only the competitions the
+    # caller may read. A system role (admin/support) sees ALL; anyone else sees only
+    # its membership competitions that grant competition:read -- so a caller holding
+    # competition:read from ONE competition no longer reads every competition's
+    # config.
+    principal: Principal = Depends(
+        require_any_competition_permission(Permission.COMPETITION_READ)
+    ),
     service=Depends(get_competition_service),
 ):
-    configs = sorted(service.list(), key=lambda c: c.competition_id)
+    configs = service.list()
+    allowed = authorized_competitions(principal, Permission.COMPETITION_READ)
+    if allowed is not None:
+        configs = [c for c in configs if c.competition_id in allowed]
+    configs = sorted(configs, key=lambda c: c.competition_id)
     page = paginate(
         configs, key=lambda c: c.competition_id, limit=limit, cursor=cursor
     )
