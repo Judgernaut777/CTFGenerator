@@ -24,6 +24,14 @@ from sqlalchemy.orm import Mapped, mapped_column
 from ...domain.authoring.models import VALID_DECAY_FUNCTIONS, VALID_VERSION_STATES
 from ...domain.execution.models import VALID_RUNTIME_TYPES, VALID_TRUST_STATES
 from ...domain.identity.models import VALID_ROLES
+from ...domain.instances.models import (
+    VALID_DESIRED_STATES,
+    VALID_EVENT_ACTORS,
+    VALID_INSTANCE_STATES,
+    VALID_OBSERVED_STATES,
+    VALID_RESOURCE_STATES,
+    VALID_RUNTIME_RESOURCE_KINDS,
+)
 from ...domain.ledger.models import (
     VALID_PROJECTION_TASK_STATUSES,
     VALID_SCORE_EVENT_TYPES,
@@ -81,6 +89,17 @@ _CEILING_DIMENSION_IN_LIST = ", ".join(f"'{d}'" for d in sorted(CEILING_DIMENSIO
 _RESERVATION_STATE_IN_LIST = ", ".join(
     f"'{s}'" for s in sorted(VALID_RESERVATION_STATES)
 )
+# M8 slice 1b: instance-lifecycle enumerations -- rendered from the domain
+# frozensets (single source of truth) and sorted, so the ORM CHECK SQL and the
+# migration SQL cannot drift from the domain or each other.
+_INSTANCE_STATE_IN_LIST = ", ".join(f"'{s}'" for s in sorted(VALID_INSTANCE_STATES))
+_DESIRED_STATE_IN_LIST = ", ".join(f"'{s}'" for s in sorted(VALID_DESIRED_STATES))
+_RESOURCE_KIND_IN_LIST = ", ".join(
+    f"'{k}'" for k in sorted(VALID_RUNTIME_RESOURCE_KINDS)
+)
+_RESOURCE_STATE_IN_LIST = ", ".join(f"'{s}'" for s in sorted(VALID_RESOURCE_STATES))
+_OBSERVED_STATE_IN_LIST = ", ".join(f"'{s}'" for s in sorted(VALID_OBSERVED_STATES))
+_EVENT_ACTOR_IN_LIST = ", ".join(f"'{a}'" for a in sorted(VALID_EVENT_ACTORS))
 
 
 class Competition(Base):
@@ -1186,4 +1205,283 @@ class WorkerImageCache(Base):
         ),
         CheckConstraint(r"image_ref !~ '^\s*$'", name="image_ref_non_empty"),
         Index("ix_worker_image_cache_image_ref", "image_ref"),
+    )
+
+
+class Instance(Base):
+    """Persistent form of the domain ``Instance`` (M8 slice 1b).
+
+    ``id`` is the business ``instance_id`` (caller-supplied uuid, like
+    ``jobs.id`` / ``submissions.id``), which is ALSO the quota ``reservation_id``.
+    The composite FK ``(team_id, competition_id) -> teams`` guarantees the team
+    belongs to the instance's competition (mirrors ``submissions``);
+    ``challenge_version_id`` and the optional ``assigned_worker_id`` are direct
+    FKs. The ``instance_transition_guard`` BEFORE UPDATE trigger (owned by
+    migration 0010) enforces the legal-transition matrix, freezes an ``archived``
+    row entirely, and freezes the identity columns after insert; the CHECKs tie
+    ``state``/``desired_state`` to the domain enumerations. ``image_ref`` /
+    ``instance_seed`` are references only -- never a flag or a secret."""
+
+    __tablename__ = "instances"
+
+    id: Mapped[uuid.UUID] = mapped_column(sa.Uuid, primary_key=True)
+    competition_id: Mapped[uuid.UUID] = mapped_column(
+        sa.Uuid, ForeignKey("competitions.id", ondelete="RESTRICT"), nullable=False
+    )
+    team_id: Mapped[uuid.UUID] = mapped_column(sa.Uuid, nullable=False)
+    challenge_version_id: Mapped[uuid.UUID] = mapped_column(
+        sa.Uuid,
+        ForeignKey("challenge_versions.id", ondelete="RESTRICT"),
+        nullable=False,
+    )
+    state: Mapped[str] = mapped_column(
+        sa.Text, nullable=False, server_default=sa.text("'requested'")
+    )
+    desired_state: Mapped[str] = mapped_column(
+        sa.Text, nullable=False, server_default=sa.text("'active'")
+    )
+    assigned_worker_id: Mapped[uuid.UUID | None] = mapped_column(
+        sa.Uuid, ForeignKey("workers.id", ondelete="RESTRICT"), nullable=True
+    )
+    generation: Mapped[int] = mapped_column(
+        sa.Integer, nullable=False, server_default=sa.text("1")
+    )
+    image_ref: Mapped[str | None] = mapped_column(sa.Text, nullable=True)
+    expires_at: Mapped[datetime | None] = mapped_column(
+        sa.DateTime(timezone=True), nullable=True
+    )
+    instance_seed: Mapped[str | None] = mapped_column(sa.Text, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(
+        sa.DateTime(timezone=True), nullable=False, server_default=sa.func.now()
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        sa.DateTime(timezone=True), nullable=False, server_default=sa.func.now()
+    )
+
+    __table_args__ = (
+        # The team must belong to the instance's competition (composite FK,
+        # mirroring submissions). MATCH SIMPLE is irrelevant here -- both columns
+        # are NOT NULL -- so it is always enforced.
+        ForeignKeyConstraint(
+            ["team_id", "competition_id"],
+            ["teams.id", "teams.competition_id"],
+            ondelete="RESTRICT",
+        ),
+        CheckConstraint(
+            f"state IN ({_INSTANCE_STATE_IN_LIST})", name="state_valid"
+        ),
+        CheckConstraint(
+            f"desired_state IN ({_DESIRED_STATE_IN_LIST})", name="desired_state_valid"
+        ),
+        CheckConstraint("generation >= 1", name="generation_positive"),
+        Index("ix_instances_competition_id_team_id", "competition_id", "team_id"),
+        Index("ix_instances_challenge_version_id", "challenge_version_id"),
+        Index(
+            "ix_instances_reconcile",
+            "desired_state",
+            "state",
+            postgresql_where=sa.text("state <> 'archived'"),
+        ),
+        Index("ix_instances_assigned_worker_id", "assigned_worker_id"),
+    )
+
+
+class InstanceEndpoint(Base):
+    """Persistent form of the domain ``InstanceEndpoint`` -- a team-facing
+    connection address, keyed by ``(instance_id, name)``. Mutable work table
+    (endpoints are (re)published and deleted across relaunches / cleanup), so no
+    append-only guard. Connection info only -- no secrets by content."""
+
+    __tablename__ = "instance_endpoints"
+
+    id: Mapped[uuid.UUID] = mapped_column(sa.Uuid, primary_key=True, default=uuid.uuid4)
+    instance_id: Mapped[uuid.UUID] = mapped_column(
+        sa.Uuid, ForeignKey("instances.id", ondelete="RESTRICT"), nullable=False
+    )
+    name: Mapped[str] = mapped_column(sa.Text, nullable=False)
+    host: Mapped[str] = mapped_column(sa.Text, nullable=False)
+    port: Mapped[int] = mapped_column(sa.Integer, nullable=False)
+    protocol: Mapped[str] = mapped_column(sa.Text, nullable=False)
+    url: Mapped[str] = mapped_column(sa.Text, nullable=False)
+    internal: Mapped[bool] = mapped_column(
+        sa.Boolean, nullable=False, server_default=sa.text("false")
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        sa.DateTime(timezone=True), nullable=False, server_default=sa.func.now()
+    )
+
+    __table_args__ = (
+        UniqueConstraint(
+            "instance_id", "name", name="uq_instance_endpoints_instance_id_name"
+        ),
+        CheckConstraint("port >= 1 AND port <= 65535", name="port_valid"),
+        CheckConstraint(r"host !~ '^\s*$'", name="host_non_empty"),
+        CheckConstraint(r"protocol !~ '^\s*$'", name="protocol_non_empty"),
+        CheckConstraint(r"url !~ '^\s*$'", name="url_non_empty"),
+        Index("ix_instance_endpoints_instance_id", "instance_id"),
+    )
+
+
+class RuntimeResource(Base):
+    """Persistent form of the domain ``RuntimeResource`` -- a runtime-side object
+    tracked for leak cleanup, keyed by ``(instance_id, kind, external_ref)``.
+    ``generation`` records the instance generation it was created under (so a
+    post-reset old-generation leak is detectable). Mutable (its ``state`` runs
+    active -> releasing -> released), so no append-only guard."""
+
+    __tablename__ = "runtime_resources"
+
+    id: Mapped[uuid.UUID] = mapped_column(sa.Uuid, primary_key=True, default=uuid.uuid4)
+    instance_id: Mapped[uuid.UUID] = mapped_column(
+        sa.Uuid, ForeignKey("instances.id", ondelete="RESTRICT"), nullable=False
+    )
+    kind: Mapped[str] = mapped_column(sa.Text, nullable=False)
+    external_ref: Mapped[str] = mapped_column(sa.Text, nullable=False)
+    worker_id: Mapped[uuid.UUID] = mapped_column(
+        sa.Uuid, ForeignKey("workers.id", ondelete="RESTRICT"), nullable=False
+    )
+    generation: Mapped[int] = mapped_column(
+        sa.Integer, nullable=False, server_default=sa.text("1")
+    )
+    state: Mapped[str] = mapped_column(
+        sa.Text, nullable=False, server_default=sa.text("'active'")
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        sa.DateTime(timezone=True), nullable=False, server_default=sa.func.now()
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        sa.DateTime(timezone=True), nullable=False, server_default=sa.func.now()
+    )
+
+    __table_args__ = (
+        UniqueConstraint(
+            "instance_id",
+            "kind",
+            "external_ref",
+            name="uq_runtime_resources_instance_id_kind_external_ref",
+        ),
+        CheckConstraint(f"kind IN ({_RESOURCE_KIND_IN_LIST})", name="kind_valid"),
+        CheckConstraint(f"state IN ({_RESOURCE_STATE_IN_LIST})", name="state_valid"),
+        CheckConstraint("generation >= 1", name="generation_positive"),
+        Index("ix_runtime_resources_instance_id", "instance_id"),
+        Index(
+            "ix_runtime_resources_active",
+            "state",
+            postgresql_where=sa.text("state = 'active'"),
+        ),
+    )
+
+
+class InstanceCredential(Base):
+    """Persistent form of the domain ``InstanceCredential`` -- a contestant/
+    instance access token HANDLE, keyed by ``(instance_id, name)``. ``secret_ref``
+    is a reference to the secret, NEVER the value. Mutable (rotated on relaunch)."""
+
+    __tablename__ = "instance_credentials"
+
+    id: Mapped[uuid.UUID] = mapped_column(sa.Uuid, primary_key=True, default=uuid.uuid4)
+    instance_id: Mapped[uuid.UUID] = mapped_column(
+        sa.Uuid, ForeignKey("instances.id", ondelete="RESTRICT"), nullable=False
+    )
+    name: Mapped[str] = mapped_column(sa.Text, nullable=False)
+    secret_ref: Mapped[str] = mapped_column(sa.Text, nullable=False)
+    scopes: Mapped[list[str]] = mapped_column(
+        ARRAY(sa.Text), nullable=False, server_default=sa.text("'{}'::text[]")
+    )
+    expires_at: Mapped[datetime | None] = mapped_column(
+        sa.DateTime(timezone=True), nullable=True
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        sa.DateTime(timezone=True), nullable=False, server_default=sa.func.now()
+    )
+
+    __table_args__ = (
+        UniqueConstraint(
+            "instance_id", "name", name="uq_instance_credentials_instance_id_name"
+        ),
+        CheckConstraint(r"secret_ref !~ '^\s*$'", name="secret_ref_non_empty"),
+        Index("ix_instance_credentials_instance_id", "instance_id"),
+    )
+
+
+class HealthObservation(Base):
+    """Persistent form of the domain ``HealthObservation`` -- APPEND-ONLY worker
+    reports. ``generation`` fences a stale report. Immutable via the shared
+    ``reject_mutation()`` (owned by 0004, reused BY NAME): UPDATE/DELETE/TRUNCATE
+    are rejected."""
+
+    __tablename__ = "health_observations"
+
+    id: Mapped[uuid.UUID] = mapped_column(sa.Uuid, primary_key=True, default=uuid.uuid4)
+    instance_id: Mapped[uuid.UUID] = mapped_column(
+        sa.Uuid, ForeignKey("instances.id", ondelete="RESTRICT"), nullable=False
+    )
+    observed_state: Mapped[str] = mapped_column(sa.Text, nullable=False)
+    healthy: Mapped[bool] = mapped_column(sa.Boolean, nullable=False)
+    detail: Mapped[dict] = mapped_column(
+        JSONB, nullable=False, server_default=sa.text("'{}'")
+    )
+    worker_id: Mapped[uuid.UUID] = mapped_column(
+        sa.Uuid, ForeignKey("workers.id", ondelete="RESTRICT"), nullable=False
+    )
+    generation: Mapped[int] = mapped_column(sa.Integer, nullable=False)
+    observed_at: Mapped[datetime] = mapped_column(
+        sa.DateTime(timezone=True), nullable=False
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        sa.DateTime(timezone=True), nullable=False, server_default=sa.func.now()
+    )
+
+    __table_args__ = (
+        CheckConstraint(
+            f"observed_state IN ({_OBSERVED_STATE_IN_LIST})", name="observed_state_valid"
+        ),
+        CheckConstraint("generation >= 1", name="generation_positive"),
+        Index(
+            "ix_health_observations_instance_id_observed_at",
+            "instance_id",
+            "observed_at",
+        ),
+    )
+
+
+class InstanceEvent(Base):
+    """Persistent form of the domain ``InstanceEvent`` -- APPEND-ONLY audit,
+    one row per state change (``from_state IS NULL`` marks creation), written in
+    the same transaction as the transition. Immutable via the shared
+    ``reject_mutation()`` (owned by 0004, reused BY NAME)."""
+
+    __tablename__ = "instance_events"
+
+    id: Mapped[uuid.UUID] = mapped_column(sa.Uuid, primary_key=True, default=uuid.uuid4)
+    instance_id: Mapped[uuid.UUID] = mapped_column(
+        sa.Uuid, ForeignKey("instances.id", ondelete="RESTRICT"), nullable=False
+    )
+    from_state: Mapped[str | None] = mapped_column(sa.Text, nullable=True)
+    to_state: Mapped[str] = mapped_column(sa.Text, nullable=False)
+    reason: Mapped[str] = mapped_column(sa.Text, nullable=False)
+    actor: Mapped[str] = mapped_column(sa.Text, nullable=False)
+    generation: Mapped[int] = mapped_column(sa.Integer, nullable=False)
+    occurred_at: Mapped[datetime] = mapped_column(
+        sa.DateTime(timezone=True), nullable=False
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        sa.DateTime(timezone=True), nullable=False, server_default=sa.func.now()
+    )
+
+    __table_args__ = (
+        CheckConstraint(
+            f"to_state IN ({_INSTANCE_STATE_IN_LIST})", name="to_state_valid"
+        ),
+        CheckConstraint(
+            f"from_state IS NULL OR from_state IN ({_INSTANCE_STATE_IN_LIST})",
+            name="from_state_valid",
+        ),
+        CheckConstraint(f"actor IN ({_EVENT_ACTOR_IN_LIST})", name="actor_valid"),
+        CheckConstraint("generation >= 1", name="generation_positive"),
+        Index(
+            "ix_instance_events_instance_id_occurred_at",
+            "instance_id",
+            "occurred_at",
+        ),
     )

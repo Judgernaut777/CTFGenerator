@@ -25,6 +25,19 @@ from ctf_generator.domain.execution.models import (
     WorkerCredential,
 )
 from ctf_generator.domain.identity.models import Membership, Team, User
+from ctf_generator.domain.instances.models import (
+    VALID_EVENT_ACTORS,
+    VALID_INSTANCE_STATES,
+    VALID_OBSERVED_STATES,
+    VALID_RESOURCE_STATES,
+    VALID_RUNTIME_RESOURCE_KINDS,
+    HealthObservation,
+    Instance,
+    InstanceCredential,
+    InstanceEndpoint,
+    InstanceEvent,
+    RuntimeResource,
+)
 from ctf_generator.domain.ledger.models import (
     VALID_PROJECTION_TASK_STATUSES,
     LedgerSubmission,
@@ -54,12 +67,18 @@ from .models import ChallengeDefinition as ChallengeDefinitionRow
 from .models import ChallengeVersion as ChallengeVersionRow
 from .models import Competition
 from .models import CompetitionChallenge as CompetitionChallengeRow
+from .models import HealthObservation as HealthObservationRow
+from .models import Instance as InstanceRow
+from .models import InstanceCredential as InstanceCredentialRow
+from .models import InstanceEndpoint as InstanceEndpointRow
+from .models import InstanceEvent as InstanceEventRow
 from .models import Job as JobRow
 from .models import JobTransition as JobTransitionRow
 from .models import Membership as MembershipRow
 from .models import QuotaReservation as QuotaReservationRow
 from .models import QuotaReservationItem as QuotaReservationItemRow
 from .models import ResourceQuota as ResourceQuotaRow
+from .models import RuntimeResource as RuntimeResourceRow
 from .models import ScoreboardProjection as ScoreboardProjectionRow
 from .models import ScoreEvent as ScoreEventRow
 from .models import ScoreProjectionOutbox as ScoreProjectionOutboxRow
@@ -953,4 +972,250 @@ def reservation_item_from_orm(row: QuotaReservationItemRow) -> ReservationItem:
         scope_key=row.scope_key,
         dimension=row.dimension,
         amount=row.amount,
+    )
+
+
+# --- Instance-lifecycle aggregates (M8 slice 1b) ----------------------------
+#
+# The domain ``instance_id`` string equals ``instances.id`` (a caller-supplied
+# uuid PK, like jobs/submissions), so a child aggregate's ``instance_id`` maps
+# straight onto the FK via ``_as_uuid`` -- no business-key resolution. The
+# competition/team/version/worker references, by contrast, are resolved to
+# surrogate uuids by the repository and passed in (mappers stay pure).
+# ``*_from_orm`` fail loud on an unmappable enumerated value read back (a
+# corruption signal, never silently dropped).
+
+
+def instance_to_orm(
+    instance: Instance,
+    competition_uuid: uuid.UUID,
+    team_uuid: uuid.UUID,
+    version_uuid: uuid.UUID,
+    assigned_worker_uuid: uuid.UUID | None,
+) -> InstanceRow:
+    """Map a domain ``Instance`` onto a fresh ORM row (insert only). Every
+    subsequent change (transition / assignment / generation bump / runtime
+    facts) is applied by the repository directly on the locked row, so this is
+    create-only. The four surrogate uuids are resolved by the repository from
+    the instance's business identities."""
+    return InstanceRow(
+        id=_as_uuid(instance.instance_id),
+        competition_id=competition_uuid,
+        team_id=team_uuid,
+        challenge_version_id=version_uuid,
+        state=instance.state,
+        desired_state=instance.desired_state,
+        assigned_worker_id=assigned_worker_uuid,
+        generation=instance.generation,
+        image_ref=instance.image_ref,
+        expires_at=to_utc(instance.expires_at),
+        instance_seed=instance.instance_seed,
+    )
+
+
+def instance_from_orm(
+    row: InstanceRow,
+    competition_slug: str,
+    team_name: str,
+    definition_slug: str,
+    version_no: int,
+    assigned_worker_name: str | None,
+) -> Instance:
+    """Map an ORM ``Instance`` row back to the domain. The parent business keys
+    are read by the repository alongside the row; unknown enumerated values fail
+    loud."""
+    if row.state not in VALID_INSTANCE_STATES:
+        raise ValueError(f"unmappable instance state from store: {row.state!r}")
+    if (row.assigned_worker_id is None) != (assigned_worker_name is None):
+        raise ValueError(
+            "assigned-worker linkage inconsistency: resolved name "
+            f"{assigned_worker_name!r} does not match row.assigned_worker_id"
+        )
+    return Instance(
+        instance_id=str(row.id),
+        competition_id=competition_slug,
+        team_name=team_name,
+        definition_slug=definition_slug,
+        version_no=version_no,
+        state=row.state,
+        desired_state=row.desired_state,
+        assigned_worker=assigned_worker_name,
+        generation=row.generation,
+        image_ref=row.image_ref,
+        expires_at=to_utc(row.expires_at),
+        instance_seed=row.instance_seed,
+        created_at=to_utc(row.created_at),
+        updated_at=to_utc(row.updated_at),
+    )
+
+
+def instance_endpoint_to_orm(
+    endpoint: InstanceEndpoint, existing: InstanceEndpointRow | None = None
+) -> InstanceEndpointRow:
+    """Map a domain ``InstanceEndpoint`` onto its ORM row (fresh, or updating a
+    row matched by the ``(instance_id, name)`` key on upsert)."""
+    if existing is None:
+        return InstanceEndpointRow(
+            instance_id=_as_uuid(endpoint.instance_id),
+            name=endpoint.name,
+            host=endpoint.host,
+            port=endpoint.port,
+            protocol=endpoint.protocol,
+            url=endpoint.url,
+            internal=endpoint.internal,
+        )
+    existing.host = endpoint.host
+    existing.port = endpoint.port
+    existing.protocol = endpoint.protocol
+    existing.url = endpoint.url
+    existing.internal = endpoint.internal
+    return existing
+
+
+def instance_endpoint_from_orm(row: InstanceEndpointRow) -> InstanceEndpoint:
+    return InstanceEndpoint(
+        instance_id=str(row.instance_id),
+        name=row.name,
+        host=row.host,
+        port=row.port,
+        protocol=row.protocol,
+        url=row.url,
+        internal=row.internal,
+    )
+
+
+def runtime_resource_to_orm(
+    resource: RuntimeResource,
+    worker_uuid: uuid.UUID,
+    existing: RuntimeResourceRow | None = None,
+) -> RuntimeResourceRow:
+    """Map a domain ``RuntimeResource`` onto its ORM row. ``worker_uuid`` is
+    resolved by the repository from ``resource.worker`` (a name)."""
+    if existing is None:
+        return RuntimeResourceRow(
+            instance_id=_as_uuid(resource.instance_id),
+            kind=resource.kind,
+            external_ref=resource.external_ref,
+            worker_id=worker_uuid,
+            generation=resource.generation,
+            state=resource.state,
+        )
+    # Upsert: the worker / generation / state may be refreshed on re-report.
+    existing.worker_id = worker_uuid
+    existing.generation = resource.generation
+    existing.state = resource.state
+    return existing
+
+
+def runtime_resource_from_orm(
+    row: RuntimeResourceRow, worker_name: str
+) -> RuntimeResource:
+    if row.kind not in VALID_RUNTIME_RESOURCE_KINDS:
+        raise ValueError(f"unmappable runtime-resource kind from store: {row.kind!r}")
+    if row.state not in VALID_RESOURCE_STATES:
+        raise ValueError(f"unmappable runtime-resource state from store: {row.state!r}")
+    return RuntimeResource(
+        instance_id=str(row.instance_id),
+        kind=row.kind,
+        external_ref=row.external_ref,
+        worker=worker_name,
+        generation=row.generation,
+        state=row.state,
+    )
+
+
+def instance_credential_to_orm(
+    credential: InstanceCredential, existing: InstanceCredentialRow | None = None
+) -> InstanceCredentialRow:
+    """Map a domain ``InstanceCredential`` HANDLE onto its ORM row. ``secret_ref``
+    is a reference; the secret value is never stored here."""
+    if existing is None:
+        return InstanceCredentialRow(
+            instance_id=_as_uuid(credential.instance_id),
+            name=credential.name,
+            secret_ref=credential.secret_ref,
+            scopes=sorted(set(credential.scopes)),
+            expires_at=to_utc(credential.expires_at),
+        )
+    existing.secret_ref = credential.secret_ref
+    existing.scopes = sorted(set(credential.scopes))
+    existing.expires_at = to_utc(credential.expires_at)
+    return existing
+
+
+def instance_credential_from_orm(row: InstanceCredentialRow) -> InstanceCredential:
+    return InstanceCredential(
+        instance_id=str(row.instance_id),
+        name=row.name,
+        secret_ref=row.secret_ref,
+        scopes=tuple(row.scopes),
+        expires_at=to_utc(row.expires_at),
+    )
+
+
+def health_observation_to_orm(
+    observation: HealthObservation, worker_uuid: uuid.UUID
+) -> HealthObservationRow:
+    """Map a domain ``HealthObservation`` onto a fresh ORM row (append-only).
+    ``worker_uuid`` is resolved by the repository from ``observation.worker``."""
+    return HealthObservationRow(
+        instance_id=_as_uuid(observation.instance_id),
+        observed_state=observation.observed_state,
+        healthy=observation.healthy,
+        detail=dict(observation.detail),
+        worker_id=worker_uuid,
+        generation=observation.generation,
+        observed_at=to_utc(observation.observed_at),
+    )
+
+
+def health_observation_from_orm(
+    row: HealthObservationRow, worker_name: str
+) -> HealthObservation:
+    if row.observed_state not in VALID_OBSERVED_STATES:
+        raise ValueError(
+            f"unmappable observation observed_state from store: {row.observed_state!r}"
+        )
+    return HealthObservation(
+        instance_id=str(row.instance_id),
+        observed_state=row.observed_state,
+        healthy=row.healthy,
+        worker=worker_name,
+        generation=row.generation,
+        observed_at=to_utc(row.observed_at),
+        detail=dict(row.detail),
+        observation_id=str(row.id),
+    )
+
+
+def instance_event_to_orm(
+    event: InstanceEvent, instance_uuid: uuid.UUID
+) -> InstanceEventRow:
+    return InstanceEventRow(
+        instance_id=instance_uuid,
+        from_state=event.from_state,
+        to_state=event.to_state,
+        reason=event.reason,
+        actor=event.actor,
+        generation=event.generation,
+        occurred_at=to_utc(event.occurred_at),
+    )
+
+
+def instance_event_from_orm(row: InstanceEventRow) -> InstanceEvent:
+    if row.to_state not in VALID_INSTANCE_STATES:
+        raise ValueError(f"unmappable event to_state from store: {row.to_state!r}")
+    if row.from_state is not None and row.from_state not in VALID_INSTANCE_STATES:
+        raise ValueError(f"unmappable event from_state from store: {row.from_state!r}")
+    if row.actor not in VALID_EVENT_ACTORS:
+        raise ValueError(f"unmappable event actor from store: {row.actor!r}")
+    return InstanceEvent(
+        instance_id=str(row.instance_id),
+        from_state=row.from_state,
+        to_state=row.to_state,
+        reason=row.reason,
+        actor=row.actor,
+        generation=row.generation,
+        occurred_at=to_utc(row.occurred_at),
+        event_id=str(row.id),
     )

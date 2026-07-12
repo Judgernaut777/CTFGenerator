@@ -110,3 +110,68 @@ def worker_uuid(session: Session, worker_name: str) -> uuid.UUID:
     if result is None:
         raise LookupError(f"worker not found: {worker_name!r}")
     return result
+
+
+def worker_uuid_optional(
+    session: Session, worker_name: str | None
+) -> uuid.UUID | None:
+    """Resolve an optional worker name to its uuid. ``None`` passes through; a
+    given-but-unknown name fails loud."""
+    if worker_name is None:
+        return None
+    return worker_uuid(session, worker_name)
+
+
+# --- Reverse resolvers (surrogate uuid -> business key) ---------------------
+#
+# The instance-lifecycle repository reads a row's parent business keys back for
+# ``*_from_orm`` the way the job queue's ``_audit_refs`` does. Each fails loud on
+# a dangling surrogate (a corruption signal), never returns a silent ``None``.
+
+
+def competition_slug(session: Session, competition_uuid_: uuid.UUID) -> str:
+    result = session.scalars(
+        select(Competition.slug).where(Competition.id == competition_uuid_)
+    ).one_or_none()
+    if result is None:
+        raise LookupError(f"competition id not found: {competition_uuid_!r}")
+    return result
+
+
+def team_name(session: Session, team_uuid_: uuid.UUID) -> str:
+    result = session.scalars(
+        select(Team.name).where(Team.id == team_uuid_)
+    ).one_or_none()
+    if result is None:
+        raise LookupError(f"team id not found: {team_uuid_!r}")
+    return result
+
+
+def version_business(
+    session: Session, version_uuid_: uuid.UUID
+) -> tuple[str, int]:
+    row = session.execute(
+        select(ChallengeDefinition.slug, ChallengeVersion.version_no)
+        .join(ChallengeVersion, ChallengeVersion.definition_id == ChallengeDefinition.id)
+        .where(ChallengeVersion.id == version_uuid_)
+    ).one_or_none()
+    if row is None:
+        raise LookupError(f"challenge version id not found: {version_uuid_!r}")
+    return row[0], row[1]
+
+
+def worker_name(session: Session, worker_uuid_: uuid.UUID) -> str:
+    result = session.scalars(
+        select(Worker.name).where(Worker.id == worker_uuid_)
+    ).one_or_none()
+    if result is None:
+        raise LookupError(f"worker id not found: {worker_uuid_!r}")
+    return result
+
+
+def worker_name_optional(
+    session: Session, worker_uuid_: uuid.UUID | None
+) -> str | None:
+    if worker_uuid_ is None:
+        return None
+    return worker_name(session, worker_uuid_)
