@@ -109,8 +109,8 @@ events as JSONL (`events.py::JsonlEventStore`) with an optional `postgres_events
 |---|---|
 | Detection | Control-plane API errors on read/write; submissions not persisting; scoreboard stops updating. RPO target is 5 min, RTO 30 min. |
 | Containment | Put the control plane in read-only / maintenance mode. **Do not** accept submissions that cannot be durably written — a lost submission risks violating "at most one solve per (team,challenge,competition)" reconciliation. Queue nothing in volatile memory as authoritative. |
-| Remediation | Fail over to standby or restore from the most recent backup (RPO 5 min). After recovery, **rebuild scoreboard from persisted score events** (`compute_scoreboard` over the event log) — the scoreboard is a pure fold and is fully reconstructable; never hand-edit standings. Verify sequence monotonicity (`Event.seq` strictly increasing from 1). |
-| Post-incident | Confirm no duplicate solves were created during the outage (dedupe on submission idempotency). Validate against RTO ≤ 30 min. Schedule a recovery drill (v1.0 gate). |
+| Remediation | Fail over to standby (PITR/WAL for RPO 5 min) or restore the most recent backup: **`scripts/restore.sh <backup> <target-dsn>`** (M17) — it `pg_restore`s the dump (INSERT-only, append-only triggers preserved), restores the artifact store, and runs the verifier (`ctf_generator.application.backup.verify`: migration head, ledger-seq, scoreboard parity, artifact hash) before you return to service. Then, if needed, **rebuild the scoreboard from persisted score events** (`compute_scoreboard`, a pure fold — never hand-edit standings). See docs/operations/backup-recovery-upgrade.md. |
+| Post-incident | Confirm no duplicate solves during the outage (submission idempotency). Time the restore vs RTO ≤ 30 min. Run/refresh the recovery drill (backup → restore.sh → verifier PASS), the v1.0 gate for REQ-NFR-006/007. |
 
 ### 2.5 Artifact store unavailable
 
@@ -121,7 +121,7 @@ Local-FS (dev) or S3-compatible (prod) storage for published, immutable, content
 | Detection | Image builds / instance launches fail to fetch published artifacts; artifact reads 5xx or time out. |
 | Containment | (planned) Pause new launches that require artifact fetch; already-running instances are unaffected (artifacts are pulled at build/launch, not steady-state). Do not fall back to regenerating on the control plane — the control plane never builds or executes challenge code. |
 | Remediation | Restore store connectivity or fail over to a replica. Because published artifacts are **immutable + content-addressed**, integrity is verifiable by content hash — re-fetch and verify hash before trusting any restored object. If an artifact is lost entirely, deterministic rebuild reproduces byte-identical output from `(generator version, spec, family version, seed)`. |
-| Post-incident | Verify content-address integrity across the published set. Confirm private files never entered public artifacts. Review backup/replication coverage of the bucket/volume. |
+| Post-incident | Verify content-address integrity across the published set (the M17 verifier's `artifact_integrity` check hashes every stored build's tar back to the content address its key encodes; `scripts/backup.sh` snapshots the store). Confirm private files never entered public artifacts. Review backup/replication coverage of the bucket/volume — lost artifacts are deterministically rebuildable (REQ-NFR-009). See docs/operations/backup-recovery-upgrade.md §4. |
 
 ### 2.6 Scoreboard inconsistency
 
