@@ -1,5 +1,10 @@
 # CTFGenerator — Current System (As-Built)
 
+> **HISTORICAL (M0 / v0.1.0 baseline).** Describes the pre-platform flat package as built at
+> Milestone 0. Milestones M7–M18 are now shipped; for the current layered system see
+> [`architecture/overview.md`](architecture/overview.md). This document is retained as a
+> historical record and no longer describes the code as it exists today.
+
 Milestone 0 baseline. This document is a precise description of CTFGenerator **as it exists today
 (2026-07-11, v0.1.0)**. It is the authoritative current-state reference that later milestones diff
 against. Everything under "Current" is grounded in the codebase map. Anything forward-looking is

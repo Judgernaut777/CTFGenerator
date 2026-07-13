@@ -1,5 +1,13 @@
 # Current Data Schemas
 
+> **HISTORICAL (M0 / v0.1.0 baseline).** Describes the pre-platform data shapes (spec/variant/
+> report JSON, event log, CVE cache) and the schema-versioning gap of that era. Milestones
+> M7–M18 are now shipped — persistence moved to a PostgreSQL system of record with SQLAlchemy
+> ORM and Alembic migrations. For the current system see
+> [`architecture/overview.md`](architecture/overview.md) and
+> [`architecture/persistence-design.md`](architecture/persistence-design.md). This document is
+> retained as a historical record.
+
 **Milestone 0 deliverable.** Documents every data schema that exists in CTFGenerator
 **today** (v0.1.0). All shapes below are transcribed from the codebase map; field names
 and types match source. Where planned/target behavior is described it is labelled

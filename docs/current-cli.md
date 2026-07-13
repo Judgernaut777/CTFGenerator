@@ -1,16 +1,14 @@
 # Current CLI Reference (`ctfgen`)
 
-> **Milestone 0 deliverable.** Complete reference of every current CLI subcommand and its flags,
-> the MCP tool/prompt surface, host invocation notes for this PEP 668 box, and a pure-vs-Docker
-> classification. Everything under "Current" is grounded in the codebase map for v0.1.0.
-> Sections labelled **Target/Planned** describe the productization direction and are not
-> implemented today.
->
-> **Update (M13):** the `ctfgen <area> <verb>` platform CLI that the "Target/Planned" columns
-> below anticipated is now **IMPLEMENTED** — it talks to the platform HTTP API with a session
-> token. See **[docs/supported-cli.md](supported-cli.md)** for the supported surface (auth +
-> per-area verbs) and the enforced MCP security boundary. This file remains the reference for the
-> legacy generator commands, which the `ctfgen` dispatcher still delegates to unchanged.
+> **HISTORICAL (M0 / v0.1.0 baseline).** Reference for the pre-platform generator CLI — every
+> legacy subcommand and flag, the MCP tool/prompt surface, PEP 668 host invocation notes, and a
+> pure-vs-Docker classification, all grounded in the v0.1.0 codebase map. The `ctfgen <area>
+> <verb>` platform CLI that the "Target/Planned" columns anticipated shipped in **M13**: it talks
+> to the platform HTTP API with a session token — see
+> **[docs/supported-cli.md](supported-cli.md)** for the supported surface (auth + per-area verbs)
+> and the enforced MCP boundary. The `ctfgen` dispatcher still delegates to the legacy generator
+> commands documented below unchanged, so this file remains their reference; for the current
+> system as a whole see [`architecture/overview.md`](architecture/overview.md).
 
 `prog = ctfgen` — "Generate and validate AI-resistant CTF challenge environments."
 
@@ -295,7 +293,7 @@ Writes report. Exit **0** in both.
 
 Runs `score_challenge`. If the report has errors → writes report `failed`, prints `Scoring failed:`
 + errors exit **1**. Else with `--json` prints the report mapping as indented sorted JSON; without it
-prints `AI-resistance score: <total>/100 (<band>)`, each dimension `- <name> [w=<weight>]: <score>`
+prints `AI-resistance heuristic (advisory): <total>/100 (<band>)`, each dimension `- <name> [w=<weight>]: <score>`
 plus notes, then warnings. `--min-score` triggers a threshold check: `failed` if `total < min-score`
 else `passed`; report written; below threshold → `score <total> is below threshold <min>` exit **1**,
 else exit **0**. (Dimensions/bands: see §8 of the schema catalogue — `variant_uniqueness`,
