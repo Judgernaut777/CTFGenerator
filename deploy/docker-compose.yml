@@ -1,0 +1,100 @@
+# CTFGenerator reference SINGLE-HOST topology (M18 18a) -- DEV / DEMO ONLY.
+#
+# ============================ PRODUCTION WARNING ==============================
+# This compose runs the CONTROL PLANE (postgres + API + TLS proxy) on one host.
+# It intentionally does NOT run a worker. In PRODUCTION the WORKER runs on a
+# SEPARATE host with a rootless docker engine + NET_ADMIN (see Dockerfile.worker)
+# -- the control-plane host/image NEVER holds a docker socket (REQ-INV-010 /
+# COMP-015). Do not add a worker (and never mount the docker engine socket) onto
+# this control-plane host for anything beyond a throwaway, single-operator demo; if you
+# do, treat it as a dev-only shape, isolated from any real contestant traffic.
+# =============================================================================
+#
+# SECRET-FREE: every secret is interpolated from the environment / an env-file
+# (see .env.example -> copy to .env, which is gitignored). NOTHING secret is baked
+# into this file. Bring your own .env with real values:
+#     cp deploy/.env.example deploy/.env   # then edit deploy/.env
+#     docker compose -f deploy/docker-compose.yml --env-file deploy/.env up
+#
+# Migrate-on-start + readiness gating are handled by the API container's
+# entrypoint (alembic upgrade head, then serve) and its /system/ready probe.
+
+services:
+  postgres:
+    image: postgres:16
+    environment:
+      # These come from .env (placeholders in .env.example); never hard-coded.
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_DB: ${POSTGRES_DB}
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER} -d ${POSTGRES_DB}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+    restart: unless-stopped
+
+  api:
+    build:
+      context: ..
+      dockerfile: deploy/Dockerfile.api
+    environment:
+      MODE: api
+      PORT: "8000"
+      # The DSN is assembled from the same placeholders -- the password is never
+      # written here literally; it is the interpolated ${POSTGRES_PASSWORD}.
+      CTFGEN_DATABASE_URL: postgresql+psycopg://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}
+      CTFGEN_ARTIFACT_ROOT: /var/lib/ctfgen/artifacts
+      CTFGEN_API_RATE_LIMIT: ${CTFGEN_API_RATE_LIMIT:-1}
+      CTFGEN_API_TRUSTED_PROXY: ${CTFGEN_API_TRUSTED_PROXY:-1}
+      CTFGEN_LOG_FORMAT: ${CTFGEN_LOG_FORMAT:-json}
+      CTFGEN_WEB_ENABLED: ${CTFGEN_WEB_ENABLED:-1}
+      CTFGEN_WEB_CSRF_SECRET: ${CTFGEN_WEB_CSRF_SECRET}
+      # OIDC is optional -- leave the CTFGEN_OIDC_* vars unset in .env to disable.
+      CTFGEN_OIDC_ISSUER: ${CTFGEN_OIDC_ISSUER:-}
+      CTFGEN_OIDC_CLIENT_ID: ${CTFGEN_OIDC_CLIENT_ID:-}
+      CTFGEN_OIDC_CLIENT_SECRET: ${CTFGEN_OIDC_CLIENT_SECRET:-}
+      CTFGEN_OIDC_REDIRECT_URI: ${CTFGEN_OIDC_REDIRECT_URI:-}
+    volumes:
+      - artifacts:/var/lib/ctfgen/artifacts
+    depends_on:
+      postgres:
+        condition: service_healthy
+    healthcheck:
+      # Deep readiness: green only once the DB is up AND migrations are at the
+      # code head (503 otherwise). Uses python (in the image) -- no curl/docker.
+      test: ["CMD-SHELL", "python -c \"import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://127.0.0.1:8000/api/v1/system/ready').status==200 else 1)\""]
+      interval: 15s
+      timeout: 5s
+      retries: 10
+      start_period: 40s
+    restart: unless-stopped
+
+  # TLS-terminating reverse proxy in FRONT of the API. Caddy auto-provisions a
+  # cert for ${PUBLIC_DOMAIN}; the Caddyfile is provided by the operator (mounted)
+  # so this file stays config-light. For a pure localhost demo you can hit the API
+  # directly and skip this service.
+  proxy:
+    image: caddy:2
+    depends_on:
+      - api
+    ports:
+      - "80:80"
+      - "443:443"
+    environment:
+      PUBLIC_DOMAIN: ${PUBLIC_DOMAIN:-localhost}
+    volumes:
+      # Provide ./Caddyfile with:  {$PUBLIC_DOMAIN} { reverse_proxy api:8000 }
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+    restart: unless-stopped
+
+volumes:
+  pgdata:
+  artifacts:
+  caddy_data:
+  caddy_config:

@@ -11,5 +11,8 @@ build/
 # Generated challenge output at the repo root only -- anchored so it does NOT
 # match the source package src/ctf_generator/domain/challenges/.
 /challenges/
+# Local secret env-files (the .env.example templates ARE tracked). The bare
+# `.env` pattern matches at any depth, so deploy/.env is covered too.
 .env
+deploy/.env
 

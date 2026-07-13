@@ -1,0 +1,52 @@
+# CTFGenerator CONTROL-PLANE image (M18 18a) -- API + web + auth.
+#
+# HARD SECURITY INVARIANT (REQ-INV-010 / COMP-015): the control plane is
+# docker-FREE. This image carries NO docker CLI, NO BuildKit, NO docker socket,
+# and installs ONLY the [deploy] extra (api/db/web/oidc/postgres) -- never the
+# execution engine (agent_eval / the runtime backend). Container execution lives
+# EXCLUSIVELY on the separate worker host (see Dockerfile.worker). The absence of
+# a docker client is a BUILD-TIME property this image guarantees and
+# deploy/verify-deploy.sh PROVES on the built image.
+#
+# Runs as a NON-ROOT user, copies only what the control plane needs (src +
+# pyproject + packaging metadata + alembic), and serves the module-level ASGI app
+# via uvicorn after applying migrations (deploy/entrypoint.sh, MODE=api).
+FROM python:3.12-slim
+
+# No-secret build. Pip hygiene only.
+ENV PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONUNBUFFERED=1 \
+    PIP_NO_CACHE_DIR=1 \
+    PIP_DISABLE_PIP_VERSION_CHECK=1
+
+WORKDIR /app
+
+# Copy ONLY the files needed to build + run the control plane. Deliberately NOT
+# copying tests/, scratch, the docker CLI, or any execution module.
+COPY pyproject.toml README.md LICENSE alembic.ini ./
+COPY src ./src
+COPY alembic ./alembic
+
+# Install the package with the control-plane [deploy] bundle. `pip install .`
+# builds the wheel from src/ (setuptools find + package-data templates). No
+# docker client is installed anywhere in this image.
+RUN pip install ".[deploy]"
+
+COPY deploy/entrypoint.sh /usr/local/bin/entrypoint.sh
+RUN chmod +x /usr/local/bin/entrypoint.sh
+
+# Drop to a non-root, non-login system user AFTER install. The runtime user owns
+# nothing writable in /app it does not need; artifacts live on a mounted volume.
+RUN useradd --system --create-home --uid 10001 ctfgen
+USER ctfgen
+
+ENV MODE=api \
+    PORT=8000
+EXPOSE 8000
+
+# Liveness only (no DB call, no credential); /system/ready is the deeper gate the
+# orchestrator/compose uses. Uses python (already present) -- NO curl/docker.
+HEALTHCHECK --interval=30s --timeout=5s --start-period=20s --retries=3 \
+    CMD python -c "import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://127.0.0.1:'+__import__('os').environ.get('PORT','8000')+'/api/v1/system/health').status==200 else 1)" || exit 1
+
+ENTRYPOINT ["/usr/local/bin/entrypoint.sh"]
