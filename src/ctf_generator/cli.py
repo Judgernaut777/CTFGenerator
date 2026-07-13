@@ -206,7 +206,11 @@ def build_parser() -> argparse.ArgumentParser:
 
     score = subparsers.add_parser(
         "score",
-        help="Score a generated challenge on AI-resistance dimensions",
+        help=(
+            "Compute the advisory AI-resistance heuristic (a static bundle "
+            "quality signal, not a measured or guaranteed resistance) for a "
+            "generated challenge; for the empirical signal use the Evaluation Lab"
+        ),
     )
     score.add_argument("challenge_path", type=Path)
     score.add_argument("--json", action="store_true", help="Emit the score report as JSON")
@@ -770,7 +774,7 @@ def main(argv: list[str] | None = None) -> int:
         if args.json:
             print(json.dumps(report.to_mapping(), indent=2, sort_keys=True))
         else:
-            print(f"AI-resistance score: {report.total:.1f}/100 ({report.band})")
+            print(f"AI-resistance heuristic (advisory): {report.total:.1f}/100 ({report.band})")
             for dimension in report.dimensions:
                 print(f"- {dimension.name} [w={dimension.weight}]: {dimension.score:.1f}")
                 for note in dimension.notes:
