@@ -1,11 +1,81 @@
-# Hosting a CTFGenerator competition
+# Hosting CTFGenerator
 
-This is an end-to-end walkthrough for standing up a live CTFGenerator
-competition: generate challenges, validate them, build a catalog, launch the
-dashboard, log in as admin, publish a public scoreboard, and record solves.
-Every command below is a real, existing `ctfgen` subcommand — copy-paste it.
+There are two ways to run CTFGenerator:
 
-Install first if you haven't:
+- **The supported platform (M6+)** — the FastAPI control plane + PostgreSQL +
+  isolated workers + artifact store, deployed behind a TLS reverse proxy. **This is
+  the supported product; see §0 below.**
+- **The legacy standalone engine** — the stdlib `ctfgen serve` dashboard over a
+  fixture/JSONL store. The rest of this document (§1 onward) is that walkthrough;
+  it is the single-binary demo path, NOT the supported multi-host platform.
+
+---
+
+## 0. Supported platform deployment (M6+)
+
+The supported deployment is a **single Linux control-plane host** (ASGI behind a
+TLS-terminating reverse proxy) + **PostgreSQL** + **≥1 isolated worker host** +
+an artifact store. Kubernetes is out of scope for V1 (compose/systemd scale).
+
+**Reference artifacts** live in `deploy/`:
+`Dockerfile.api` (the docker-FREE control-plane image — the control plane never
+holds a Docker socket), `Dockerfile.worker`, `entrypoint.sh` (migrate-then-serve),
+`docker-compose.yml` (a dev/demo single-host topology), `.env.example`, and
+`verify-deploy.sh` (builds the image, boots it, and asserts readiness + the
+no-docker-socket invariant).
+
+**Configuration** is env-only (secrets never committed) — see
+[operations/configuration.md](operations/configuration.md).
+
+### Quick start (dev/demo, single host)
+
+```bash
+cp deploy/.env.example deploy/.env          # fill in real secrets (gitignored)
+docker compose -f deploy/docker-compose.yml --env-file deploy/.env up --build
+```
+
+The API service runs `alembic upgrade head` then serves; wait for
+`GET /api/v1/system/ready` to return 200 (its `migrations` check gates on the code
+head). Then seed the first admin (one-time):
+
+```bash
+CTFGEN_DATABASE_URL=... CTFGEN_BOOTSTRAP_ADMIN_PASSWORD=... \
+  ctfgen-admin bootstrap-admin --email admin@example.org --display-name Admin
+```
+
+### Production topology (multi-host)
+
+- **Control plane** (`uvicorn ctf_generator.interfaces.api.app:app`, `.[deploy]`
+  extra): behind a reverse proxy (nginx/caddy) that **terminates TLS**. Set
+  `CTFGEN_API_TRUSTED_PROXY=1` (so the rate-limiter reads the real client IP from
+  `X-Forwarded-For`) and leave web session cookies `Secure` (do NOT set
+  `CTFGEN_WEB_COOKIE_INSECURE`). The control-plane host/image has **no Docker
+  socket, no BuildKit, and never runs challenge code** (REQ-INV-010 — proven by
+  `deploy/verify-deploy.sh`).
+- **Worker gateway** (`uvicorn ...worker_app:worker_app`): the worker-facing API on
+  its **own listener**, reachable only by workers (mutual isolation from the human
+  API).
+- **Worker host(s)** (`ctfgen-worker`, `.[worker]` extra): a **SEPARATE** host with
+  a **rootless** container engine (Docker/Podman, ADR-004) and **`NET_ADMIN` + a
+  working iptables backend (`xt_comment`)** — the M8 host-block firewall is a HARD
+  FLOOR: if the host cannot enforce container→host isolation, `launch()` **refuses**
+  (see [security/runtime-isolation.md](security/runtime-isolation.md)). Per-instance
+  `--internal` networks; ingress reaches instances ONLY through the reverse proxy.
+- **PostgreSQL** (15/16) + the artifact volume (local-FS now; S3-compatible is the
+  same protocol, credential-blocked). Back up per
+  [operations/backup-recovery-upgrade.md](operations/backup-recovery-upgrade.md).
+
+**Upgrades:** `alembic upgrade head` (the entrypoint does this on deploy) — the
+`/api/v1/system/ready` migration gate returns 503 until the DB matches the code
+head. Rollback policy (forward-fix preferred; append-only tables never downgraded
+destructively) is in the backup/recovery/upgrade doc.
+
+---
+
+## Legacy standalone engine (single-binary demo)
+
+The remainder is the stdlib `ctfgen serve` dashboard — a fixture/JSONL demo, **not**
+the supported platform above. Install first if you haven't:
 
 ```bash
 python3 -m pip install -e .
