@@ -73,6 +73,11 @@ cli = ["httpx>=0.27"]
 # Lint / type / security tooling used by CI (.github/workflows/pr.yml). Kept out
 # of `dev` so `pip install .[dev]` for running tests stays minimal.
 ci = ["ruff>=0.6", "mypy>=1.11", "bandit>=1.7", "pip-audit>=2.7", "build>=1.2", "twine>=5"]
+# M20 validation: coverage measurement (scripts/coverage.sh, the informational
+# .github/workflows/coverage.yml job). Kept out of `dev`/`ci` so the stdlib-only
+# unit gate and the lint/type/SAST CI tier stay unchanged; coverage is an
+# OBSERVING tool, never a runtime dependency. See docs/validation/coverage.md.
+cov = ["coverage>=7"]
 # --- M18 18a: supported-deployment bundles ------------------------------------
 # `deploy` = the CONTROL-PLANE production bundle: everything an API + web + auth
 # control plane needs to RUN in one install. It is the UNION of the runtime
@@ -196,4 +201,41 @@ check_untyped_defs = false
 # `pytest` work locally too.
 pythonpath = ["src", "tests"]
 testpaths = ["tests"]
+
+# --- Coverage measurement (M20 validation; scripts/coverage.sh) ----------------
+# Coverage OBSERVES the package; it never changes behaviour. Config lives here so
+# a local `coverage run` and the informational CI job (.github/workflows/
+# coverage.yml) agree. Host-only runs UNDERSTATE the number because the Docker-/
+# Postgres-gated integration suites skip -- run with CTFGEN_TEST_DATABASE_URL set
+# to count them (see docs/validation/coverage.md).
+[tool.coverage.run]
+source = ["ctf_generator"]
+branch = true
+# parallel + a stable data_file let each `coverage run` write a distinct
+# `.coverage.<host>.<pid>` that `coverage combine` folds together (matches how
+# scripts/coverage.sh runs). Harmless for a single run.
+parallel = true
+# Thin, untestable-in-process boilerplate. The measured surface is the library;
+# `-m module` entry shims and the `if __name__ == "__main__"` guards are driven
+# by the console-script wiring / subprocess CI tiers, not the unit suite. The
+# Alembic migration scripts live OUTSIDE the package (repo-root `alembic/`) so
+# `source = ["ctf_generator"]` already excludes them -- no omit needed.
+omit = [
+    "*/__main__.py",
+]
+
+[tool.coverage.report]
+# `# pragma: no cover` plus the conventional never-run guards. This does NOT
+# lower the number for real code -- it stops abstract stubs and unreachable
+# defensive branches from being counted as missed.
+exclude_lines = [
+    "pragma: no cover",
+    "if __name__ == .__main__.:",
+    "raise NotImplementedError",
+    "if TYPE_CHECKING:",
+    "@(abc\\.)?abstractmethod",
+]
+show_missing = true
+skip_covered = false
+precision = 2
 
