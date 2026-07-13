@@ -401,7 +401,7 @@ class LlmSolverAgent:
             except ImportError as exc:  # pragma: no cover - exercised only with extra installed
                 raise ImportError(
                     "LlmSolverAgent(provider='anthropic') requires the 'anthropic' package; "
-                    "install the ctf_generator[llm-anthropic] extra"
+                    "install the ctf_generator[anthropic] extra"
                 ) from exc
             return anthropic.Anthropic()
         try:
@@ -409,7 +409,7 @@ class LlmSolverAgent:
         except ImportError as exc:  # pragma: no cover - exercised only with extra installed
             raise ImportError(
                 "LlmSolverAgent(provider='openai') requires the 'openai' package; "
-                "install the ctf_generator[llm-openai] extra"
+                "install the ctf_generator[openai] extra"
             ) from exc
         return openai.OpenAI()
 
