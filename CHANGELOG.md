@@ -9,6 +9,71 @@ Release CI enforces that every tagged version has an entry here (see
 
 ## [Unreleased]
 
+### Added — Milestone 22: Release qualification + final report
+
+- `docs/RELEASE_QUALIFICATION.md`: the authoritative capstone sign-off. Adjudicates
+  every release gate in `docs/RELEASE_CRITERIA.md` against the executed M20/M21
+  evidence, citing a re-runnable artifact for each QUALIFIED verdict and naming
+  every NOT-QUALIFIED gap bluntly. Documentation only — no code, test, schema,
+  migration, fixture, or scoring-math change.
+- `docs/RELEASE_CRITERIA.md`: the formal reconciliation pass. Boxes are ticked
+  **only** where a specific executed artifact proves them, with an inline cite;
+  everything else carries an inline `(UNVERIFIED: …)` reason. Ticked at this pass:
+  the security gates **S1–S9** (S4/S5/S6/S9-static host; S1/S2/S3/S7/S8/S9-runtime
+  integration-gated), the evidence-backed shipped capabilities, the evidence-backed
+  internal-alpha entry/exit items, and the closed-beta recovery-drill (RTO) exit
+  item. Re-executed here: 184 host tests OK + 118 PG-integration tests OK.
+- **Release-readiness verdict (honest):** the product is **qualified through
+  internal-alpha and early closed-beta on single-host evidence** — security,
+  isolation, determinism, at-most-one-solve, scoreboard reconstruction, and
+  migration reversibility are all backed by re-runnable executed tests. **v1.0 is
+  NOT release-qualified.** Outstanding blockers: production-scale capacity (25
+  teams / 20 challenges / ≥99% launch / sustained <3s/<500ms — 25×20 submission
+  p95 measured over target ≈2050 ms), a real TLS/multi-host deployment, a real
+  external closed beta, the distributed-worker bundle-launch flow (`build_challenge`
+  unbuilt), continuous RPO/PITR (only baseline RPO + measured RTO exist), and an
+  external security review. This completes the product's autonomous build (M0–M22).
+
+### Added — Milestone 21: Internal-alpha + closed-beta gate simulations
+
+- `docs/validation/internal-alpha-report.md`, `closed-beta-report.md`, and the
+  consolidated `gate-status.md`: the internal-alpha and closed-beta entry/exit
+  checklists replayed as single-host simulations over real PG + Docker, each item
+  mapped to an executed test or a documented UNVERIFIED. `scripts/alpha_sim.py` +
+  `tests/test_alpha_sim_integration.py` run the generate→publish→submit→solve→
+  score→scoreboard spine over live PG (exactly-one-solve, content-addressed
+  immutability, scoreboard-from-events, no-secret-leak invariants).
+- **Honest verdicts:** internal-alpha is **MET-by-simulation with one PARTIAL**
+  (the joined worker-launch-of-the-published-bundle flow is a composite whose two
+  halves are each proven but not stitched — `build_challenge` unbuilt); closed-beta
+  is **PARTIAL** (TLS deploy, production scale, real external beta, continuous RPO
+  UNVERIFIED). The 25×20 in-process submission p95 was measured **over target
+  ≈2050 ms**. These reports change no `RELEASE_CRITERIA.md` box (that is M22).
+
+### Added — Milestone 20: Validation program (executed evidence)
+
+- `docs/validation/`: an evidence program where each document is backed by a
+  runnable artifact. `tests/test_conformance_suite.py` (byte-identical rebuild +
+  a no-wall-clock-in-provenance assertion, aggregating the five determinism
+  suites); `tests/test_security_validation_meta.py` mapping each gate **S1–S9** to
+  its executed test and guarding the mapping; `tests/test_e2e_flow_integration.py`
+  (organizer→publish→contestant-submit→scoreboard over real PG);
+  `scripts/recovery_drill.sh` + `tests/test_recovery_drill_integration.py`
+  (measured **RTO** vs the ≤30 min SLO); `scripts/loadtest.py` +
+  `tests/test_capacity_smoke_integration.py` (measured p50/p95 at smoke scale);
+  `scripts/coverage.sh`; and an honest `ai-resistance.md`.
+- Scope stated without softening: **RPO (≤5 min continuous)** is UNVERIFIED (no
+  WAL/PITR on the validation host), production-scale load is UNVERIFIED (only
+  smoke ran), and the distributed-worker instance launch is UNVERIFIED. This
+  program **supplies** the evidence; ticking `RELEASE_CRITERIA.md` is M22's job.
+
+### Added — Milestone 19: Documentation + product presentation
+
+- Product-facing documentation and presentation of the as-built platform (the
+  layered architecture, control/execution-plane boundary, supported deployment
+  topology, and operations), consolidating the M0–M18 build into a coherent
+  narrative ahead of the M20–M22 validation/qualification program.
+
 ### Added — Milestone 18: Supported deployment + packaging
 
 - `deploy/`: `Dockerfile.api`, `Dockerfile.worker`, a compose stack
