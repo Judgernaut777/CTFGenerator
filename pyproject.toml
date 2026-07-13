@@ -137,6 +137,7 @@ ignore = ["E501"] # line length is enforced by the formatter, not the linter
 # them) + the import-firewall subprocess running a fixed snippet via sys.executable.
 "tests/test_mcp_server.py" = ["S108", "S603"]
 "tests/test_worker_dispatch.py" = ["S105", "S106"] # fake bearer-token fixtures, not real secrets
+"tests/test_worker_agent_eval_dispatch.py" = ["S105", "S106"] # fake bearer-token fixtures, not real secrets
 # The OIDC flow/security tests mint ID tokens, drive PKCE, and carry fake client
 # secrets / codes / tokens as literals -- S105/S106 (hardcoded "secret"-looking
 # strings) are the point of a federated-login test double, not real secrets.
