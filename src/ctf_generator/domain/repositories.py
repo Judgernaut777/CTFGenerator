@@ -20,6 +20,7 @@ from collections.abc import Mapping, Sequence
 from datetime import datetime
 from typing import Protocol
 
+from .audit.models import AuditCursor, AuditEvent, AuditEventPage
 from .auth.models import (
     AuthCredential,
     AuthSession,
@@ -356,6 +357,43 @@ class EvalRunRepository(Protocol):
         """Update an existing run keyed by ``eval_run_id`` (the guarded status
         move + advisory result / sanitized error). Raises :class:`LookupError` if
         the run does not exist."""
+        ...
+
+
+class AuditRepository(Protocol):
+    """Stores the durable, APPEND-ONLY audit trail (M16), keyed by
+    ``audit_event_id``.
+
+    An audit event is WRITTEN once (:meth:`add`) and thereafter immutable -- there
+    is deliberately NO update and NO delete method, and the store backs that with
+    a BEFORE UPDATE OR DELETE trigger (tamper-evidence). :meth:`list` is the
+    privileged, admin/support-only read: a filtered, ``occurred_at``-DESC,
+    keyset-cursor-paginated query returning a page of DOMAIN events (never ORM
+    rows). Every field it can surface is a short identifier -- there is no column
+    that could hold a secret.
+    """
+
+    def add(self, event: AuditEvent) -> None:
+        """Append one audit event. Insert-only; a persisted row can never be
+        updated or deleted."""
+        ...
+
+    def list(
+        self,
+        *,
+        actor: str | None = None,
+        action: str | None = None,
+        outcome: str | None = None,
+        since: datetime | None = None,
+        until: datetime | None = None,
+        limit: int,
+        cursor: AuditCursor | None = None,
+    ) -> AuditEventPage:
+        """Return one ``occurred_at``-DESC page of the trail, applying the exact-
+        match ``actor`` / ``action`` / ``outcome`` filters and the inclusive
+        ``since`` / ``until`` time window, resuming strictly after ``cursor``.
+        ``limit`` is the page size; the page carries ``next_cursor`` iff more rows
+        follow."""
         ...
 
 

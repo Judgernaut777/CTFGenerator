@@ -10,6 +10,7 @@ from __future__ import annotations
 import uuid
 from datetime import UTC, datetime
 
+from ctf_generator.domain.audit.models import AuditEvent
 from ctf_generator.domain.auth.models import (
     AuthCredential,
     AuthSession,
@@ -69,6 +70,7 @@ from ctf_generator.domain.work.models import (
     JobTransition,
 )
 
+from .models import AuditEvent as AuditEventRow
 from .models import AuthCredential as AuthCredentialRow
 from .models import AuthSession as AuthSessionRow
 from .models import ChallengeBuild as ChallengeBuildRow
@@ -470,6 +472,40 @@ def eval_run_from_orm(
         blended_score=row.blended_score,
         notes=tuple(row.notes) if row.notes else (),
         error=row.error,
+    )
+
+
+def audit_event_to_orm(event: AuditEvent) -> AuditEventRow:
+    """Map a domain ``AuditEvent`` onto a fresh ORM row (the insert path -- an
+    audit row is append-only, so there is no update mapper). SECRET-FREE: only
+    the short-identifier fields are written; there is no secret column to map."""
+    return AuditEventRow(
+        id=_as_uuid(event.audit_event_id),
+        actor=event.actor,
+        action=event.action,
+        target=event.target,
+        outcome=event.outcome,
+        request_id=event.request_id,
+        reason=event.reason,
+        occurred_at=to_utc(event.occurred_at),
+    )
+
+
+def audit_event_from_orm(row: AuditEventRow) -> AuditEvent:
+    """Map an ORM ``audit_events`` row back to the domain aggregate. Fails loud on
+    a missing/naive ``occurred_at`` via the aggregate's own tz-aware guard."""
+    occurred_at = to_utc(row.occurred_at)
+    if occurred_at is None:  # pragma: no cover - NOT NULL column, defensive
+        raise ValueError(f"audit_events row {row.id} has no occurred_at")
+    return AuditEvent(
+        audit_event_id=str(row.id),
+        actor=row.actor,
+        action=row.action,
+        target=row.target,
+        outcome=row.outcome,
+        request_id=row.request_id,
+        reason=row.reason,
+        occurred_at=occurred_at,
     )
 
 

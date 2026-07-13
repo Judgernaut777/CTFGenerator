@@ -21,6 +21,7 @@ from sqlalchemy import (
 from sqlalchemy.dialects.postgresql import ARRAY, JSONB
 from sqlalchemy.orm import Mapped, mapped_column
 
+from ...domain.audit.models import VALID_AUDIT_OUTCOMES
 from ...domain.auth.models import VALID_SYSTEM_ROLES
 from ...domain.authoring.models import VALID_DECAY_FUNCTIONS, VALID_VERSION_STATES
 from ...domain.evaluation.models import (
@@ -81,6 +82,10 @@ _EVAL_PROFILE_IN_LIST = ", ".join(f"'{p}'" for p in sorted(VALID_EVAL_PROFILES))
 _EVAL_RUN_STATUS_IN_LIST = ", ".join(
     f"'{s}'" for s in sorted(VALID_EVAL_RUN_STATUSES)
 )
+# M16 audit trail: the closed set of audit outcomes, rendered from the domain
+# frozenset (single source of truth) and sorted so the ORM CHECK SQL and the
+# migration SQL cannot drift.
+_AUDIT_OUTCOME_IN_LIST = ", ".join(f"'{o}'" for o in sorted(VALID_AUDIT_OUTCOMES))
 # M7: job queue, worker trust, and projection-outbox enumerations -- rendered
 # from the domain frozensets (single source of truth) and sorted, so the ORM
 # CHECK SQL and the migration SQL cannot drift from the domain or each other.
@@ -1727,4 +1732,44 @@ class OidcLoginTransaction(Base):
             "binding_hash ~ '^[0-9a-f]{64}$'", name="binding_hash_format"
         ),
         CheckConstraint("expires_at > created_at", name="expiry_after_created"),
+    )
+
+
+class AuditEvent(Base):
+    """Persistent form of the domain ``AuditEvent`` -- the durable, APPEND-ONLY
+    privileged-action audit record (M16). ``id`` is the caller-supplied
+    ``audit_event_id`` (uuid, like ``jobs.id``).
+
+    SECRET-FREE by construction: every column is a short identifier or sanitized
+    free text (``actor`` / ``action`` / ``target`` / ``outcome`` / ``request_id``
+    / optional ``reason``). There is NO flag/token/password/body column -- a
+    secret cannot be stored here. TAMPER-EVIDENT: the shared ``reject_mutation``
+    BEFORE UPDATE OR DELETE trigger (see migration 0014) makes a persisted row
+    immutable -- it can never be altered or deleted. The ``actor`` / ``action`` /
+    ``outcome`` / ``occurred_at`` columns are indexed for the operator query."""
+
+    __tablename__ = "audit_events"
+
+    id: Mapped[uuid.UUID] = mapped_column(sa.Uuid, primary_key=True)
+    actor: Mapped[str] = mapped_column(sa.Text, nullable=False)
+    action: Mapped[str] = mapped_column(sa.Text, nullable=False)
+    target: Mapped[str] = mapped_column(sa.Text, nullable=False)
+    outcome: Mapped[str] = mapped_column(sa.Text, nullable=False)
+    request_id: Mapped[str] = mapped_column(sa.Text, nullable=False)
+    reason: Mapped[str | None] = mapped_column(sa.Text, nullable=True)
+    occurred_at: Mapped[datetime] = mapped_column(
+        sa.DateTime(timezone=True), nullable=False
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        sa.DateTime(timezone=True), nullable=False, server_default=sa.func.now()
+    )
+
+    __table_args__ = (
+        CheckConstraint(
+            f"outcome IN ({_AUDIT_OUTCOME_IN_LIST})", name="outcome_valid"
+        ),
+        Index("ix_audit_events_actor", "actor"),
+        Index("ix_audit_events_action", "action"),
+        Index("ix_audit_events_outcome", "outcome"),
+        Index("ix_audit_events_occurred_at", "occurred_at"),
     )
