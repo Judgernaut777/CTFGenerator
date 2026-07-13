@@ -1,5 +1,10 @@
 # Current Architecture (Baseline)
 
+> **HISTORICAL (M0 / v0.1.0 baseline).** Describes the pre-platform flat package and the
+> divergences the productization refactor set out to fix. Milestones M7–M18 are now shipped;
+> for the current layered system see [`overview.md`](overview.md). This document is retained as
+> a historical record of the starting point and is no longer an accurate description of the code.
+
 > Milestone 0 baseline. This document describes the system **as it exists today** (v0.1.0)
 > and maps its modules onto the planned four-plane target. It **complements** the conceptual
 > overview in [`../ARCHITECTURE.md`](../ARCHITECTURE.md) — that document covers the
