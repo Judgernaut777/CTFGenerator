@@ -41,6 +41,7 @@ from ctf_generator.application.catalog import (
     TeamService,
 )
 from ctf_generator.application.catalog.publication_service import PublicationService
+from ctf_generator.application.evaluation import EvalRunService
 from ctf_generator.application.identity import IdentityService
 from ctf_generator.application.instances.service import InstanceLifecycleService
 from ctf_generator.application.jobs.service import JobService
@@ -77,6 +78,11 @@ class Permission(StrEnum):
     INSTANCE_OPERATE = "instance:operate"
     BUILD_READ = "build:read"
     BUILD_CREATE = "build:create"
+    # M15 evaluation lab: request an agent-eval + read its platform record.
+    # AUTHORING-scoped (like BUILD_*): an author/organizer evaluates a version
+    # independent of any competition. NOT a plain contestant.
+    EVAL_READ = "eval:read"
+    EVAL_RUN = "eval:run"
     PUBLICATION_READ = "publication:read"
     PUBLICATION_WRITE = "publication:write"
     JOB_READ = "job:read"
@@ -116,6 +122,8 @@ PERMISSION_SCOPE: dict[Permission, PermissionScope] = {
     Permission.CHALLENGE_PUBLISH: PermissionScope.AUTHORING,
     Permission.BUILD_READ: PermissionScope.AUTHORING,
     Permission.BUILD_CREATE: PermissionScope.AUTHORING,
+    Permission.EVAL_READ: PermissionScope.AUTHORING,
+    Permission.EVAL_RUN: PermissionScope.AUTHORING,
     # COMPETITION (scoped to the target competition via the caller's membership).
     Permission.COMPETITION_READ: PermissionScope.COMPETITION,
     Permission.COMPETITION_WRITE: PermissionScope.COMPETITION,
@@ -178,6 +186,9 @@ ROLE_PERMISSIONS: dict[str, frozenset[Permission]] = {
             Permission.INSTANCE_OPERATE,
             Permission.BUILD_READ,
             Permission.BUILD_CREATE,
+            # Organizer evaluates versions (agent-eval lab).
+            Permission.EVAL_READ,
+            Permission.EVAL_RUN,
             Permission.PUBLICATION_READ,
             Permission.PUBLICATION_WRITE,
         }
@@ -192,6 +203,9 @@ ROLE_PERMISSIONS: dict[str, frozenset[Permission]] = {
             # An author materializes their own challenge builds.
             Permission.BUILD_READ,
             Permission.BUILD_CREATE,
+            # An author evaluates their own challenge versions (agent-eval lab).
+            Permission.EVAL_READ,
+            Permission.EVAL_RUN,
         }
     ),
     "captain": _CONTESTANT,
@@ -608,6 +622,15 @@ def get_job_service(database: Database = Depends(get_database)) -> JobService:
 
 def get_build_service(database: Database = Depends(get_database)) -> BuildService:
     return BuildService(database, jobs=JobService(database))
+
+
+def get_eval_run_service(
+    database: Database = Depends(get_database),
+) -> EvalRunService:
+    # Composes the JobService collaborator exactly as BuildService does: the API
+    # only requests an eval (enqueues a job) and reads records -- it never runs
+    # the effectful eval (a worker claims the job with scoped credentials).
+    return EvalRunService(database, jobs=JobService(database))
 
 
 def get_artifact_download_service(

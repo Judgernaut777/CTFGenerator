@@ -59,6 +59,10 @@ from ctf_generator.application.auth import InvalidCredentialsError
 from ctf_generator.application.catalog.competition_service import (
     CompetitionWindowError,
 )
+from ctf_generator.application.evaluation import (
+    EvalRunConflictError,
+    EvalVersionNotPublishedError,
+)
 from ctf_generator.application.execution.worker_instance_service import (
     InstanceOwnershipError,
 )
@@ -339,6 +343,22 @@ async def _handle_domain_idempotency_conflict(
     return _response(request, 409, "conflict", str(exc) or "idempotency conflict")
 
 
+async def _handle_eval_version_not_published(
+    request: Request, exc: EvalVersionNotPublishedError
+) -> JSONResponse:
+    # The version exists but is not published -- a conflict with its current
+    # state (409), never a 500. The message is state-only (no secrets).
+    return _response(
+        request, 409, "conflict", "challenge version is not published; cannot evaluate"
+    )
+
+
+async def _handle_eval_run_conflict(
+    request: Request, exc: EvalRunConflictError
+) -> JSONResponse:
+    return _response(request, 409, "conflict", str(exc) or "eval run already recorded")
+
+
 async def _handle_flag_rejected(
     request: Request, exc: FlagRejectedError
 ) -> JSONResponse:
@@ -414,6 +434,10 @@ def register_exception_handlers(app: FastAPI) -> None:
     app.add_exception_handler(
         IllegalInstanceTransitionError, _handle_illegal_instance_transition
     )
+    app.add_exception_handler(
+        EvalVersionNotPublishedError, _handle_eval_version_not_published
+    )
+    app.add_exception_handler(EvalRunConflictError, _handle_eval_run_conflict)
     # Submission-processing errors. ChallengeNotAttachedError is registered
     # explicitly so it stays a 404 (its own MRO entry wins over the
     # SubmissionProcessingError base handler); the two flag errors get their
