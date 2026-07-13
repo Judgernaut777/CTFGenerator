@@ -5,7 +5,10 @@ Control Plane, Execution Plane, Evaluation Lab). Some runbooks reference compone
 **planned** (worker protocol, PostgreSQL job queue, instance orchestration, lifecycle/cleanup —
 release stages v0.2/v0.3). Where a procedure can be executed against the **current** codebase
 (`0.1.0`), the current tooling is named explicitly and grounded in the codebase map. Steps labelled
-**(planned)** describe target behavior and are not yet implemented.
+**(planned)** describe target behavior and are not yet implemented. **As of M16 the observability +
+audit surface referenced throughout is IMPLEMENTED** — see §1.1 (`/system/ready` depth,
+`/system/metrics`, the durable audit-read API `GET /audit`, structured redacted logs); many
+"(planned)" *detection* steps below now have a concrete signal there.
 
 Scope: responding to failures and security events during a *live competition*. Assumes the V1
 deployment model — single control-plane deployment, PostgreSQL persistence, one or more isolated
@@ -31,12 +34,28 @@ never mounts Docker socket".
 **Standing invariants that bound every response:**
 - Control plane never executes generated challenge code and never has Docker socket access.
 - Generated vulnerable workloads run only on isolated Execution-Plane workers.
-- Flags, session tokens, provider keys are never logged.
+- Flags, session tokens, provider keys are never logged (M16: enforced by the structured-logging
+  redaction filter, not only by discipline — REQ-INV-011).
 - Scoreboards are reconstructable from persisted score events (`events.py` JSONL / `postgres_events.py`).
 - One team cannot reach another team's instance.
 
 Every SEV-1/SEV-2 gets a timeline log (detection → containment → remediation → post-incident) that
 feeds the audit trail.
+
+### 1.1 Observability quick-reference (now IMPLEMENTED — M16)
+
+The signals and controls below are real as of M16 and ground the "(planned)" detection/audit steps in
+§2. All are secret-free (they never expose a flag/token/DSN):
+
+| Surface | What it gives you | Notes |
+|---|---|---|
+| `GET /system/ready` | Structured multi-check readiness: `{status, degraded, checks:{database, migrations, dead_letter, projection_lag}}` | **503** when DB is down or migrations are behind; **200 `degraded:true`** for dead-letter depth / projection lag (serving-but-attention). `GET /system/live` = cheap liveness (no DB). |
+| `GET /system/metrics` | Prometheus text: `ctfgen_projection_pending/_failed`, `ctfgen_jobs_dead_letter`, `ctfgen_eval_runs_non_terminal`, `ctfgen_build_info` | Admin/support-scoped (`METRICS_READ`). Scrape for alerting thresholds. |
+| `GET /audit?actor=&action=&outcome=&since=&until=` | The durable, **append-only, tamper-evident** audit trail of every privileged state change **and denied privileged attempt** | Admin/support-scoped (`AUDIT_READ`). This is the timeline sink referenced in every runbook's post-incident step. |
+| `GET /jobs/dead-letter`, `GET /jobs/{id}` | Failed/exhausted jobs (type/state/attempts/`error_class`; never payload/result) | Act via `POST /jobs/{id}/retry` (dead-letter requeue) / `POST /jobs/{id}/cancel`. |
+| `GET /competitions/{id}/scoreboard/lag` | ProjectionLag (pending/failed/oldest-pending age) | Advisory; also surfaced in `/system/ready` + `/system/metrics`. |
+| Instance ops | `GET /instances`, `.../instances/{id}`; act via `POST .../stop|reset`, `DELETE .../{id}` | The manual containment verbs for a leaking/stuck instance. |
+| Structured JSON logs | One JSON line/record with `request_id` correlation; a **redaction filter** strips flags/tokens/passwords/provider-keys/DSNs before emit (REQ-INV-011) | Grep by `request_id` to reconstruct a request across services. |
 
 ---
 
@@ -161,6 +180,18 @@ volumes, or artifacts. **Instance lifecycle + expiration + cleanup are planned**
 | Containment | (planned) Stop scheduling to the affected worker if resource-starved. Do not let stale instances remain reachable by contestants after a competition window closes — expired instances are a data-exposure surface (they still hold live flags). |
 | Remediation | (planned) Run reconciliation: for every instance the control plane considers terminated, force-remove the container + its network + volumes on the worker. Because launch is idempotent and artifacts are immutable, safe re-teardown is repeatable. Reclaim disk. Verify no flag-bearing container persists past its window. |
 | Post-incident | Confirm cleanup is idempotent and that a failed teardown dead-letters rather than silently leaking. Ensure expiration is enforced by the worker, not only the control-plane clock. Check for capacity impact against the operating targets. |
+
+---
+
+### 2.11 Bad deploy / rollback
+
+| | |
+|---|---|
+| Severity | SEV-2 (degradation after a release) or SEV-1 (a release breaks auth / leaks a secret / corrupts data) |
+| Detection | Post-deploy: `GET /system/ready` flips to 503 or `degraded`; error rate / `ctfgen_jobs_dead_letter` climbs in `/system/metrics`; a spike of `outcome=denied`/`error` in `GET /audit`; structured logs show a new exception class by `request_id`. |
+| Containment | Stop the rollout / take the new version out of the load-balancer rotation. Because challenge artifacts are **immutable + content-addressed** and instance launch is **idempotent**, a control-plane rollback does not disturb running instances. Do NOT roll the DB back blindly — see remediation. |
+| Remediation | **App rollback:** redeploy the previous image/tag; `GET /system/version` confirms the running version and `/system/ready`'s `migrations` check confirms the schema matches the code (`CODE_MIGRATION_HEAD`). **Schema:** migrations are **reversible** (Alembic `downgrade`), but only downgrade if the new migration is the cause AND no data depends on it — prefer a forward fix. Append-only tables (audit_events, the ledger, score_events) are never downgraded destructively. Re-run the readiness checks until green. |
+| Post-incident | Record the rollback in the audit trail (who/what/why via the `reason` field). Add the failing signal to the pre-deploy smoke set. Confirm no secret was emitted during the incident window (grep the redacted log stream). |
 
 ---
 
