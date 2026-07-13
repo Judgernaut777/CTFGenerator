@@ -44,6 +44,15 @@ class ScoreReport:
 
 
 def score_challenge(challenge_path: Path) -> ScoreReport:
+    """Compute the ADVISORY AI-resistance heuristic for a challenge bundle.
+
+    This is a static quality signal derived from bundle heuristics (string
+    counts and self-reported flags), NOT a measured or guaranteed resistance:
+    the dimensions are DECLARED signals (see the integrity-gate comment below),
+    so a gamed challenge can score highly. For the empirical solved-with-vs-
+    without-defense signal, use the Evaluation Lab (agent-eval). The band and
+    total returned here are an advisory heuristic only.
+    """
     report = ScoreReport()
     if not challenge_path.is_dir():
         report.errors.append(f"{challenge_path} is not a directory")
@@ -494,7 +503,12 @@ def _read_text(path: Path) -> str:
 def score_with_agent_eval(
     challenge_path: Path, eval_report_path: Path | None = None
 ) -> dict[str, object]:
-    """Blend the static AI-resistance score with a saved agent-eval report.
+    """Combine the static AI-resistance heuristic with a saved agent-eval report.
+
+    The static piece is the advisory bundle heuristic (an estimated quality
+    signal), while the agent-eval piece is the MEASURED solved-with-vs-without-
+    defense signal produced by the Evaluation Lab. This view keeps the two
+    distinct: it never treats the static heuristic as an empirical guarantee.
 
     Always runs the unmodified ``score_challenge`` first; ``static`` in the
     returned mapping is exactly ``ScoreReport.to_mapping()``. When
