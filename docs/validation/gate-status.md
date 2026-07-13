@@ -128,7 +128,7 @@ Per-item evidence lives in
 | Exit: scoreboard reconstructed from score events, matched live | **GATED-PASS** | restore-verify scoreboard parity (S8, 38 OK) |
 | Exit: zero public flag leak + zero deterministic-rebuild failures | **PASS** | S4 (host) + conformance byte-stability (52 OK) |
 | Exit: no unresolved critical/high finding across S1–S9 | **PARTIAL** | none in the executed surface here; production-deployment scope UNVERIFIED |
-| Exit: recovery drill (RPO 5min / RTO 30min) rehearsed once | **PARTIAL** | RTO rehearsed vs live PG; RPO-continuous UNVERIFIED |
+| Exit: recovery drill (RPO 5min / RTO 30min) rehearsed once | **MET** (RTO) / **UNVERIFIED** (continuous RPO) | RTO rehearsed vs live PG (drill executed); continuous RPO ≤5 min UNVERIFIED (no WAL/PITR) |
 | Exit: beta findings gated into v1.0 external-review scope | **UNVERIFIED** | requires a real external beta |
 
 **Closed-beta verdict: PARTIAL.** The security, isolation, determinism,

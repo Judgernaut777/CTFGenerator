@@ -21,7 +21,10 @@ Executed-evidence artifacts, and what each proves:
 | Internal-alpha gate dry-run (M21) | [internal-alpha-report.md](internal-alpha-report.md) | the alpha entry/exit checklist replayed as a single-host simulation over real PG + Docker | MET-by-simulation with one PARTIAL (named-operators/rollback is a process artifact, not a test); distributed-worker launch UNVERIFIED |
 | Closed-beta gate dry-run (M21) | [closed-beta-report.md](closed-beta-report.md) | the beta entry/exit checklist replayed as a simulation; reuses the S1–S9 + DR + capacity-smoke artifacts | PARTIAL — security/isolation/determinism/uniqueness backed by executed tests; TLS deploy, production scale, real external beta, continuous RPO UNVERIFIED |
 | Consolidated gate-status matrix (M21) | [gate-status.md](gate-status.md) | roll-up of `test_security_validation_meta` + the S1–S9 modules + the alpha/beta reports | executed on this host: S4/S5/S6/S9(static) PASS, S1/S2/S3/S7/S8/S9(runtime) GATED-PASS; v1.0 blockers listed honestly — evidence for M22, ticks no box |
+| Final release qualification (M22) | [../RELEASE_QUALIFICATION.md](../RELEASE_QUALIFICATION.md) | capstone adjudication of every `../RELEASE_CRITERIA.md` gate against the artifacts in this table + the M21 sims | authoritative sign-off pass: S1–S9 QUALIFIED (host / integration-gated), internal-alpha QUALIFIED-by-sim (composite worker-launch seam UNVERIFIED), closed-beta PARTIAL; **states plainly that v1.0 is NOT fully release-qualified** with the six outstanding blockers |
 
 **Release-gate sign-off is M22's job, not M20's.** This program supplies the
-evidence; `../RELEASE_CRITERIA.md` gates stay unchecked until the M22
-qualification pass adjudicates them against this evidence.
+evidence; the M22 qualification pass ([`../RELEASE_QUALIFICATION.md`](../RELEASE_QUALIFICATION.md))
+adjudicates `../RELEASE_CRITERIA.md` against this evidence. That pass concludes
+**v1.0 is NOT fully release-qualified**; it credits only what a re-runnable
+executed artifact proves and leaves every unproven gate UNVERIFIED.
