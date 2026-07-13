@@ -23,6 +23,10 @@ from sqlalchemy.orm import Mapped, mapped_column
 
 from ...domain.auth.models import VALID_SYSTEM_ROLES
 from ...domain.authoring.models import VALID_DECAY_FUNCTIONS, VALID_VERSION_STATES
+from ...domain.evaluation.models import (
+    VALID_EVAL_PROFILES,
+    VALID_EVAL_RUN_STATUSES,
+)
 from ...domain.execution.models import VALID_RUNTIME_TYPES, VALID_TRUST_STATES
 from ...domain.identity.models import VALID_ROLES
 from ...domain.instances.models import (
@@ -69,6 +73,13 @@ _VERSION_STATE_IN_LIST = ", ".join(f"'{s}'" for s in sorted(VALID_VERSION_STATES
 _DECAY_FUNCTION_IN_LIST = ", ".join(f"'{d}'" for d in sorted(VALID_DECAY_FUNCTIONS))
 _SCORE_EVENT_TYPE_IN_LIST = ", ".join(
     f"'{t}'" for t in sorted(VALID_SCORE_EVENT_TYPES)
+)
+# M15: agent-evaluation platform-record enumerations -- rendered from the domain
+# frozensets (single source of truth) and sorted, so the ORM CHECK SQL and the
+# migration SQL cannot drift from the domain or each other.
+_EVAL_PROFILE_IN_LIST = ", ".join(f"'{p}'" for p in sorted(VALID_EVAL_PROFILES))
+_EVAL_RUN_STATUS_IN_LIST = ", ".join(
+    f"'{s}'" for s in sorted(VALID_EVAL_RUN_STATUSES)
 )
 # M7: job queue, worker trust, and projection-outbox enumerations -- rendered
 # from the domain frozensets (single source of truth) and sorted, so the ORM
@@ -422,6 +433,86 @@ class ChallengeBuild(Base):
             postgresql_nulls_not_distinct=True,
         ),
         Index("ix_challenge_builds_challenge_version_id", "challenge_version_id"),
+    )
+
+
+class EvalRun(Base):
+    """Persistent form of the domain ``EvalRun`` -- the durable, operator-visible
+    agent-evaluation platform record (M15). ``id`` is the business ``eval_run_id``
+    (caller-supplied uuid, like ``jobs.id``); the run references the version it
+    evaluates by ``challenge_version_id``. The dedupe key ``(challenge_version_id,
+    profile, adversarial)`` is UNIQUE so a re-request collapses to one record.
+
+    SECRET-FREE by construction: there is NO flag/token/answer column. The only
+    result columns are the advisory outcome subset + sanitized ``notes``/``error``
+    (references/summaries only). CHECKs tie the result columns to ``status`` and
+    the ``eval_run_transition_guard`` BEFORE UPDATE trigger freezes terminal rows
+    and the immutable identity columns (see migration 0013)."""
+
+    __tablename__ = "eval_runs"
+
+    id: Mapped[uuid.UUID] = mapped_column(sa.Uuid, primary_key=True)
+    challenge_version_id: Mapped[uuid.UUID] = mapped_column(
+        sa.Uuid,
+        ForeignKey("challenge_versions.id", ondelete="RESTRICT"),
+        nullable=False,
+    )
+    profile: Mapped[str] = mapped_column(sa.Text, nullable=False)
+    adversarial: Mapped[bool] = mapped_column(sa.Boolean, nullable=False)
+    status: Mapped[str] = mapped_column(
+        sa.Text, nullable=False, server_default=sa.text("'pending'")
+    )
+    requested_at: Mapped[datetime] = mapped_column(
+        sa.DateTime(timezone=True), nullable=False
+    )
+    completed_at: Mapped[datetime | None] = mapped_column(
+        sa.DateTime(timezone=True), nullable=True
+    )
+    solved: Mapped[bool | None] = mapped_column(sa.Boolean, nullable=True)
+    steps: Mapped[int | None] = mapped_column(sa.Integer, nullable=True)
+    success_dropped: Mapped[bool | None] = mapped_column(sa.Boolean, nullable=True)
+    step_delta: Mapped[int | None] = mapped_column(sa.Integer, nullable=True)
+    blended_score: Mapped[float | None] = mapped_column(sa.Double, nullable=True)
+    notes: Mapped[list[str] | None] = mapped_column(ARRAY(sa.Text), nullable=True)
+    error: Mapped[str | None] = mapped_column(sa.Text, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(
+        sa.DateTime(timezone=True), nullable=False, server_default=sa.func.now()
+    )
+
+    __table_args__ = (
+        # One live run per (version, profile, adversarial) -- matches the enqueue
+        # idempotency key so a re-request is idempotent.
+        UniqueConstraint(
+            "challenge_version_id",
+            "profile",
+            "adversarial",
+            name="uq_eval_runs_challenge_version_id_profile_adversarial",
+        ),
+        CheckConstraint(
+            f"profile IN ({_EVAL_PROFILE_IN_LIST})", name="profile_valid"
+        ),
+        CheckConstraint(
+            f"status IN ({_EVAL_RUN_STATUS_IN_LIST})", name="status_valid"
+        ),
+        CheckConstraint("steps IS NULL OR steps >= 0", name="steps_non_negative"),
+        # completed_at is set iff the record is terminal.
+        CheckConstraint(
+            "(status IN ('succeeded', 'failed')) = (completed_at IS NOT NULL)",
+            name="completed_state_consistent",
+        ),
+        # The advisory result exists ONLY on a succeeded run.
+        CheckConstraint(
+            "status = 'succeeded' OR (solved IS NULL AND steps IS NULL "
+            "AND success_dropped IS NULL AND step_delta IS NULL "
+            "AND blended_score IS NULL)",
+            name="result_only_when_succeeded",
+        ),
+        # error is a failure record: present iff the run failed.
+        CheckConstraint(
+            "(status = 'failed') = (error IS NOT NULL)",
+            name="error_only_when_failed",
+        ),
+        Index("ix_eval_runs_challenge_version_id", "challenge_version_id"),
     )
 
 
