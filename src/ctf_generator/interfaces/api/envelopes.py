@@ -51,6 +51,7 @@ JOB_LIST_SCHEMA = "ctfgen.job-list"
 # M15 evaluation-lab surface.
 EVAL_RUN_SCHEMA = "ctfgen.eval-run"
 EVAL_RUN_LIST_SCHEMA = "ctfgen.eval-run-list"
+AUDIT_EVENT_LIST_SCHEMA = "ctfgen.audit-event-list"
 SYSTEM_HEALTH_SCHEMA = "ctfgen.system-health"
 SYSTEM_READINESS_SCHEMA = "ctfgen.system-readiness"
 SYSTEM_VERSION_SCHEMA = "ctfgen.system-version"

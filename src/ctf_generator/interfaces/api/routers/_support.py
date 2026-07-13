@@ -86,11 +86,16 @@ def record_audit(
     action: str,
     target: str,
     outcome: str = "success",
+    reason: str | None = None,
 ) -> None:
+    """Emit a privileged-action audit record onto the app's sink. ``reason`` is an
+    OPTIONAL operator justification for an admin override (REQ-INV-009), threaded
+    into the event only when supplied; existing callers are unaffected."""
     audit(
         audit_sink(request),
         actor=principal.subject,
         action=action,
         target=target,
         outcome=outcome,
+        reason=reason,
     )

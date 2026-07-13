@@ -29,6 +29,7 @@ from typing import Protocol
 
 from fastapi import Depends, Request
 
+from ctf_generator.application.audit import AuditQueryService
 from ctf_generator.application.auth import AuthService
 from ctf_generator.application.authoring.artifact_download import (
     ArtifactDownloadService,
@@ -87,6 +88,10 @@ class Permission(StrEnum):
     PUBLICATION_WRITE = "publication:write"
     JOB_READ = "job:read"
     JOB_OPERATE = "job:operate"
+    # M16 audit trail: read the durable, system-wide privileged-action audit log.
+    # A privileged, deployment-global capability -- admin / support ONLY (a plain
+    # organizer/contestant never reads the cross-competition audit trail).
+    AUDIT_READ = "audit:read"
 
 
 class PermissionScope(StrEnum):
@@ -116,6 +121,7 @@ PERMISSION_SCOPE: dict[Permission, PermissionScope] = {
     Permission.USER_WRITE: PermissionScope.SYSTEM,
     Permission.JOB_READ: PermissionScope.SYSTEM,
     Permission.JOB_OPERATE: PermissionScope.SYSTEM,
+    Permission.AUDIT_READ: PermissionScope.SYSTEM,
     # AUTHORING (platform-global challenge authoring; independent of a competition).
     Permission.CHALLENGE_READ: PermissionScope.AUTHORING,
     Permission.CHALLENGE_WRITE: PermissionScope.AUTHORING,
@@ -224,6 +230,8 @@ ROLE_PERMISSIONS: dict[str, frozenset[Permission]] = {
             Permission.BUILD_READ,
             Permission.JOB_READ,
             Permission.JOB_OPERATE,
+            # Support reads the system-wide audit trail (incident triage).
+            Permission.AUDIT_READ,
         }
     ),
 }
@@ -618,6 +626,12 @@ def get_scoreboard_service(
 
 def get_job_service(database: Database = Depends(get_database)) -> JobService:
     return JobService(database)
+
+
+def get_audit_query_service(
+    database: Database = Depends(get_database),
+) -> AuditQueryService:
+    return AuditQueryService(database)
 
 
 def get_build_service(database: Database = Depends(get_database)) -> BuildService:
