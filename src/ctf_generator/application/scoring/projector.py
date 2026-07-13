@@ -270,6 +270,16 @@ class ScoreProjector:
 
     # -- operations ------------------------------------------------------------
 
+    def dry_project(self, session, competition_id: str) -> ScoreboardProjectionRecord:
+        """Read-only refold for one competition (verification / dry-run).
+
+        Runs the EXACT same pure fold ``_project_competition`` persists -- the
+        committed ledger through ``compute_scoreboard`` -- but writes NOTHING.
+        The restore verifier uses this to prove the restored scoreboard
+        projection is derivable from the restored ledger (ledger + projection
+        restored consistently). Never mutates; the caller owns the session."""
+        return self._refold(session, competition_id)
+
     def rebuild(self, batch_size: int = 100) -> int:
         """Delete every projection row, re-enqueue an outbox row per ledger
         event, and drain -- the ledger stays the sole source of truth."""
