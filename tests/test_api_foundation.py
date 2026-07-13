@@ -380,7 +380,7 @@ class PermissionScopeMapTests(unittest.TestCase):
             by_scope[PermissionScope.SYSTEM],
             {Permission.USER_READ, Permission.USER_WRITE,
              Permission.JOB_READ, Permission.JOB_OPERATE,
-             Permission.AUDIT_READ},
+             Permission.AUDIT_READ, Permission.METRICS_READ},
         )
         self.assertIn(Permission.CHALLENGE_WRITE, by_scope[PermissionScope.AUTHORING])
         self.assertIn(Permission.BUILD_CREATE, by_scope[PermissionScope.AUTHORING])
