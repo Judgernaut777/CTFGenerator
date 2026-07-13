@@ -1,0 +1,63 @@
+name: coverage
+
+# INFORMATIONAL coverage tier (M20 validation program).
+#
+# Runs the FULL unittest suite under coverage.py against a real Postgres service
+# so the Docker-/Postgres-gated integration suites execute and COUNT (a host-only
+# run understates the number -- docs/validation/coverage.md). It is deliberately
+# NOT a required, merge-blocking gate: implemented != qualified, and a hard
+# coverage floor is premature. Like the lint/type/SAST jobs in pr.yml this job is
+# `continue-on-error` -- it MEASURES and PUBLISHES, it does not veto. The floor
+# below is a soft tripwire set at/just under the current measured total (see the
+# doc); raise it deliberately as coverage is driven up, don't let it ratchet
+# silently.
+
+on:
+  pull_request:
+  push:
+    branches-ignore: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  coverage:
+    name: coverage (informational)
+    runs-on: ubuntu-latest
+    continue-on-error: true # measure + publish only; never blocks merge
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_PASSWORD: pw
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 5s --health-timeout 5s --health-retries 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      # Install the runtime extras so the api/db/web/oidc/cli integration suites
+      # actually import + run (they SKIP when their extra is absent), plus [cov].
+      - run: pip install -e ".[dev,deploy,cli,worker,mcp,cov]"
+      - name: Run suite under coverage against real Postgres
+        env:
+          CTFGEN_TEST_DATABASE_URL: postgresql+psycopg://postgres:pw@localhost:5432/postgres
+          COVERAGE_XML: "1"
+          COVERAGE_HTML: "1"
+        # A non-zero MIN makes the floor a visible signal in the log; the job is
+        # continue-on-error so a dip below it is reported, not merge-blocking.
+        run: bash scripts/coverage.sh 50
+      - name: Upload coverage report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: coverage-report
+          path: |
+            coverage.xml
+            htmlcov/
+          if-no-files-found: warn
