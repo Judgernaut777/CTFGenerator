@@ -1,7 +1,8 @@
 # CTFGenerator
 
-CTFGenerator is a CVE-driven, multi-domain, live-adversarial CTF challenge
-generator, validator, and competition platform.
+CTFGenerator is an AI-resistant CTF platform: a deterministic, CVE-driven,
+multi-domain challenge **generator core** plus a **self-hosted competition
+platform** for running live events end-to-end.
 
 Challenges are never stored as static artifacts to hand out — every challenge
 is regenerated deterministically from a seed (optionally folded together with
@@ -11,44 +12,82 @@ sibling-variant comparison, and cross-instance exploit replay possible.
 Nothing about a specific instance is ever memoized to disk except the
 rendered challenge folder itself.
 
-## What's here
+**New here?** [docs/getting-started.md](docs/getting-started.md) routes the
+four audiences — operator/deployer, challenge author, contestant, CLI user —
+to the right doc.
 
-- **8 challenge domains** — web, scada_ics, network, crypto, cloud, forensics,
-  binary, mobile — via 8 registered challenge families, each supporting a
-  subset of offensive (`red`), defensive (`blue`), and hybrid (`purple`)
-  modes.
-- **CVE-driven generation** — ground a challenge in a real, named CVE
-  (Log4Shell, PrintNightmare, Heartbleed, Zerologon, EternalBlue, and more)
-  with difficulty and category derived from the CVE's own CVSS score and CWE
-  classification.
-- **A live-adversarial scenario engine** — a scripted timeline where a
-  defender reacts to an attacker (or vice versa) while the challenge is
-  running, so a static writeup goes stale mid-solve. Runs offline
-  (deterministic, no Docker) or live against a running Docker instance.
-- **AI-resistance scoring** — a static, per-challenge 0–100 score, plus an
-  **AI-agent evaluation harness** that measures how a scripted solver agent
-  actually fares against a live instance, with and without the live-adversarial
-  engine turned on.
-- **Competition scoring and a scoreboard** — four pluggable scoring engines
-  (including CTFd-style solve-count decay and this project's own time-decay
-  default) and a scoreboard computed from a competition's event log.
-- **A live competition platform** — `ctfgen serve` runs a session-authenticated
-  admin API with a live progress feed, plus a separately-tokened, redacted
-  public scoreboard the admin can publish without exposing the admin surface.
-- **An MCP server** — drive spec drafting from your own Claude/GPT
-  subscription instead of an API key; everything that touches Docker or the
-  host stays CLI-only and is never exposed to a model host.
+## The two halves
+
+- **The generator core** — a dependency-free Python engine that drafts specs,
+  renders deterministic challenge bundles, grounds them in real CVEs, runs the
+  live-adversarial scenario engine, and scores/evaluates AI-resistance. Driven
+  by the `ctfgen create|spec|validate|score|...` commands (below), and usable
+  entirely offline.
+- **The self-hosted platform (M6+)** — a FastAPI control plane, PostgreSQL,
+  auth/RBAC, organizer + contestant web apps, and isolated workers that build
+  and run challenges off the control plane. This is the supported product; the
+  generator core is the engine underneath it.
+
+## The platform
+
+- **Control plane** — a FastAPI JSON API served at `/api/v1`
+  (`src/ctf_generator/interfaces/api/`). Eighteen routers cover competitions,
+  teams, users, challenge definitions/versions, submissions, scoreboard,
+  instances, builds, evaluations, publications, artifacts, jobs, audit, auth,
+  system, plus optional OIDC and a plane-isolated worker gateway. The live
+  contract is the OpenAPI document at `/api/v1/openapi.json`, with Swagger UI
+  at `/api/v1/docs`.
+- **Auth + RBAC (M10)** — local password login and hash-only bearer sessions,
+  optional OIDC authorization-code+PKCE federation, and per-competition role
+  scoping. Eight competition roles (`player`, `captain`, `author`, `organizer`,
+  `admin`, `observer`, `judge`, `support`; `domain/identity/models.py`
+  `VALID_ROLES`) plus two deployment-global system roles (`admin`, `support`).
+  See [docs/adr/007-authentication-and-sessions.md](docs/adr/007-authentication-and-sessions.md)
+  and [docs/security/oidc.md](docs/security/oidc.md).
+- **Web apps (M11/M12)** — a server-rendered sub-app mounted at `/app`
+  (`src/ctf_generator/interfaces/web/`): the organizer dashboard and the
+  contestant portal, sharing one hardened stack (cookie session bridge over the
+  M10 auth service, per-response CSP nonce, double-submit CSRF, no CDN, no JS).
+  See [docs/web/contestant-portal.md](docs/web/contestant-portal.md).
+- **Workers + job queue (M7/M8)** — a PostgreSQL-backed job queue (`SKIP
+  LOCKED` leasing, retries, dead-letter, idempotency) feeds isolated workers
+  that build and run generated (untrusted) workloads off the control plane. The
+  worker reaches the platform only through the worker gateway with a scoped,
+  short-lived credential — an auth plane disjoint from human sessions. See
+  [docs/security/runtime-isolation.md](docs/security/runtime-isolation.md).
+- **Challenge SDK** — the supported, semver-stable authoring surface
+  (`ctf_generator.sdk`); families register through an explicit plugin boundary
+  instead of editing a central hub. See
+  [docs/CHALLENGE_SDK.md](docs/CHALLENGE_SDK.md).
+- **Platform CLI** — `ctfgen <area> <verb>` is an HTTP client for a running
+  deployment (auth, competition, team, user, challenge-def, challenge-version,
+  publication, submission, instance, job, build, system), authenticated with a
+  scoped session token. It is a separate half of the `ctfgen` entry point from
+  the generator commands. See [docs/supported-cli.md](docs/supported-cli.md).
+- **Deploy stack** — a supported Docker deployment (`deploy/`: API and worker
+  images, a compose stack, an entrypoint, and a verify script) behind a TLS
+  reverse proxy. See [docs/HOSTING.md](docs/HOSTING.md) and
+  [docs/operations/configuration.md](docs/operations/configuration.md).
+
+> **Legacy note.** A single-process stdlib dashboard (`ctfgen serve`) still
+> ships for the offline/demo path — a session-authenticated admin API plus a
+> separately-tokened public scoreboard over a fixture/JSONL store. It is not the
+> supported platform; use the control plane above for real events. The legacy
+> walkthrough is §1 onward of [docs/HOSTING.md](docs/HOSTING.md).
 
 ## Install
 
-No runtime dependencies; Python 3.11+:
+The generator core has no runtime dependencies (Python 3.11+):
 
 ```bash
 python3 -m pip install -e .
 ctfgen --version
 ```
 
-## Quick Start
+The platform surfaces are opt-in extras (`.[api]`, `.[db]`, `.[web]`,
+`.[cli]`, `.[deploy]`, …) — see [Optional extras](#optional-extras).
+
+## Quick Start (generator core)
 
 List the challenge families the generator can produce:
 
@@ -84,16 +123,16 @@ ctfgen validate-runtime challenges/invoice-drift
 
 That command runs static validation, `docker compose build`, `docker compose up -d`, the generated health check, the private solver, and cleanup with `docker compose down --volumes --remove-orphans`.
 
-Score a generated challenge on AI-resistance dimensions:
+Compute the advisory AI-resistance score for a generated challenge:
 
 ```bash
 ctfgen score challenges/invoice-drift
 ```
 
-The score cross-checks the challenge spec's AI-resistance claims against what
-the generated artifacts actually do (variant uniqueness, statefulness, solver
-depth, live interaction, scanner resistance). Use `--json` for a machine-readable
-report or `--min-score N` to gate generation in CI:
+The score is a static, advisory quality signal (see
+[Three signals of AI-resistance](#three-signals-of-ai-resistance) for what it
+does and does not mean). Use `--json` for a machine-readable report or
+`--min-score N` to gate generation in CI:
 
 ```bash
 ctfgen score challenges/invoice-drift --min-score 80
@@ -190,12 +229,71 @@ endpoint for attacker/sensor events:
 ctfgen run-scenario challenges/log4shell --runtime --base-url http://127.0.0.1:8080
 ```
 
-## AI-resistance scoring vs. competition scoring
+## Three signals of AI-resistance
 
-These are two different scoring systems. `ctfgen score` (above) rates one
-generated challenge's AI-resistance out of 100. Everything below is
-*competition* scoring — how many points a team earns for solving a challenge
-during a live event.
+AI-resistance has three distinct signals — do not conflate them. All three are
+about *how well a challenge resists an AI solver*, and are separate from
+*competition* scoring (how many points a team earns, further below).
+
+1. **The mechanism** — variant regeneration + the live-adversarial engine
+   (above). This is what actually resists a solver: a rotating instance and a
+   live-reacting defender, not a design claim.
+2. **The advisory heuristic** — `ctfgen score` produces a static, per-challenge
+   0–100 quality signal by cross-checking the spec's AI-resistance *claims*
+   against what the generated artifacts actually do (variant uniqueness,
+   statefulness, solver depth, live interaction, scanner resistance). It is an
+   **advisory quality signal, not a measured guarantee** — a high score means
+   the design has the ingredients, not that a real agent failed.
+3. **The measured signal** — the Evaluation Lab (`ctfgen eval-agent`, below)
+   runs an actual scripted solver agent against a *live* instance and measures
+   the outcome, with and without the live-adversarial engine. This is the
+   empirical evidence; the heuristic score is only a proxy for it.
+
+### AI-agent evaluation (the measured signal)
+
+Measures how an AI agent actually fares against a *live* challenge instance —
+using only its public surface (`public/description.md`, `public/hints.yaml`,
+and live HTTP access), never the private solution — and how much the
+live-adversarial engine degrades that success. A large "solved without defense"
+vs. "solved with defense" gap means a challenge resists a scripted,
+live-reacting adversary, not just a static writeup.
+
+```bash
+ctfgen eval-agent challenges/log4shell --profile writeup_replay
+```
+
+Three built-in profiles, all driving the same deterministic baseline agent
+(`ScriptedSolverAgent`, which extracts a plan from `public/` and does not
+adapt to responses) with different step/time budgets:
+
+| Profile             | Steps | Models                                          |
+|----------------------|-------|--------------------------------------------------|
+| `one_shot_prompt`     | 1     | a single best-guess request (one-shot LLM prompt) |
+| `writeup_replay`      | 8     | replays a fixed plan without adapting            |
+| `tool_using_agent`    | 20    | a larger budget, models an iterative tool-caller  |
+
+Add `--adversarial` to run the same profile twice — scenario engine off, then
+on — and report the delta:
+
+```bash
+ctfgen eval-agent challenges/log4shell --profile writeup_replay --adversarial
+```
+
+```
+Adversarial delta for challenges/log4shell [writeup_replay]
+  baseline:    solved=True steps=2
+  adversarial: solved=False steps=5
+  success_dropped=True step_delta=3
+```
+
+`success_dropped=True` means live defense flipped a solve into a non-solve —
+direct evidence the live-adversarial engine, not just the static challenge
+design, is doing the AI-resisting.
+
+## Competition scoring and scoreboard
+
+Distinct from AI-resistance: competition scoring is how many points a team
+earns for solving a challenge during a live event.
 
 List the registered competition scoring engines:
 
@@ -239,77 +337,6 @@ is a JSON array of solve events (`team_id`, `challenge_id`, `solved_at`,
 `minimum_value`, `decay_function`, `decay`); `config.json` is a single
 `CompetitionConfig` object (`competition_id`, `name`, `start_time`,
 `end_time`, and optionally `scoring_start_time`/`freeze_time`).
-
-## AI-agent evaluation
-
-Measures how an AI agent actually fares against a *live* challenge instance —
-using only its public surface (`public/description.md`, `public/hints.yaml`,
-and live HTTP access), never the private solution — and how much the
-live-adversarial engine degrades that success. This is the empirical
-AI-resistance signal: a large "solved without defense" vs. "solved with
-defense" gap means a challenge resists a scripted, live-reacting adversary,
-not just a static writeup.
-
-```bash
-ctfgen eval-agent challenges/log4shell --profile writeup_replay
-```
-
-Three built-in profiles, all driving the same deterministic baseline agent
-(`ScriptedSolverAgent`, which extracts a plan from `public/` and does not
-adapt to responses) with different step/time budgets:
-
-| Profile             | Steps | Models                                          |
-|----------------------|-------|--------------------------------------------------|
-| `one_shot_prompt`     | 1     | a single best-guess request (one-shot LLM prompt) |
-| `writeup_replay`      | 8     | replays a fixed plan without adapting            |
-| `tool_using_agent`    | 20    | a larger budget, models an iterative tool-caller  |
-
-Add `--adversarial` to run the same profile twice — scenario engine off, then
-on — and report the delta:
-
-```bash
-ctfgen eval-agent challenges/log4shell --profile writeup_replay --adversarial
-```
-
-```
-Adversarial delta for challenges/log4shell [writeup_replay]
-  baseline:    solved=True steps=2
-  adversarial: solved=False steps=5
-  success_dropped=True step_delta=3
-```
-
-`success_dropped=True` means live defense flipped a solve into a non-solve —
-direct evidence the live-adversarial engine, not just the static challenge
-design, is doing the AI-resisting.
-
-## The competition platform
-
-`ctfgen serve` runs the live competition backend: a session-authenticated
-admin JSON API with a live progress feed, and a separately-tokened public
-scoreboard endpoint that can be shared with contestants/spectators without
-exposing the admin surface at all.
-
-```bash
-ctfgen serve --admin-user admin --admin-password 'change-me' \
-  --events-file events.jsonl --challenges challenges.json --config config.json
-```
-
-`--public-token` fixes the public scoreboard token; if omitted, one is
-generated randomly and printed once at startup. `--events-file` persists the
-event log to JSONL (default: in-memory only, lost on restart). `--challenges`
-and `--config` accept the same JSON shapes as `scoreboard` above; both default
-to an empty catalog / a permissive year-long placeholder competition when
-omitted.
-
-Admin routes (`POST /login`, `GET /`, `/api/progress`, `/api/leaderboard`,
-`/api/feed`, `POST /api/event`) require a session cookie from `/login` (a
-PBKDF2-hashed username/password check); every authenticated request rotates
-the session token, and every `POST` additionally requires a matching
-`X-CSRF-Token` header. Public routes (`GET /public/scoreboard`, `GET
-/public/feed`) require only the separate public token (`X-Public-Token` header
-or `?token=`) and expose nothing but a redacted leaderboard (display name,
-rank, score, solve count — no team ids, no per-challenge detail) and a
-redacted solve feed.
 
 ## Structured specs and LLM-drafted metadata
 
@@ -400,12 +427,12 @@ ctfgen report-index /tmp/reports
 ctfgen report-index /tmp/reports --html /tmp/reports/index.html
 ```
 
-### Use your own subscription via MCP
+## Use your own subscription via MCP
 
-Instead of an API key, run CTFGenerator as an MCP server and let an MCP host
-(Claude Desktop/Code, or any other client) drive it with the model you already
-pay for. The host's model drafts the metadata and calls the server's tools; the
-LLM never lives in CTFGenerator.
+Instead of an API key, run the generator core as an MCP server and let an MCP
+host (Claude Desktop/Code, or any other client) drive it with the model you
+already pay for. The host's model drafts the metadata and calls the server's
+tools; the LLM never lives in CTFGenerator.
 
 ```bash
 pip install -e '.[mcp]'
@@ -430,14 +457,13 @@ scoreboard/admin surface. Run those from the CLI.
 
 ## Host a competition
 
-Want to run a live event end-to-end — generate a batch of challenges, build a
-catalog, launch the session-authenticated admin dashboard, publish a public
-scoreboard, and record solves? See **[docs/HOSTING.md](docs/HOSTING.md)** for
-the full copy-pasteable walkthrough, including `ctfgen quickstart`, `ctfgen
-catalog`, `ctfgen serve --challenges-dir`, the browser admin UI at `/login`
-and `/`, the public scoreboard at `/public?token=...`, scoring-engine choices,
-the optional `[postgres]` durable event store, and the session/CSRF/public-
-token security model.
+To run a live event end-to-end on the supported platform — deploy the control
+plane, PostgreSQL, and isolated workers; seed an admin; author and publish
+challenges; open the organizer and contestant web apps; record solves — see
+**[docs/HOSTING.md](docs/HOSTING.md)** (§0 is the supported platform;
+[docs/operations/configuration.md](docs/operations/configuration.md) is the
+`CTFGEN_*` env reference). The legacy single-process `ctfgen serve` demo path is
+§1 onward of the same document.
 
 ## Development
 
@@ -453,21 +479,29 @@ PYTHONPATH=src python3 -m compileall -q src tests
 
 ## Optional extras
 
-| Extra       | Adds                                              | Needs                          |
-|-------------|----------------------------------------------------|---------------------------------|
-| `anthropic` | Claude-backed `spec --backend anthropic`           | `ANTHROPIC_API_KEY`             |
-| `openai`    | GPT-backed `spec --backend openai`                 | `OPENAI_API_KEY`                |
-| `mcp`       | The `ctfgen-mcp` MCP server                        | an MCP host                     |
-| `cve`       | Opt-in marker for live NVD lookups (`--source nvd`)| network access (stdlib `urllib`)|
-| `web`       | Opt-in marker for `ctfgen serve`                   | nothing (stdlib `http.server`)  |
-| `dev`       | `pytest` for the test suite                        | —                                |
+| Extra       | Adds                                                     | Needs                            |
+|-------------|----------------------------------------------------------|-----------------------------------|
+| `api`       | The FastAPI control plane at `/api/v1`                    | fastapi, uvicorn, pydantic, httpx |
+| `db`        | The persistence layer (PostgreSQL)                       | sqlalchemy, alembic, psycopg      |
+| `web`       | The organizer + contestant web sub-app at `/app`         | jinja2                            |
+| `oidc`      | OIDC authorization-code+PKCE federated login             | pyjwt[crypto]                     |
+| `cli`       | The supported platform CLI (`ctfgen <area> <verb>`)      | httpx                             |
+| `worker`    | The networked worker run loop (`ctfgen-worker`)          | httpx                             |
+| `deploy`    | Meta-extra: `api` + `db` + `web` + `oidc` + `postgres`   | —                                 |
+| `anthropic` | Claude-backed `spec --backend anthropic`                 | `ANTHROPIC_API_KEY`               |
+| `openai`    | GPT-backed `spec --backend openai`                       | `OPENAI_API_KEY`                  |
+| `mcp`       | The `ctfgen-mcp` MCP server                              | an MCP host                       |
+| `cve`       | Opt-in marker for live NVD lookups (`--source nvd`)      | network access (stdlib `urllib`)  |
+| `dev`       | `pytest` for the test suite                              | —                                 |
 
-`cve` and `web` carry no package dependencies of their own — both the NVD
-client and the dashboard server are stdlib-only; the extras exist as
-documentation/opt-in markers, not as installable requirements.
+The generator core (`ctfgen create|spec|validate|score|...`) needs none of
+these; the platform surfaces do. `cve` carries no dependencies of its own — the
+NVD client is stdlib-only; the extra is an opt-in marker.
 
 ## License
 
 CTFGenerator is proprietary, for-profit software — see [LICENSE](LICENSE).
 Copyright (c) 2026 Judgernaut777, all rights reserved. Commercial use requires a
 paid license from the copyright holder; there is no open-source grant.
+</content>
+</invoke>
