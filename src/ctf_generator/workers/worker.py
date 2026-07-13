@@ -27,7 +27,6 @@ from __future__ import annotations
 
 import logging
 import os
-import re
 import signal
 import time
 from collections.abc import Sequence
@@ -55,6 +54,7 @@ from ctf_generator.domain.work.models import JobLease
 from ctf_generator.infrastructure.runtime.docker_backend import (
     UnsupportedRuntimeError,
 )
+from ctf_generator.observability.secrets import EVAL_SECRET_PATTERNS
 
 _LOG = logging.getLogger("ctf_generator.worker")
 
@@ -94,15 +94,11 @@ DISPATCHABLE_JOBS = (
 # is the FIRST secret-free guard (record_result re-sanitizes defensively): every
 # note it forwards is redacted here, and only the ALLOWLISTED advisory scalars
 # (solved/steps/success_dropped/step_delta) plus redacted notes ever enter the
-# result -- never a flag, base_url, candidate answer, or credential. Kept local so
-# worker.py never imports the effectful agent_eval module (which owns FLAG_PATTERN).
-_EVAL_SECRET_PATTERNS = (
-    re.compile(r"(?i)(?:ctf|flag|key|secret|pass|pwd)\{[^}]{0,400}\}"),
-    re.compile(r"sk-ant-[A-Za-z0-9\-_]{8,}"),
-    re.compile(r"sk-[A-Za-z0-9]{16,}"),
-    re.compile(r"(?i)bearer\s+[A-Za-z0-9\-._~+/]{8,}=*"),
-    re.compile(r"(?i)authorization[:=]\s*\S+"),
-)
+# result -- never a flag, base_url, candidate answer, or credential. Sourced from
+# ctf_generator.observability.secrets (stdlib-only; NO agent_eval import, which
+# owns FLAG_PATTERN) so there is ONE definition shared with the control-plane
+# sanitizer.
+_EVAL_SECRET_PATTERNS = EVAL_SECRET_PATTERNS
 _EVAL_REDACTED = "[redacted]"
 # Cap the forwarded transcript so an adversarial challenge cannot bloat the
 # operator-visible job/result row.
@@ -693,7 +689,12 @@ def main(argv: Sequence[str] | None = None) -> int:  # pragma: no cover - entryp
 
     The token is never logged.
     """
-    logging.basicConfig(level=logging.INFO)
+    # Structured, redacted JSON logging for the worker process (REQ-PLAT-009 /
+    # REQ-INV-011): even an accidental credential/flag in a log call is redacted
+    # before it reaches a line. Replaces the plain basicConfig.
+    from ctf_generator.observability import configure_logging
+
+    configure_logging()
     transport = os.environ.get("CTFGEN_WORKER_TRANSPORT", "http").lower()
     if transport != "http":
         _LOG.error(

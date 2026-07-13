@@ -539,6 +539,15 @@ def build_parser() -> argparse.ArgumentParser:
 
 
 def main(argv: list[str] | None = None) -> int:
+    # Structured, redacted JSON logging for the legacy generator CLI when invoked
+    # directly (idempotent with the entry.py dispatcher). Guarded so logging setup
+    # can never stop a generator command; writes to stderr, never stdout.
+    import contextlib
+
+    with contextlib.suppress(Exception):  # logging setup must never break the CLI
+        from ctf_generator.observability import configure_logging
+
+        configure_logging()
     # EXPLICIT external-family bootstrap. This is the ONE place entry-point
     # plugins are loaded (fail-safe, at most once per process). It lives on the
     # generator-CLI bootstrap path deliberately -- NEVER at ``families`` import

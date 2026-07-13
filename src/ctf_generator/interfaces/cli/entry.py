@@ -20,6 +20,7 @@ Why this shape:
 
 from __future__ import annotations
 
+import contextlib
 import sys
 
 # The platform areas whose first token routes to the HTTP CLI. Kept in sync with
@@ -48,6 +49,15 @@ _PLATFORM_AREAS = frozenset(
 
 
 def main(argv: list[str] | None = None) -> int:
+    # Structured, redacted JSON logging for the CLI process (REQ-PLAT-009 /
+    # REQ-INV-011). Imported lazily + guarded so a broken/absent observability
+    # module can never stop a legacy generator command from running; it writes to
+    # stderr and never touches the CLI's stdout output. Operators can select the
+    # human-readable dev format with CTFGEN_LOG_FORMAT=text.
+    with contextlib.suppress(Exception):  # logging setup must never break the CLI
+        from ctf_generator.observability import configure_logging
+
+        configure_logging()
     args = list(sys.argv[1:] if argv is None else argv)
     if args and args[0] in _PLATFORM_AREAS:
         return _run_platform(args)

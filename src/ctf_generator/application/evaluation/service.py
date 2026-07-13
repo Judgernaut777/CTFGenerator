@@ -20,7 +20,6 @@ publish"; a ``succeeded`` run with ``solved=True`` is just a record.
 
 from __future__ import annotations
 
-import re
 import uuid
 from dataclasses import dataclass
 from datetime import datetime
@@ -40,6 +39,7 @@ from ctf_generator.infrastructure.database.eval_run_repository import (
     SqlAlchemyEvalRunRepository,
 )
 from ctf_generator.infrastructure.database.session import Database
+from ctf_generator.observability.secrets import EVAL_SECRET_PATTERNS
 
 from ..jobs.service import JobService
 
@@ -58,18 +58,13 @@ def eval_job_idempotency_key(
 # Free-text notes/error reported by a (15b) worker are the ONLY vector by which a
 # secret could reach this otherwise secret-free record, so redact defensively. Two
 # secret classes named by the job invariant: (1) challenge FLAGS -- ctf{...}/
-# FLAG{...}/key{...}, INCLUDING flags with spaces/newlines inside the braces (the
-# `[^}]` class, not the old `[^{}\s]`, so a multi-word flag is caught); (2) provider
-# API keys / bearer tokens (an LLM SDK exception repr can embed an sk-ant-.../sk-...
-# key or an Authorization header). Kept local (the service must not import the
-# effectful agent_eval engine, which owns the canonical FLAG_PATTERN).
-_SECRET_PATTERNS = (
-    re.compile(r"(?i)(?:ctf|flag|key|secret|pass|pwd)\{[^}]{0,400}\}"),
-    re.compile(r"sk-ant-[A-Za-z0-9\-_]{8,}"),
-    re.compile(r"sk-[A-Za-z0-9]{16,}"),
-    re.compile(r"(?i)bearer\s+[A-Za-z0-9\-._~+/]{8,}=*"),
-    re.compile(r"(?i)authorization[:=]\s*\S+"),
-)
+# FLAG{...}/key{...}, INCLUDING flags with spaces/newlines inside the braces (so a
+# multi-word flag is caught); (2) provider API keys / bearer tokens (an LLM SDK
+# exception repr can embed an sk-ant-.../sk-... key or an Authorization header).
+# Sourced from ctf_generator.observability.secrets -- a stdlib-only module with NO
+# dependency on the effectful agent_eval engine (which owns the canonical
+# FLAG_PATTERN), so the single-source import does not violate the layering.
+_SECRET_PATTERNS = EVAL_SECRET_PATTERNS
 _REDACTED = "[redacted]"
 
 
