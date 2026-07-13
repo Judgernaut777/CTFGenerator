@@ -19,22 +19,37 @@ live-adversarial scenario engine, the agent-eval harness) is what makes those
 challenges hold up against LLM-assisted solvers — a quality dimension layered on top
 of an operable competition platform, not a replacement for it.
 
+"AI-resistance" resolves to **three distinct signals**, not one number: (1) the
+`score.py` output is an **advisory heuristic** static quality signal (Experimental);
+(2) the Evaluation Lab produces a **measured** agent-eval outcome per challenge version
+(`EvalRun`); and (3) the competition-points **multiplier** is the `ai_resistance`
+scoring engine. They are computed by different subsystems and must not be conflated.
+
 ### Current vs. target in one line
 
-- **Current (v0.1.0):** a single pure-Python (3.11, stdlib-only core) process — a
-  deterministic generator/validator/scorer plus a stdlib `http.server` dashboard, an
-  MCP server (pure tools only), and a `ctfgen` CLI over ~20 subcommands. 709 unit
-  tests green. License proprietary.
-- **Target:** a secure, persistent, multi-user competition platform split across four
-  planes with a hard boundary keeping generated vulnerable code off the control plane.
+- **Current (M6+ platform):** the deterministic generator/validator/scorer core
+  (pure-Python, stdlib-only) plus the layered platform that milestones M7–M18 shipped —
+  a FastAPI control plane at `/api/v1`, PostgreSQL + Alembic persistence, auth/RBAC +
+  OIDC, organizer + contestant web portals, an isolated worker + PostgreSQL job queue,
+  an evaluation lab, audit/observability, backup/restore/DR tooling, and a supported
+  docker deploy stack — with the hard boundary keeping generated vulnerable code off the
+  control plane enforced (ADR-001). The `ctfgen` CLI and MCP server (pure tools only) are
+  retained over the same application services.
+- **Target (v1.0):** the same platform through its hardening pass — external security
+  review, recovery drill validating RPO/RTO, capacity testing at the operating targets,
+  and four production-quality challenge categories (M20–M22).
 
 ---
 
-## 2. Target user roles
+## 2. User roles
 
-Eight roles. Each names *who* acts and *what* they do; permission enforcement is
-**(planned)** — the current build has only a single dashboard admin
-(`serve --admin-user/--admin-password`) plus a public read-only scoreboard token.
+Eight roles. Each names *who* acts and *what* they do. Permission enforcement **is
+shipped** (M10): `domain/identity` defines the role set, and a fine-grained `Permission`
+enum + `ROLE_PERMISSIONS` + `require_permission` dependency gate every privileged route
+(`interfaces/api/deps.py`), with per-competition role scoping, denied-action audit, and
+OIDC federation (ADR-007, ADR-008). The conceptual roles below map onto the enforced
+`VALID_ROLES` (`player`, `captain`, `author`, `organizer`, `admin`, `observer`, `judge`,
+`support`).
 
 | # | Role | What they do |
 |---|------|--------------|
@@ -67,7 +82,7 @@ publication, and version history.
 | Family / CVE / seed selection | `list-families`, `cve-search`/`cve-show`/`cve-categories`; `cve_blueprint.spec_from_cve` | Web pickers over the same registry/source |
 | Static + quality validation | `ctfgen validate` (`validate_challenge`), `ctfgen score` (`score_challenge`, AI-resistance dimensions + bands) | Gated review workflow |
 | Review / approval / publication | **(planned)** — no review or approval state exists today | Reviewer approval → immutable published version |
-| Version history | **(planned)** — `spec_version`/`schema_version` are write-only stamps, no registry/migration | Content-addressed, immutable published versions |
+| Version history | Shipped — `schema.py` `check_compatible`/`migrate`/`register_migration`; `challenge_versions` router; content-addressed immutable published versions in `infrastructure/artifacts` | Reviewer-gated *approval* over the same versions (still planned, REQ-GEN-013) |
 
 ### 3.2 Competition Control Plane
 Auth, competitions, teams, publication, instance orchestration, submissions, scoring,
@@ -83,7 +98,7 @@ Docker socket access.**
 | Event log | `events.py` (`InMemory`/`Jsonl` stores) + optional `postgres_events.py` | PostgreSQL as the durable store |
 | Scoreboards / feed | `serve` → `/public/scoreboard`, `/public/feed`; `scoreboard` CLI | Reconstructable from persisted score events |
 | Reports / audit | `report_writer.py` envelope (`schema_version 1.0`), `report-index` table/HTML | Every privileged state change auditable |
-| Instance orchestration | **(planned)** — control plane *dispatches* jobs to the Execution Plane; never runs them | Job dispatch + reconciliation |
+| Instance orchestration | **Shipped** — control plane dispatches launch/build jobs to the isolated worker via the PG job queue (`jobs`/`builds` routers, `application/instances` lifecycle + reconciler); never runs them itself | Job dispatch + reconciliation |
 
 ### 3.3 Execution Plane
 Image builds, instance launch, health checks, runtime validation, intended solver
@@ -96,7 +111,7 @@ cleanup. **Runs on ISOLATED workers.**
 | Health checks | `tests/healthcheck.py` probe of `/healthz`; `runtime.json` overrides for non-HTTP families | Unchanged probe contract |
 | Runtime + non-transfer validation | `validate-runtime`, `replay` (`cross_replay`), `validate-siblings --runtime/--cross-replay` | Runs only as isolated jobs |
 | Untrusted-code isolation | `--sandbox` runs healthcheck/solver in an ephemeral read-only container; compose hardening (`no-new-privileges`, `cap_drop: [ALL]`, `mem_limit`, `pids_limit`, `internal: true` nets) | Sandbox mandatory on isolated hosts; resource + network enforcement |
-| Log collection / expiration / cleanup | teardown + `report.logs` today | Instance lifecycle + expiration + reconciliation **(planned)** |
+| Log collection / expiration / cleanup | teardown + `report.logs` (generator path) | Shipped — instance lifecycle + expiration + reconciliation (`application/instances` 14-state machine + desired-vs-observed reconciler) |
 
 > **Boundary note:** today `runtime_validator._run` shells out to Docker and runs
 > bundle-shipped `solver.py`/`healthcheck.py` **on the host by default** (`--sandbox`
@@ -112,7 +127,7 @@ benchmark ingestion, difficulty analysis, and quality reports.
 | Agent baselines | `agent_eval.py`; `eval-agent [--adversarial]` (baseline vs. scenario-on delta) | Managed eval runs as jobs |
 | Live-adversarial scenarios | `scenario.py` engine + `scenario_runtime.py`; `run-scenario [--runtime]` | Scored generalization signal |
 | Generalization / non-transfer | `replay`, `validate-siblings` (`changed_tokens`, cross-replay) | Cross-seed/cross-family batteries |
-| Difficulty / quality reports | `score.py` dimensions + bands; `score_with_agent_eval` blended score | Human-benchmark ingestion **(planned)** |
+| Difficulty / quality reports | `score.py` **advisory heuristic** dimensions + bands (distinct from the measured `EvalRun`); `score_with_agent_eval` blended score | Human-benchmark ingestion + aggregated report **(planned)** |
 
 ---
 
@@ -134,7 +149,7 @@ multi-user, isolated-execution version is the V1 target.
 | 5 | Reviewer approves → publish immutable version | **(planned)** review/approval + content-addressed immutable versions |
 | 6 | Assemble a competition catalog | `ctfgen catalog` → `ChallengeScoringConfig` JSON |
 | 7 | Configure competition, teams, windows | `CompetitionConfig`; `serve --config/--challenges/--challenges-dir` |
-| 8 | Launch per-team instances | **(planned)** control plane dispatches launch jobs to isolated workers |
+| 8 | Launch per-team instances | Shipped — control plane dispatches launch jobs to isolated workers via the PG job queue (`instances` router + `application/instances`) |
 | 9 | Operate live: scoreboard, feed, audit | `ctfgen serve` admin dashboard + `/public/scoreboard` + `/public/feed` |
 | 10 | Produce reports | `report_writer` envelopes; `ctfgen report-index --html` |
 
@@ -146,8 +161,8 @@ steps 1–7 today.
 
 | Step | Target action | Current grounding |
 |---|---|---|
-| 1 | Join team, see published challenges | **(planned)** contestant portal |
-| 2 | Receive an isolated instance | **(planned)** per-team instance; today `serve` exposes catalog metadata only |
+| 1 | Join team, see published challenges | **Shipped** — contestant portal (`interfaces/web/contestant.py`); see `docs/web/contestant-portal.md` |
+| 2 | Receive an isolated instance | **Shipped** — team-scoped instance via the `instances` router (cross-team access denied; `tests/test_team_isolation_integration.py`) |
 | 3 | Read the brief + tiered hints | bundle `public/description.md`, `public/hints.yaml` |
 | 4 | Exploit the live service for the flag | flag injected at runtime via `${CTFGEN_FLAG:-}`, never in `public/` |
 | 5 | Submit the flag | `Submission` → at most one `SolveEvent` per correct submit |
@@ -170,10 +185,10 @@ One supported topology. Anything else is a V1 non-goal.
 | Persistence | PostgreSQL |
 | Workers | One or more **isolated** worker hosts running containerized challenge workloads |
 | Runtime | Rootless Docker/Podman + rootless BuildKit on the workers **(planned)** |
-| Work queue | PostgreSQL-backed job rows: `FOR UPDATE SKIP LOCKED`, leases, heartbeats, retries, idempotency keys, dead-letter (**no Redis** unless proven inadequate) **(planned)** |
+| Work queue | Shipped — PostgreSQL-backed job rows: `FOR UPDATE SKIP LOCKED`, leases, heartbeats, retries, idempotency keys, dead-letter (**no Redis** unless proven inadequate) |
 | Ingress | Reverse proxy with TLS (control plane server is plain HTTP; `--secure-cookie` only meaningful behind TLS termination) |
-| Artifact storage | Interface with local-FS (dev) + S3-compatible (prod); published artifacts **immutable + content-addressed** **(planned)** |
-| Interfaces | Web UI + REST API + supported CLI, all over shared application services **(planned; current UI is the stdlib dashboard, current API surface is the `ctfgen` CLI + MCP)** |
+| Artifact storage | Local-FS backend + published artifacts **immutable + content-addressed** shipped (`infrastructure/artifacts`); S3-compatible (prod) backend still planned (Protocol defined) |
+| Interfaces | Shipped — organizer + contestant web apps at `/app` (M11/M12), the REST API at `/api/v1`, and the supported `ctfgen <area> <verb>` CLI, all over shared application services (the legacy stdlib `serve` dashboard still ships but is not the product) |
 
 **Tech baseline (target, unless a repo constraint makes one unsuitable):** Python
 3.12; FastAPI-or-comparable ASGI framework; Pydantic-style validation; SQLAlchemy 2.x

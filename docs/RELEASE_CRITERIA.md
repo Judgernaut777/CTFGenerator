@@ -3,8 +3,8 @@
 Milestone 1 deliverable. Defines, per release stage, the **required capabilities** that must ship and the **security release gates / release blockers** that must all clear before the stage can be tagged. Also defines entry/exit checklists for the **internal-alpha** and **closed-beta** gates.
 
 - Every criterion is a checkbox. A stage is releasable only when **all** its capability boxes and **all** applicable security gate boxes are checked.
-- "Current" describes behavior grounded in the codebase as of 2026-07-11 (version `0.1.0`, flat `src/ctf_generator/`). Everything tied to a stage at or beyond v0.2-alpha is **planned/target** unless explicitly noted as current.
-- Release stages and their scope come from the productization plan's stable facts.
+- **Reconciliation (2026-07-13):** milestones M6–M18 have **implemented** most of the v0.1→v0.4 capability scope — the layered platform, PostgreSQL persistence, control-plane API, auth/RBAC + OIDC, organizer + contestant web, isolated worker + PG job queue, evaluation lab, audit/observability, backup/DR tooling, and the supported deploy stack. The boxes below, however, track **formal release-gate sign-off** (each capability verified and each security gate cleared for a tagged release), which is the job of the M20–M22 validation/qualification program. They therefore remain **unchecked**: implemented ≠ release-qualified. Where a capability is now built, it is noted inline rather than by ticking the box.
+- "Current" (in this doc) means the M6+ platform codebase as of 2026-07-13; the generator core remains pure-Python/stdlib. Release stages and their scope come from the productization plan's stable facts.
 
 ---
 
@@ -18,9 +18,9 @@ For reference — what exists today and is the foundation the stages build on.
 - [x] Stdlib `http.server` dashboard (`dashboard_server.py`, `dashboard_ui.py`) via `ctfgen serve`
 - [x] MCP server exposing pure/deterministic tools only (`mcp_server.py`); never imports `runtime_validator`/`scenario_runtime`/`agent_eval`/`subprocess`
 - [x] 8 families across 8 domains; red/blue/purple modes; CVE sourcing (snapshot + NVD)
-- [x] 709 unit tests green
+- [x] Host unit suite green (grown from the original 709 to the M6+ platform's host + Docker-gated PostgreSQL integration suites)
 
-Known baseline gaps this document tracks as blockers for later stages: bundle scripts (`tests/healthcheck.py`, `private/solver.py`) execute **on the host with caller privileges** unless `validate-runtime --sandbox` is passed; schema versions are write-only stamps with no reader/migration (`SPEC_VERSION`, `SCHEMA_VERSION`, `__version__` all `"1.0"`); `spec.json`/`variant.json`/event log carry no version field; `serve` is plain HTTP with in-process auth.
+Several original baseline gaps have since been **closed** by M4–M18: schema versioning is enforced (`schema.py` — identifier + `check_compatible` + `migrate`, no longer write-only stamps); execution now runs on isolated workers driven by the control plane over the PG job queue (the host-executing CLI helpers remain author-side tools); the control plane is an ASGI (FastAPI) app with real auth/RBAC + OIDC (TLS termination is the reverse proxy's job). The residual gaps this document still tracks toward v1.0 are the **verification** ones: formal security-gate sign-off, the recovery drill (RPO/RTO), capacity testing, and rootless worker runtime on the deployment host (capability-gated today).
 
 ---
 
