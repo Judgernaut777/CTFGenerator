@@ -139,3 +139,64 @@ Because the ledger and audit trail are append-only and fully backed up, and
 artifacts are rebuildable, the durable state has a single authoritative recovery
 path: restore PostgreSQL (PITR for RPO ≤ 5 min) + the artifact volume, then run the
 verifier before returning to service.
+
+---
+
+## 5. Recovery drill results (RPO/RTO evidence — M20)
+
+`scripts/recovery_drill.sh` is the **executed** disaster-recovery drill behind
+RELEASE_CRITERIA gate **S8** and REQ-NFR-007. `verify.py` proves a restore is
+*integrity*-correct; the drill answers the *time* question: it seeds a known state
+into a throwaway source DB, takes a logical `pg_dump -Fc` backup + artifact tar +
+MANIFEST, **drops the source** (simulated loss), restores into a fresh target, and
+wraps the **whole recovery-to-verified-usable path** (`pg_restore` → extract
+artifacts → `verify.py`) in an explicit `perf_counter` clock. It prints MEASURED vs
+TARGET for both RTO and RPO, asserts **RTO ≤ SLO** (parameter, default 1800 s =
+30 min), asserts the restore is not a no-op (target actually holds the seeded ledger
+rows, parity vs MANIFEST), and **exits nonzero on any breach**.
+
+```
+CTFGEN_TEST_DATABASE_URL=postgresql+psycopg://ctfgen:ctfgen@172.20.0.2:5432/postgres \
+  scripts/recovery_drill.sh [--rto-slo-seconds N] [--rpo-target-seconds N]
+```
+
+**Measured (representative slice — 1 competition, 3 ledger events, 1 audit row, 1
+content-addressed build blob), live `ctfgen_pg_epic1` PostgreSQL 16:**
+
+| Metric | Measured | Target | Result |
+|--------|----------|--------|--------|
+| **RTO** (restore → verified-usable, wall clock) | **≈ 1.7 s** | ≤ 1800 s (30 min) | **PASS** |
+| **RPO** (baseline snapshot staleness) | ≈ 0 s | ≤ 300 s | baseline-only (not a gate) |
+
+The gate is live, not a tautology: `--rto-slo-seconds 0` breaches and exits nonzero,
+and `--empty-target` (verify an un-restored empty target) is caught as a NO-OP
+restore and exits nonzero. Regression-guarded by
+`tests/test_recovery_drill_integration.py` (PG+docker gated; skips cleanly when
+PostgreSQL is unreachable).
+
+**RTO scope.** The measured RTO is the restore + verify wall clock on a small
+representative dataset; it does **not** include human detection/decision latency or
+production-scale data volume. It validates the *mechanism* is well within SLO with
+large headroom; production-scale RTO on a full dataset is **UNVERIFIED here**
+(no production-scale corpus on this host) — re-run the drill against a
+production-sized restore to close that.
+
+**RPO — honest status (charter §5).** A logical `pg_dump` is a point-in-time
+**baseline**: at the instant of backup everything committed is captured, so the
+drill reports only "baseline snapshot staleness" (backup age vs the newest datum),
+which is **not a gate**. The continuous **RPO ≤ 5 min (REQ-NFR-006)** posture
+requires **WAL archiving / PITR**, which is **NOT configured on this host** →
+**UNVERIFIED**. The drill deliberately does **not** fake a 5-minute RPO; it
+validates RTO end-to-end and documents the PITR requirement as the remaining RPO
+work (configure `archive_mode`/`archive_command` + base backups, then drill a
+point-in-time restore to a target recovery timestamp and assert the recoverable
+window ≤ 5 min).
+
+**Host caveat.** On an operator host with the `postgresql-client` binaries,
+`scripts/backup.sh` + `restore.sh` run verbatim. This rootful arm64 CI host has no
+pg client binaries and the postgres container shares no host path, so a docker-exec
+`pg_dump --file=` would write inside the container. The drill therefore reuses the
+**same** logical `pg_dump -Fc`/`pg_restore` semantics and the **same** `verify.py`
+harness + MANIFEST format, but streams the dump/restore over `docker exec`
+stdin/stdout (the proven pattern in `tests/test_restore_verify_integration.py`). The
+RTO methodology is identical when the scripts run directly.

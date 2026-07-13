@@ -160,7 +160,7 @@ yet load- or durability-tested against them.
 | REQ-NFR-003 | Instance launch success | ≥ 99% | Execution-plane launch reliability. |
 | REQ-NFR-004 | Scoreboard update latency | < 3 s | Solve event → visible standings. |
 | REQ-NFR-005 | Submission processing | < 500 ms | Server-side, per submission. |
-| REQ-NFR-006 | Recovery Point Objective (RPO) | ≤ 5 min | Max tolerable data loss. Backup tooling SHIPPED (`scripts/backup.sh`, `application/backup/verify.py` restore-integrity harness); the formal ≤5min RPO number is a deployment cadence (WAL/PITR) concern validated in M20. |
+| REQ-NFR-006 | Recovery Point Objective (RPO) | ≤ 5 min | Max tolerable data loss. Backup tooling SHIPPED (`scripts/backup.sh`, `application/backup/verify.py` restore-integrity harness); the M20 recovery drill reports RPO **baseline-only** (logical-dump snapshot age). The formal continuous ≤5min RPO requires WAL archiving/PITR, **not configured on the validation host → UNVERIFIED** (see `docs/operations/backup-recovery-upgrade.md` §5). |
 | REQ-NFR-007 | Recovery Time Objective (RTO) | ≤ 30 min | Max tolerable restore time. Restore/verify tooling SHIPPED; the formal ≤30min RTO wall-clock is measured under the M20 recovery drill. |
 | REQ-NFR-008 | Public flag leakage | 0 | No flag reachable via any public/contestant surface. See REQ-INV-004. |
 | REQ-NFR-009 | Deterministic-rebuild failure | 0 | Same `(generator version, spec, family version, seed)` always rebuilds identically. See REQ-INV-001. |
