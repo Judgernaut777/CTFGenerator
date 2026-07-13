@@ -92,6 +92,11 @@ class Permission(StrEnum):
     # A privileged, deployment-global capability -- admin / support ONLY (a plain
     # organizer/contestant never reads the cross-competition audit trail).
     AUDIT_READ = "audit:read"
+    # M16b operational metrics: read the Prometheus-format platform metrics
+    # (queue depth, projection lag, eval backlog). Deployment-global operational
+    # internals -- admin / support ONLY (mirrors AUDIT_READ), never public: the
+    # aggregate counts still reveal system pressure/health an outsider shouldn't see.
+    METRICS_READ = "metrics:read"
 
 
 class PermissionScope(StrEnum):
@@ -122,6 +127,7 @@ PERMISSION_SCOPE: dict[Permission, PermissionScope] = {
     Permission.JOB_READ: PermissionScope.SYSTEM,
     Permission.JOB_OPERATE: PermissionScope.SYSTEM,
     Permission.AUDIT_READ: PermissionScope.SYSTEM,
+    Permission.METRICS_READ: PermissionScope.SYSTEM,
     # AUTHORING (platform-global challenge authoring; independent of a competition).
     Permission.CHALLENGE_READ: PermissionScope.AUTHORING,
     Permission.CHALLENGE_WRITE: PermissionScope.AUTHORING,
@@ -232,6 +238,8 @@ ROLE_PERMISSIONS: dict[str, frozenset[Permission]] = {
             Permission.JOB_OPERATE,
             # Support reads the system-wide audit trail (incident triage).
             Permission.AUDIT_READ,
+            # Support reads the operational metrics endpoint.
+            Permission.METRICS_READ,
         }
     ),
 }
