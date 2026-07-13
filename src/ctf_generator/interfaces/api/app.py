@@ -25,7 +25,7 @@ from ctf_generator.infrastructure.database.config import (
 )
 from ctf_generator.infrastructure.database.session import Database
 
-from .audit import AuditSink, LoggingAuditSink
+from .audit import AuditSink, CompositeAuditSink, DbAuditSink, LoggingAuditSink
 from .db_authenticator import DbAuthenticator
 from .deps import Authenticator, StubAuthenticator, principal_for
 from .errors import register_exception_handlers
@@ -38,6 +38,7 @@ from .middleware import (
 )
 from .routers import (
     artifacts,
+    audit,
     auth,
     builds,
     challenge_definitions,
@@ -114,7 +115,15 @@ def create_app(
     # (feature-disabled) envelope, and local auth is entirely unaffected.
     app.state.oidc_service = oidc_service
     app.state.idempotency_store = idempotency_store or InMemoryIdempotencyStore()
-    app.state.audit_sink = audit_sink or LoggingAuditSink()
+    # The default audit sink is BOTH the durable, tamper-evident DB trail (M16)
+    # AND the historical log line, when a database is configured; otherwise the
+    # log-only sink. The DB sink is non-fatal (its own txn, failures swallowed), so
+    # co-mounting it can never turn an audited success into a 500.
+    app.state.audit_sink = audit_sink or (
+        CompositeAuditSink(DbAuditSink(database), LoggingAuditSink())
+        if database is not None
+        else LoggingAuditSink()
+    )
     # The artifact store backs the contestant public-artifact download (14c-2). Built
     # from CTFGEN_ARTIFACT_ROOT when not injected, or left None (download then cleanly
     # 404s -- never a 500) when that env is unset.
@@ -159,6 +168,7 @@ def create_app(
         publications,
         artifacts,
         jobs,
+        audit,
         system,
     ):
         app.include_router(module.router, prefix=API_V1_PREFIX)
@@ -205,7 +215,13 @@ def create_worker_app(
         redoc_url=f"{API_V1_PREFIX}/redoc",
     )
     app.state.database = database
-    app.state.audit_sink = audit_sink or LoggingAuditSink()
+    # Durable + log audit trail on the worker gateway too (its denied-worker-auth
+    # events then persist), non-fatal when the DB is unreachable.
+    app.state.audit_sink = audit_sink or (
+        CompositeAuditSink(DbAuditSink(database), LoggingAuditSink())
+        if database is not None
+        else LoggingAuditSink()
+    )
 
     register_exception_handlers(app)
 
