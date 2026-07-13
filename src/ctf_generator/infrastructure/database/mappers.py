@@ -23,6 +23,7 @@ from ctf_generator.domain.authoring.models import (
     ChallengeVersion,
 )
 from ctf_generator.domain.challenges.models import CompetitionConfig
+from ctf_generator.domain.evaluation.models import EvalRun
 from ctf_generator.domain.execution.models import (
     VALID_CREDENTIAL_SCOPES,
     VALID_RUNTIME_TYPES,
@@ -75,6 +76,7 @@ from .models import ChallengeDefinition as ChallengeDefinitionRow
 from .models import ChallengeVersion as ChallengeVersionRow
 from .models import Competition
 from .models import CompetitionChallenge as CompetitionChallengeRow
+from .models import EvalRun as EvalRunRow
 from .models import HealthObservation as HealthObservationRow
 from .models import Instance as InstanceRow
 from .models import InstanceCredential as InstanceCredentialRow
@@ -401,6 +403,73 @@ def challenge_build_from_orm(
         manifest=dict(row.manifest_json),
         family_version=row.family_version,
         storage_uri=row.storage_uri,
+    )
+
+
+def eval_run_to_orm(eval_run: EvalRun, version_uuid: uuid.UUID) -> EvalRunRow:
+    """Map a domain ``EvalRun`` onto a fresh ORM row (insert path).
+
+    ``version_uuid`` is the evaluated version's surrogate id, resolved by the
+    repository from ``(definition_slug, version_no)``. ``notes`` stores ``NULL``
+    when empty (mirrors ``cve_refs``). SECRET-FREE: only the advisory subset +
+    sanitized notes/error are ever written -- there is no flag column to map."""
+    return EvalRunRow(
+        id=_as_uuid(eval_run.eval_run_id),
+        challenge_version_id=version_uuid,
+        profile=eval_run.profile,
+        adversarial=eval_run.adversarial,
+        status=eval_run.status,
+        requested_at=to_utc(eval_run.requested_at),
+        completed_at=to_utc(eval_run.completed_at),
+        solved=eval_run.solved,
+        steps=eval_run.steps,
+        success_dropped=eval_run.success_dropped,
+        step_delta=eval_run.step_delta,
+        blended_score=eval_run.blended_score,
+        notes=list(eval_run.notes) if eval_run.notes else None,
+        error=eval_run.error,
+    )
+
+
+def eval_run_apply_update(row: EvalRunRow, eval_run: EvalRun) -> EvalRunRow:
+    """Apply the mutable fields of a domain ``EvalRun`` onto an existing row
+    (the guarded status move + advisory result / sanitized error). The identity
+    columns (id / challenge_version_id / profile / adversarial / requested_at /
+    created_at) are left untouched -- the DB trigger is the backstop."""
+    row.status = eval_run.status
+    row.completed_at = to_utc(eval_run.completed_at)
+    row.solved = eval_run.solved
+    row.steps = eval_run.steps
+    row.success_dropped = eval_run.success_dropped
+    row.step_delta = eval_run.step_delta
+    row.blended_score = eval_run.blended_score
+    row.notes = list(eval_run.notes) if eval_run.notes else None
+    row.error = eval_run.error
+    return row
+
+
+def eval_run_from_orm(
+    row: EvalRunRow, definition_slug: str, version_no: int
+) -> EvalRun:
+    """Map an ORM ``EvalRun`` row back to the domain. The parent
+    ``(definition_slug, version_no)`` are read by the repository via a join.
+    NULL ``notes`` becomes an empty tuple."""
+    return EvalRun(
+        eval_run_id=str(row.id),
+        definition_slug=definition_slug,
+        version_no=version_no,
+        profile=row.profile,
+        adversarial=row.adversarial,
+        status=row.status,
+        requested_at=to_utc(row.requested_at),
+        completed_at=to_utc(row.completed_at),
+        solved=row.solved,
+        steps=row.steps,
+        success_dropped=row.success_dropped,
+        step_delta=row.step_delta,
+        blended_score=row.blended_score,
+        notes=tuple(row.notes) if row.notes else (),
+        error=row.error,
     )
 
 
