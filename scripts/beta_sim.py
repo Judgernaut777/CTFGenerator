@@ -291,9 +291,8 @@ def _seed(client: TestClient, db: Database, teams: int, challenges: int) -> None
             )
 
 
-def _submit(app, token: str, team: str, slug: str) -> tuple[int, dict | str]:
-    """One HTTP submission with its OWN TestClient. Returns (status, body)."""
-    client = TestClient(app)
+def _submit(client: TestClient, token: str, team: str, slug: str) -> tuple[int, dict | str]:
+    """One HTTP submission on an already-warmed TestClient. Returns (status, body)."""
     r = client.post(
         f"/api/v1/competitions/{_CID}/submissions",
         headers=_auth(token),
@@ -319,10 +318,22 @@ def _run_single_solve(app, db, *, team_index: int, slug: str, concurrency: int) 
     barrier = threading.Barrier(concurrency)
     lock = threading.Lock()
 
-    def worker() -> None:
+    # Pre-create one TestClient per worker and WARM each SEQUENTIALLY in this
+    # (single) thread before the barrier. Each TestClient lazily spins up its own
+    # httpx transport + anyio portal on its first request; doing that concurrently
+    # in the post-barrier burst intermittently dispatched a submission before its
+    # client's stack was ready, yielding a routing 404 (get_principal never ran ->
+    # principal "-"). Warming here means the synchronized burst races ONLY on the
+    # submission path -- the real thing under test -- with each worker on its own
+    # already-ready client (httpx isolation preserved).
+    clients = [TestClient(app) for _ in range(concurrency)]
+    for c in clients:
+        c.get(f"/api/v1/competitions/{_CID}/scoreboard", headers=_auth(token))
+
+    def worker(client: TestClient) -> None:
         # Release all workers at the same instant for a genuine race.
         barrier.wait(timeout=30)
-        status, body = _submit(app, token, team, slug)
+        status, body = _submit(client, token, team, slug)
         with lock:
             if status != 201 or not isinstance(body, dict):
                 result.http_errors.append(f"{status}: {body}")
@@ -333,7 +344,7 @@ def _run_single_solve(app, db, *, team_index: int, slug: str, concurrency: int) 
                 result.first_solves += 1
 
     with ThreadPoolExecutor(max_workers=concurrency) as pool:
-        futs = [pool.submit(worker) for _ in range(concurrency)]
+        futs = [pool.submit(worker, c) for c in clients]
         for f in as_completed(futs):
             f.result()  # re-raise a worker crash (e.g. barrier timeout)
 
@@ -366,6 +377,7 @@ def _spread_solves(app, *, teams: int, challenges: int, skip: tuple[int, str]) -
     reconstruction parity check is not vacuous. Sequential, one correct
     submission each; ``skip`` (the pair used by the concurrency check) is left
     alone (it is already solved)."""
+    client = TestClient(app)  # sequential submits share one warmed client
     for ti in range(teams):
         for ci in range(challenges):
             slug = _slug(ci)
@@ -375,7 +387,7 @@ def _spread_solves(app, *, teams: int, challenges: int, skip: tuple[int, str]) -
             # even -> a mix of ranks and per-challenge solver counts.
             if (ti + ci) % 2 != 0:
                 continue
-            status, body = _submit(app, _team_token(ti), _team_name(ti), slug)
+            status, body = _submit(client, _team_token(ti), _team_name(ti), slug)
             if status != 201 or not (isinstance(body, dict) and body.get("correct")):
                 raise RuntimeError(f"spread solve {ti},{slug} failed: {status} {body}")
 
