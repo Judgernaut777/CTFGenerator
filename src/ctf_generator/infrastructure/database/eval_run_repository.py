@@ -132,6 +132,32 @@ class SqlAlchemyEvalRunRepository:
             eval_run_from_orm(row, definition_slug, version_no) for row in rows
         ]
 
+    def list_non_terminal(self) -> list[EvalRun]:
+        """Every eval run still ``pending``/``running`` (oldest first). Drives the
+        :class:`EvalResultProjector` drain: a terminal run is already folded, so
+        it is excluded, which makes the drain converge."""
+        rows = self._session.execute(
+            select(
+                EvalRunRow,
+                ChallengeDefinitionRow.slug,
+                ChallengeVersionRow.version_no,
+            )
+            .join(
+                ChallengeVersionRow,
+                EvalRunRow.challenge_version_id == ChallengeVersionRow.id,
+            )
+            .join(
+                ChallengeDefinitionRow,
+                ChallengeVersionRow.definition_id == ChallengeDefinitionRow.id,
+            )
+            .where(EvalRunRow.status.in_(("pending", "running")))
+            .order_by(EvalRunRow.requested_at, EvalRunRow.id)
+        ).all()
+        return [
+            eval_run_from_orm(eval_row, definition_slug, version_no)
+            for eval_row, definition_slug, version_no in rows
+        ]
+
     def update(self, eval_run: EvalRun) -> None:
         """Guarded status move + advisory-result/error update, keyed by
         ``eval_run_id``. Raises :class:`LookupError` if the run does not exist;

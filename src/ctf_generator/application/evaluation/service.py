@@ -45,6 +45,16 @@ from ..jobs.service import JobService
 
 _EVAL_JOB_TYPE = "run_agent_evaluation"
 
+
+def eval_job_idempotency_key(
+    definition_slug: str, version_no: int, profile: str, adversarial: bool
+) -> str:
+    """The idempotency key naming the ``run_agent_evaluation`` job for exactly
+    one (version, profile, adversarial) request. Shared by ``request_eval`` (the
+    enqueue) and the :class:`EvalResultProjector` (which matches a non-terminal
+    run back to its completed job) so the two can never drift out of format."""
+    return f"eval:{definition_slug}:v{version_no}:{profile}:{adversarial}"
+
 # Free-text notes/error reported by a (15b) worker are the ONLY vector by which a
 # secret could reach this otherwise secret-free record, so redact defensively. Two
 # secret classes named by the job invariant: (1) challenge FLAGS -- ctf{...}/
@@ -198,8 +208,8 @@ class EvalRunService:
             job = Job(
                 job_id=str(uuid.uuid4()),
                 job_type=_EVAL_JOB_TYPE,
-                idempotency_key=(
-                    f"eval:{definition_slug}:v{version_no}:{profile}:{adversarial}"
+                idempotency_key=eval_job_idempotency_key(
+                    definition_slug, version_no, profile, adversarial
                 ),
                 available_at=now,
                 required_capabilities=(_EVAL_JOB_TYPE,),
@@ -289,3 +299,9 @@ class EvalRunService:
             return SqlAlchemyEvalRunRepository(session).list_for_version(
                 definition_slug, version_no
             )
+
+    def list_non_terminal(self) -> list[EvalRun]:
+        """Every eval run still awaiting a result (``pending``/``running``).
+        Drives the :class:`EvalResultProjector` drain."""
+        with self._database.session_scope() as session:
+            return SqlAlchemyEvalRunRepository(session).list_non_terminal()
