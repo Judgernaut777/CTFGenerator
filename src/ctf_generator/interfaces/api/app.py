@@ -24,6 +24,7 @@ from ctf_generator.infrastructure.database.config import (
     DatabaseConfigError,
 )
 from ctf_generator.infrastructure.database.session import Database
+from ctf_generator.observability import configure_logging
 
 from .audit import AuditSink, CompositeAuditSink, DbAuditSink, LoggingAuditSink
 from .db_authenticator import DbAuthenticator
@@ -89,6 +90,12 @@ def create_app(
     artifact_store: ArtifactStore | None = None,
 ) -> FastAPI:
     settings = settings or ApiSettings()
+
+    # Structured, redacted JSON logging for the API process (REQ-PLAT-009 /
+    # REQ-INV-011). Idempotent, so building fixtures/apps repeatedly is a no-op
+    # after the first call; it configures the ctfgen/ctf_generator logger trees
+    # only (never third-party/root loggers).
+    configure_logging()
 
     app = FastAPI(
         title=settings.title,
@@ -205,6 +212,8 @@ def create_worker_app(
     identity is resolved solely from the scoped credential inside the gated
     services."""
     settings = settings or ApiSettings()
+
+    configure_logging()
 
     app = FastAPI(
         title=f"{settings.title} (Worker Gateway)",
