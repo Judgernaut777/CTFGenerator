@@ -35,6 +35,7 @@ from .challenges.models import (
     ChallengeSpec,
     CompetitionConfig,
 )
+from .evaluation.models import EvalRun
 from .execution.models import Worker, WorkerCredential
 from .identity.models import Membership, Team, User
 from .instances.models import (
@@ -311,6 +312,50 @@ class ChallengePublicationRepository(Protocol):
         """Detach a version from a competition. Returns ``True`` if a row was
         removed, ``False`` if the attachment did not exist; raises
         :class:`LookupError` if the competition or version are unknown."""
+        ...
+
+
+class EvalRunRepository(Protocol):
+    """Stores agent-evaluation platform records, keyed by ``eval_run_id``.
+
+    An eval run references the version it evaluates by the business
+    ``(definition_slug, version_no)`` pair; ``add`` resolves it to the surrogate
+    uuid and fails loudly (:class:`LookupError`) if the version is missing. The
+    business dedupe key is ``(definition_slug, version_no, profile, adversarial)``
+    (UNIQUE in the store), so a duplicate request surfaces as an IntegrityError
+    the application layer collapses to the existing record.
+
+    ``update`` performs the guarded state move (``pending``/``running`` ->
+    ``succeeded``/``failed``); a terminal record is frozen (the store's
+    BEFORE-UPDATE trigger is the backstop). There is NO delete -- an eval run is
+    a durable record.
+    """
+
+    def add(self, eval_run: EvalRun) -> None:
+        """Insert a fresh (typically ``pending``) eval run. A missing version ->
+        LookupError; a duplicate ``(definition_slug, version_no, profile,
+        adversarial)`` -> the underlying IntegrityError."""
+        ...
+
+    def get(self, eval_run_id: str) -> EvalRun | None:
+        ...
+
+    def get_for_version(
+        self, definition_slug: str, version_no: int, profile: str, adversarial: bool
+    ) -> EvalRun | None:
+        """Resolve the single run for the business dedupe key (the idempotent-
+        request lookup), or ``None``."""
+        ...
+
+    def list_for_version(
+        self, definition_slug: str, version_no: int
+    ) -> list[EvalRun]:
+        ...
+
+    def update(self, eval_run: EvalRun) -> None:
+        """Update an existing run keyed by ``eval_run_id`` (the guarded status
+        move + advisory result / sanitized error). Raises :class:`LookupError` if
+        the run does not exist."""
         ...
 
 
