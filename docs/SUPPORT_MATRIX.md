@@ -1,9 +1,14 @@
 # CTFGenerator V1 Support Matrix
 
-Milestone 1 deliverable. Defines what the V1 platform officially supports, what is
-experimental, and what is explicitly out of scope. "Current" = behavior grounded in the
-present codebase (v0.1.0, pure-Python, flat `src/ctf_generator/`). "Target" / "Planned" =
-the productization plan (single-control-plane platform, four planes), **not yet built**.
+Milestone 1 deliverable; reconciled 2026-07-13 for the M6+ platform. Defines what the V1
+platform officially supports, what is experimental, and what is explicitly out of scope.
+"Current" = behavior grounded in the present codebase — the deterministic generator core
+**plus** the layered platform shipped by M7–M18 (FastAPI control plane at `/api/v1`,
+PostgreSQL + Alembic, auth/RBAC + OIDC, organizer + contestant web, isolated worker + PG
+job queue, evaluation lab, audit/observability, backup/DR tooling, supported docker
+deploy). "Target" / "Planned" marks the remaining v1.0 hardening (external review,
+recovery drill, capacity testing) and the few items still unbuilt (e.g. the S3 artifact
+backend, rootless worker runtime on this host).
 
 > Scope: V1 is a **single supported deployment path**. Anything not listed here is
 > unsupported by definition. See [Unsupported Configurations](#unsupported-configurations-v1-non-goals).
@@ -12,13 +17,13 @@ the productization plan (single-control-plane platform, four planes), **not yet 
 
 ## Platform status summary
 
-| Aspect | Current (v0.1.0) | Target (V1) |
+| Aspect | Current (M6+ platform) | Target (v1.0 hardening) |
 |---|---|---|
-| Form factor | CLI (`ctfgen`) + stdlib `http.server` dashboard + MCP server | Single control-plane deployment + isolated worker host(s) |
-| Language runtime | Python 3.11 (stdlib-only core) | Python 3.12 |
-| Persistence | JSONL event log (`events.py`); optional Postgres (`postgres_events.py`) | PostgreSQL (required) |
-| Web serving | Hand-rolled `http.server.ThreadingHTTPServer` (plain HTTP) | ASGI app behind reverse proxy with TLS |
-| Challenge execution | In-process `docker compose` shell-out (`runtime_validator.py`) | Isolated worker hosts, rootless runtime |
+| Form factor | FastAPI control plane (`/api/v1`) + organizer/contestant web + isolated worker; `ctfgen` CLI + MCP server retained over shared application services | Same topology, hardened + capacity-tested |
+| Language runtime | Python 3.11 (stdlib-only generator core); platform deps (FastAPI, SQLAlchemy, psycopg) lazy/optional-extra | Python 3.12 |
+| Persistence | PostgreSQL via SQLAlchemy 2.x + Alembic (`infrastructure/database/`, head `0014_audit_events`) | Same, migration/upgrade path tested across versions |
+| Web serving | ASGI (FastAPI) app; reverse-proxy TLS termination is an operator responsibility (`deploy/`, `docs/HOSTING.md`) | Same, under the supported deployment |
+| Challenge execution | Isolated worker + PG job queue (`workers/`, ADR-003); control plane never mounts the Docker socket (ADR-001) | Rootless Docker/Podman + rootless BuildKit on workers (capability-gated on this host) |
 
 ---
 
@@ -53,7 +58,7 @@ Only one minor version is targeted per release. 3.13 is not evaluated for V1.
 
 ## Deployment model (V1)
 
-**Single supported path** (target):
+**Single supported path** (built; hardening in v1.0):
 
 - One control-plane deployment (API + web UI + CLI share one application layer).
 - PostgreSQL for persistence.
@@ -66,11 +71,15 @@ Only one minor version is targeted per release. 3.13 is not evaluated for V1.
 plane, and the control plane NEVER has Docker socket access. All build/launch/health/solve
 work runs on isolated workers.
 
-Current state: there is no control/worker split yet. `runtime_validator.py`,
-`replay_validator.py`, `sibling_validator.py`, `scenario_runtime.py`, and `agent_eval.py`
-shell out to `docker compose` **in-process, on the host, with the caller's privileges**.
-`validate-runtime --sandbox` is the only current isolation (an ephemeral read-only
-`python:3.11-slim` container for the bundle's `healthcheck.py`/`solver.py`).
+Current state: the control/worker split is **built** (M7/M8). The control plane
+dispatches launch/build jobs onto the PostgreSQL job queue; the isolated worker
+(`workers/worker.py`) claims them and drives `DockerRuntimeBackend`, reaching the control
+plane only through the `WorkerControlPlaneClient` seam. The control plane holds no Docker
+socket (ADR-001). The original CLI helpers (`runtime_validator.py`, `replay_validator.py`,
+`sibling_validator.py`, `scenario_runtime.py`, `agent_eval.py`) remain as author-side
+tools that still shell out to `docker compose` on the host — they are not the deployed
+execution path. Rootless Docker/Podman + rootless BuildKit on workers is capability-gated
+on the current host (see `docs/security/runtime-isolation.md`).
 
 ---
 
@@ -111,10 +120,10 @@ everything under `private/` is operator-side).
 
 | Item | Current | Target (V1) |
 |---|---|---|
-| Primary store | JSONL append log (`events.py`, `threading.Lock`-guarded) | PostgreSQL (required) |
-| Optional durable store | `postgres_events.py` (lazy `psycopg`) | Promoted to the default/required store |
-| Migrations | none | Planned: Alembic |
-| ORM / access | raw psycopg (events only) | Planned: SQLAlchemy 2.x |
+| Primary store | PostgreSQL (`infrastructure/database/`) — required for the platform | PostgreSQL (required) |
+| Legacy store | `events.py` JSONL / `postgres_events.py` retained for the CLI-only path | Superseded by the domain model |
+| Migrations | Alembic chain to head `0014_audit_events` | Reversible/tested across versions |
+| ORM / access | SQLAlchemy 2.x, per-aggregate repositories (ORM never leaves infrastructure) | Same |
 
 | PostgreSQL version | Status |
 |---|---|
@@ -247,6 +256,7 @@ Explicitly out of scope for V1:
 - Published versions are immutable; private solvers never served to contestants.
 - Control plane never mounts the Docker socket.
 
-Schema versioning today is advisory only: `SPEC_VERSION`, `SCHEMA_VERSION`, and
-`__version__` are hard-coded `"1.0"`/build strings that are **written but never read or
-migrated**. A real versioning/migration path is planned work (release stage v0.1-alpha).
+Schema versioning is now **enforced** (M4, `schema.py`): serialized specs carry a schema
+identifier (`ctfgen.challenge-spec`), `check_compatible` rejects an unknown major, and
+`migrate` upgrades older documents forward at load. The AI-resistance heuristic's bands
+and dimension weights (`score.py`) remain **not stable** and are labeled Experimental.

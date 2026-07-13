@@ -1,11 +1,20 @@
 # Subsystem Maturity & Stability Tiers
 
-**Version:** 0.1.0 · **Status date:** 2026-07-11
+**Version:** 0.1.0 (M6+ platform) · **Status date:** 2026-07-13
 
 This document defines the stability tiers used across CTFGenerator and classifies
 every current subsystem and challenge family by tier. It reflects the codebase **as
 it exists today**; forward-looking notes are labelled **(planned)** and are not
 guarantees.
+
+Milestones M6–M18 have landed the layered platform on top of the original flat
+generator package: a domain/application/infrastructure/interfaces/workers layering,
+a FastAPI control plane at `/api/v1`, PostgreSQL + Alembic persistence, auth/RBAC,
+organizer + contestant web portals, an isolated worker + PG job queue, an evaluation
+lab, audit/observability, and a supported docker deploy stack. The subsystem table
+below now classifies those layered subsystems alongside the original generator core.
+These are 0.x subsystems: they are functional and tested, but their interface/behavior
+stability is tiered conservatively (most sit at **Beta**) until the v1.0 hardening pass.
 
 CTFGenerator is a self-hosted platform for generating, validating, deploying, and
 operating reproducible cybersecurity challenges. AI-resistance evaluation is one
@@ -25,10 +34,11 @@ independently below.
 
 **Note on 0.x semantics:** the whole product is pre-1.0. "Stable" here means *most
 mature and safe to depend on within 0.x*, not a 1.0-level API contract. Schema
-versioning is currently advisory only — `SPEC_VERSION`, `SCHEMA_VERSION`, and
-`__version__` are write-only stamps with no consumer-side validation or migration
-path (see `docs`/codebase map §12). Hardened schema versioning is **(planned,
-v0.1-alpha)**.
+versioning is now **enforced**, not advisory: `schema.py` gives every serialized spec
+a schema identifier (`ctfgen.challenge-spec`), `check_compatible` rejects an unknown
+major, and `migrate` upgrades older documents forward at load (including at the MCP
+`build_spec`/`validate_spec` boundary). The score.py AI-resistance **bands and
+dimension weights** remain not-stable (see the AI-resistance note below).
 
 ---
 
@@ -72,8 +82,35 @@ the current tier.
 | Dashboard server | `dashboard_server.py`, `dashboard_ui.py` | **Experimental** | Hand-rolled stdlib `ThreadingHTTPServer` admin dashboard + public scoreboard (`serve`). Plain HTTP; `--secure-cookie` only meaningful behind a TLS proxy. **(planned)** replacement by a maintained ASGI stack. |
 | Dashboard authentication | `dashboard_server.py` (session login, token rotation, `AuthConfig`) | **Experimental** | Bespoke session/cookie/token auth in the hand-rolled server. Not hardened for untrusted exposure; deploy behind a reverse proxy only. |
 | Agent-eval harness | `agent_eval.py` | **Experimental** | LLM tool-using agent driven against a live Docker instance (`eval-agent`, `--adversarial`). Network + Docker + provider-key dependent. |
-| Agent-eval "resistance" metric | `score.py` AI-resistance dimensions incl. `scenario_resistance`; blended agent-eval score | **Experimental** | The "resistance" metric is experimental and **being renamed per M19**. Bands/weights and the blended-score contract are not stable. |
+| AI-resistance signals (three distinct things) | `score.py` (advisory heuristic); `application/evaluation` + `agent_eval.py` (measured eval); `scoring_engine.py` `AIResistanceWeightedEngine` (`name="ai_resistance"`, competition multiplier) | **Experimental** | M19 settles the naming into three DISTINCT signals, not one metric: (1) `score.py` output is an **advisory heuristic** static quality signal derived from bundle heuristics (Experimental; its docstring already says "advisory heuristic only"); (2) the Evaluation Lab produces a **measured** agent-eval outcome per version (`EvalRun`); (3) the competition-points **multiplier** is the `ai_resistance` scoring engine. The advisory heuristic's bands and dimension weights are **not stable**; the blended-score contract is not stable. |
 | LLM spec backends | `spec_generator.py` (`AnthropicSpecBackend`, `OpenAISpecBackend`) | **Experimental** | Network-effectful `spec --backend anthropic\|openai`; LLM emits pedagogical text only. Optional provider deps. |
+
+### Layered platform subsystems (M6–M18)
+
+The subsystems below were built by milestones M7–M18 on top of the generator core.
+They are functional and tested (host + Docker PG integration suites) but are tiered
+**Beta** as 0.x subsystems: usable and settled in shape, still ahead of the v1.0
+hardening/external-review pass. The hard control/execution boundary (ADR-001) holds —
+the control-plane API never mounts the Docker socket and never imports execution
+modules.
+
+| Subsystem | Modules | Tier | Notes |
+|---|---|---|---|
+| Layered core (domain/application) | `domain/*`, `application/*` | **Beta** | Pure domain layer + application services; dependency rule enforced by `tests/test_architecture_boundaries.py`. CLI and API share these services. |
+| Persistence | `infrastructure/database/*`, `alembic/*` | **Beta** | SQLAlchemy 2.x, per-aggregate repositories, unit-of-work session scope; Alembic chain to head `0014_audit_events`. ORM objects never leave infrastructure. |
+| Control-plane API | `interfaces/api/*` (FastAPI `/api/v1`, 18 routers) | **Beta** | Request-id/access-log/rate-limit middleware, cursor pagination, ETag concurrency, principal-scoped idempotency. No Docker socket, no execution imports. |
+| Auth / RBAC | `interfaces/api/deps.py` (`Permission`, `ROLE_PERMISSIONS`, `require_permission`), `db_authenticator.py`, `auth`/`oidc`/`users` routers | **Beta** | Local password + sessions (hash-only tokens), per-competition role scoping, denied-action audit; OIDC auth-code+PKCE federation (ADR-007, ADR-008). |
+| Workers / job queue | `workers/*`, `application/jobs`, `domain/work`, `jobs`/`builds` routers | **Beta** | PG job queue (`FOR UPDATE SKIP LOCKED`, leases, retries, dead-letter, idempotency; migration `0006_jobs`). Worker drives the plane through one `WorkerControlPlaneClient` seam; ADR-003. |
+| Execution runtime (isolated) | `infrastructure/runtime` (`DockerRuntimeBackend`), `workers/worker.py` | **Beta** | Host-block (iptables DROP) capability-gated hard floor, per-worker reap, compose hardening; isolation proven by an independent escape agent (M8). Rootless/userns still capability-gated on the current host — see `docs/security/runtime-isolation.md`. |
+| Instance lifecycle | `application/instances`, `instances` router | **Beta** | 14-state machine + desired-vs-observed reconciler; team-scoped operator view (public fields only). |
+| Organizer web | `interfaces/web/router.py`, `views.py`, `templates/*` | **Beta** | Server-rendered organizer portal (competitions/teams/publications/instance ops), authz-scoped to match the API's 403s. No external CDN. |
+| Contestant portal | `interfaces/web/contestant.py` | **Beta** | Contestant challenge list / instance access / submission / standing; private solvers never served. See `docs/web/contestant-portal.md`. |
+| Challenge SDK | `sdk/*` (`plugins.py`, `adapter.py`, `scaffold.py`, `lint.py`) | **Beta** | Documented family/plugin registration boundary (`docs/CHALLENGE_SDK.md`); replaces the convention-only template contract. |
+| Evaluation Lab (measured) | `application/evaluation`, `evaluations` router, `workers/eval_runner.py` | **Experimental** | **Measured** agent eval as isolated PENDING `EvalRun` jobs + adversarial-delta. Distinct from the advisory `score.py` heuristic. Aggregate generalization/difficulty reports still thin. |
+| Audit trail | `domain/audit`, `audit` router, migration `0014_audit_events` | **Beta** | Append-only, tamper-evident privileged-action log; admin/support-only read (`AUDIT_READ`). |
+| Observability | `observability/logging.py`, `observability/secrets.py` | **Beta** | Structured JSON logging with secret redaction (flags/tokens/provider-keys never logged). |
+| Backup / restore / DR | `scripts/backup.sh`, `application/backup/verify.py` | **Experimental** | Restore-**integrity** verification harness + backup script. Verifies a backup restores to a consistent state; does NOT yet measure RPO/RTO SLOs (M20 recovery drill). |
+| Supported deploy stack | `deploy/*` (`Dockerfile.api`, `Dockerfile.worker`, `docker-compose.yml`, `verify-deploy.sh`), `docs/HOSTING.md` | **Beta** | The single supported deployment topology; reverse proxy + TLS is an operator responsibility. |
 
 ---
 
@@ -102,14 +139,22 @@ family's own track.
 
 ---
 
-## Target-state note (planned)
+## Plane split — status
 
 The productization plan splits the system into four planes — Author Studio,
 Competition Control Plane, Execution Plane, and Evaluation Lab — with a hard boundary:
 generated vulnerable workloads must **never** execute on the control plane, and the
-control plane must never mount the Docker socket. Under that model, today's
-**Beta**/**Experimental** execution subsystems (`runtime_validator`,
-`scenario_runtime`, `agent_eval`, sibling/replay) migrate to isolated Execution-Plane
-and Evaluation-Lab workers before they can be promoted toward Stable. These promotions
-are **(planned)** across release stages v0.2-alpha through v1.0 and are not in effect
-at 0.1.0.
+control plane must never mount the Docker socket. That split is now **built**: the
+isolated worker + PG job queue (M7/M8), the control-plane API (M9), and the evaluation
+lab (M15) run generated workloads only on isolated workers reached through the
+`WorkerControlPlaneClient` seam, and the boundary is enforced by ADR-001 plus the
+architecture-boundary test. The original CLI-only execution helpers
+(`runtime_validator`, `scenario_runtime`, sibling/replay, `agent_eval`) remain as the
+author-side, host-executing tools they always were — the worker path is the isolated,
+control-plane-driven route.
+
+Remaining toward **Stable**: the layered platform subsystems are tiered **Beta** and
+promote to Stable only after the v1.0 hardening pass (external security review, recovery
+drill validating RPO/RTO, capacity testing) — **(planned)** across M20–M22. Rootless
+Docker/Podman + rootless BuildKit on workers remains capability-gated on the current
+host (see `docs/security/runtime-isolation.md`).

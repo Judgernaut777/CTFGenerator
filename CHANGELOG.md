@@ -9,6 +9,123 @@ Release CI enforces that every tagged version has an entry here (see
 
 ## [Unreleased]
 
+### Added — Milestone 18: Supported deployment + packaging
+
+- `deploy/`: `Dockerfile.api`, `Dockerfile.worker`, a compose stack
+  (`docker-compose.yml`), `entrypoint.sh`, and `verify-deploy.sh` (LEAD
+  Docker-verification). `docs/HOSTING.md` documents the single supported
+  topology: one control plane (no Docker socket), PostgreSQL, one or more
+  isolated worker hosts, reverse-proxy TLS termination, and local-FS or
+  S3-compatible artifact storage.
+
+### Added — Milestone 17: Backup, restore, DR, upgrades
+
+- `scripts/backup.sh` and `application/backup/` restore-verification harness
+  (`verify.py`): `verify_restore(...)` runs read-only integrity checks over a
+  *restored* control-plane database (schema, ledger/audit rows, scoreboard
+  projection) and returns a `VerificationReport`. Scope is honest — it verifies
+  restore **integrity**, not the RPO/RTO time/loss SLOs, which are a deployment
+  cadence + recovery-drill concern (M20).
+
+### Added — Milestone 16: Observability + incident operations
+
+- `observability/`: structured JSON logging (`logging.py`) with a redaction
+  policy (`secrets.py`) so flags, session tokens, and provider API keys are
+  never logged.
+- Durable, append-only, tamper-evident `audit_events` log (`domain/audit/`,
+  migration `0014_audit_events`) for every privileged state change; admin/
+  support-only `audit` router read (`AUDIT_READ`, SYSTEM scope), filterable and
+  cursor-paginated.
+
+### Added — Milestone 15: Evaluation Lab
+
+- **Measured** agent evaluation as isolated jobs: `evaluations` router enqueues a
+  PENDING `EvalRun` (never run on the control plane) that `workers/eval_runner.py`
+  executes on a worker; `application/evaluation` records an allow-listed advisory
+  projection (`solved`, `steps`, sanitized notes, adversarial `step_delta`).
+  Migration `0013_eval_runs`. This measured signal is DISTINCT from the advisory
+  `score.py` heuristic and from the `ai_resistance` competition-scoring engine.
+
+### Added — Milestone 14: Challenge SDK + product depth
+
+- `sdk/` package: an explicit family/plugin registration boundary
+  (`plugins.py` registry, `adapter.py`, `scaffold.py`, `lint.py`), replacing the
+  convention-only "templates must not import `families`" contract. Documented in
+  `docs/CHALLENGE_SDK.md`.
+
+### Added — Milestone 13: Supported CLI + MCP finalization
+
+- `interfaces/cli/` command groups (`commands/`, `admin.py`, `client.py`,
+  `platform.py`, `output.py`) call the shared `application/*` services rather than
+  inlining orchestration — the CLI and API now share one application layer. MCP
+  server retained as pure, workspace-sandboxed tools only (no Docker/subprocess/
+  execution imports).
+
+### Added — Milestone 12: Contestant portal
+
+- `interfaces/web/contestant.py`: a contestant portal (published-challenge list,
+  team-scoped instance access, flag submission, personal/team standing) distinct
+  from the organizer surface. Private solvers/flags are never served; authorization
+  reuses the API's per-competition scoping.
+
+### Added — Milestone 11: Organizer web application
+
+- `interfaces/web/` (`router.py`, `views.py`, `templates/`): a server-rendered
+  organizer portal over the application services — competitions, teams,
+  publications, and the operator instance-ops views. Every route is authz-scoped so
+  a web response is never weaker than the API's 403; no external CDN. Integration
+  test `tests/test_web_instances_ops_integration.py`.
+
+### Added — Milestone 10: Authentication + authorization
+
+- Local password auth + sessions with a `DbAuthenticator` swapped in behind the M9
+  auth seam (PBKDF2 hashing, hash-only session tokens); `auth`/`users` routers.
+- Per-competition role scoping + team tenancy closing the IDOR deferral, and a
+  denied-action audit trail. `Permission` enum + `ROLE_PERMISSIONS` +
+  `require_permission` enforced on every privileged route.
+- OIDC authorization-code + PKCE federation (`oidc` router). Migrations
+  `0011_auth`, `0012_oidc_login_transactions`. ADR-007 (authentication/sessions),
+  ADR-008 (OIDC federation).
+
+### Added — Milestone 9: Production API + application services
+
+- FastAPI control plane at `/api/v1` (`interfaces/api/app.py`, `create_app`
+  factory): `ctfgen.error` envelope, request-id / access-log / rate-limit
+  middleware, cursor pagination, principal-scoped idempotency, row-locked ETag
+  concurrency, and an `Authenticator` Protocol auth seam (later filled by M10).
+- Routers for the contestant loop, organizer/ops surfaces (instances, builds,
+  publications, jobs, system), and a worker HTTP transport whose auth plane is
+  DISJOINT from human auth (`worker_id` only ever from the worker credential).
+  CLI and API share the same `application/*` services.
+
+### Added — Milestone 8: Hardened execution plane + instance lifecycle
+
+- Quotas/scheduling + a runtime-backend Protocol + a secure `ContainerPolicy`; a
+  `WorkerJobService` that authenticates and checks trust/drain/quarantine/scope
+  before every queue verb (`worker_id` derived from the credential).
+- Instance lifecycle: six aggregates + a 14-state machine + a desired-vs-observed
+  reconciler (generation-gated, idempotent). Migrations `0009_scheduling_quotas`,
+  `0010_instances`.
+- Concrete `DockerRuntimeBackend`: `ContainerPolicy` → docker flags, a
+  capability-detected **host-block** hard floor (iptables `INPUT DROP` + `DOCKER-USER`)
+  that REFUSES launch if unenforceable, per-worker reap, fail-safe rule teardown;
+  plus the `ctfgen-worker` executable. Isolation was proven by an INDEPENDENT escape
+  agent. Rootless/userns/AppArmor/custom-seccomp are capability-gated on this host
+  (`docs/security/runtime-isolation.md`).
+
+### Added — Milestone 7: Worker orchestration + transactional submission processing
+
+- PostgreSQL job queue (`FOR UPDATE SKIP LOCKED`, leases, retries, dead-letter,
+  idempotency keys) with worker identity/trust (scoped short-lived credentials;
+  `authenticate()` → `AuthenticatedWorker` + `require_scope`). Migrations
+  `0006_jobs`, `0007_workers`.
+- Transactional submission-processing service: a correct submission establishes
+  `solved_at` **by construction** with at-most-one solve per (team, challenge,
+  competition). Gap-safe transactional-outbox projector — migration
+  `0008_score_projection` co-commits an outbox row via an AFTER-INSERT trigger and
+  refolds the scoreboard from persisted score events (no sequence cursor). ADR-003
+  (PostgreSQL-backed job queue).
+
 ### Added — Milestone 6 (Step 3): Competition aggregate (the canonical pattern)
 
 - First persisted aggregate, establishing the reference pattern for every
