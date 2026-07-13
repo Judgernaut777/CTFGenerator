@@ -27,12 +27,17 @@ from __future__ import annotations
 
 import logging
 import os
+import re
 import signal
 import time
 from collections.abc import Sequence
 from dataclasses import dataclass
 from datetime import UTC, datetime
-from typing import Protocol
+from typing import TYPE_CHECKING, Protocol
+
+if TYPE_CHECKING:  # typing-only: importing these at runtime would pull the
+    # effectful eval engine onto the worker's import graph (see EvalJobRunner).
+    from ctf_generator.agent_eval import AdversarialDeltaReport, AgentEvalReport
 
 from ctf_generator.domain.execution.runtime import (
     ContainerPolicy,
@@ -67,6 +72,11 @@ RESTART_JOBS = frozenset({"restart_instance"})
 RESET_JOBS = frozenset({"reset_instance"})
 HEALTH_JOBS = frozenset({"run_health_check"})
 LOG_JOBS = frozenset({"collect_logs"})
+# The agent-evaluation job (M15b). Unlike every other dispatchable job it is
+# NOT instance-scoped: its payload carries (eval_run_id, definition_slug,
+# version_no, profile, adversarial) and NO instance_id -- so _dispatch branches
+# it BEFORE the instance_id extraction.
+EVAL_JOBS = frozenset({"run_agent_evaluation"})
 
 DISPATCHABLE_JOBS = (
     LAUNCH_JOBS
@@ -76,7 +86,33 @@ DISPATCHABLE_JOBS = (
     | RESET_JOBS
     | HEALTH_JOBS
     | LOG_JOBS
+    | EVAL_JOBS
 )
+
+# The agent transcript an eval reports back (AgentEvalReport.notes) can quote a
+# discovered ``ctf{...}`` flag or an SDK error carrying a provider key. The worker
+# is the FIRST secret-free guard (record_result re-sanitizes defensively): every
+# note it forwards is redacted here, and only the ALLOWLISTED advisory scalars
+# (solved/steps/success_dropped/step_delta) plus redacted notes ever enter the
+# result -- never a flag, base_url, candidate answer, or credential. Kept local so
+# worker.py never imports the effectful agent_eval module (which owns FLAG_PATTERN).
+_EVAL_SECRET_PATTERNS = (
+    re.compile(r"(?i)(?:ctf|flag|key|secret|pass|pwd)\{[^}]{0,400}\}"),
+    re.compile(r"sk-ant-[A-Za-z0-9\-_]{8,}"),
+    re.compile(r"sk-[A-Za-z0-9]{16,}"),
+    re.compile(r"(?i)bearer\s+[A-Za-z0-9\-._~+/]{8,}=*"),
+    re.compile(r"(?i)authorization[:=]\s*\S+"),
+)
+_EVAL_REDACTED = "[redacted]"
+# Cap the forwarded transcript so an adversarial challenge cannot bloat the
+# operator-visible job/result row.
+_MAX_EVAL_NOTES = 40
+
+
+def _redact_eval_text(text: str) -> str:
+    for pattern in _EVAL_SECRET_PATTERNS:
+        text = pattern.sub(_EVAL_REDACTED, text)
+    return text
 
 
 def _now() -> datetime:
@@ -147,6 +183,33 @@ class WorkerControlPlaneClient(Protocol):
         ...
 
 
+class EvalJobRunner(Protocol):
+    """The effectful arm of a ``run_agent_evaluation`` job, injected as a seam.
+
+    An implementation RENDERS the full bundle for a published version and RUNS
+    ``agent_eval`` against it (Docker on the worker host). It is injected so the
+    worker dispatch is unit-testable WITHOUT Docker (a deterministic fake returns
+    a scripted report); the default single-host implementation lives in
+    :mod:`ctf_generator.workers.eval_runner` and imports ``agent_eval`` lazily.
+
+    Returns the raw effectful report (an ``AgentEvalReport`` for a plain profile,
+    an ``AdversarialDeltaReport`` when ``adversarial``); the worker -- never the
+    runner -- projects that into the SECRET-FREE advisory result. A distributed
+    runner (separate-host bundle delivery + challenge image build) depends on the
+    UNBUILT ``build_challenge`` pipeline and is deferred; see the module docstring
+    of :mod:`ctf_generator.workers.eval_runner`."""
+
+    def run(
+        self,
+        *,
+        definition_slug: str,
+        version_no: int,
+        profile: str,
+        adversarial: bool,
+        now: datetime,
+    ) -> AgentEvalReport | AdversarialDeltaReport: ...
+
+
 @dataclass
 class WorkerConfig:
     """Static worker configuration."""
@@ -179,6 +242,7 @@ class Worker:
         *,
         policy: ContainerPolicy = DEFAULT_POLICY,
         command: Sequence[str] | None = None,
+        eval_runner: EvalJobRunner | None = None,
         clock=_now,
     ) -> None:
         self._config = config
@@ -186,6 +250,10 @@ class Worker:
         self._backend = backend
         self._policy = policy
         self._command = tuple(command) if command else None
+        # The single-host caller injects a concrete EvalJobRunner (it shares the
+        # host + DB with the control plane); a networked worker leaves it None
+        # until the distributed build_challenge pipeline exists.
+        self._eval_runner = eval_runner
         self._clock = clock
         self._draining = False
 
@@ -285,6 +353,11 @@ class Worker:
     # -- dispatch table --------------------------------------------------------
 
     def _dispatch(self, job_type: str, payload: dict, now: datetime) -> _DispatchOutcome:
+        # The eval job is NOT instance-scoped -- it MUST branch before the
+        # instance_id extraction below, which would otherwise raise "missing
+        # instance_id" for a valid eval payload.
+        if job_type in EVAL_JOBS:
+            return self._do_agent_eval(payload, now)
         instance_id = payload.get("instance_id")
         if not isinstance(instance_id, str) or not instance_id:
             raise ValueError(f"{job_type} payload missing instance_id")
@@ -491,6 +564,109 @@ class Worker:
         logs = self._backend.collect_logs(instance_id, cid)
         # Raw logs may carry challenge output; return only a length, never content.
         return _DispatchOutcome(result={"log_lines": len(logs.splitlines())})
+
+    # -- agent evaluation (M15b, NOT instance-scoped) --------------------------
+
+    def _do_agent_eval(self, payload: dict, now: datetime) -> _DispatchOutcome:
+        """Run one agent evaluation for a published version and return its
+        SECRET-FREE advisory result.
+
+        The effectful work (render the FULL bundle, build+run it via Docker,
+        drive the agent) sits behind the injected :class:`EvalJobRunner` seam, so
+        this dispatch is unit-testable without Docker. The result carries ONLY the
+        allowlisted advisory subset + REDACTED notes keyed by ``eval_run_id`` --
+        never a flag, base_url/token, candidate answer, or provider key (the
+        control-plane projector re-sanitizes via ``record_result``).
+
+        A failed/unsupported eval is reported as an ADVISORY failure RESULT
+        (``error``, sanitized) rather than crashing the job: a measurement that
+        could not be taken is a recorded eval outcome, not an infrastructure
+        failure of the queue verb."""
+        eval_run_id = payload.get("eval_run_id")
+        if not isinstance(eval_run_id, str) or not eval_run_id:
+            raise ValueError("run_agent_evaluation payload missing eval_run_id")
+        definition_slug = payload.get("definition_slug")
+        version_no = payload.get("version_no")
+        profile = payload.get("profile")
+        adversarial = bool(payload.get("adversarial", False))
+        if not isinstance(definition_slug, str) or not definition_slug:
+            raise ValueError("run_agent_evaluation payload missing definition_slug")
+        if not isinstance(version_no, int):
+            raise ValueError("run_agent_evaluation payload missing version_no")
+        if not isinstance(profile, str) or not profile:
+            raise ValueError("run_agent_evaluation payload missing profile")
+
+        if self._eval_runner is None:
+            # A networked worker holds no single-host runner: a fully DISTRIBUTED
+            # eval needs the worker to fetch the FULL bundle + build the challenge
+            # image via the UNBUILT build_challenge pipeline. Until then, report a
+            # sanitized ADVISORY failure so the EvalRun resolves instead of
+            # wedging pending. (The single-host caller injects the runner.)
+            return _DispatchOutcome(
+                result={
+                    "eval_run_id": eval_run_id,
+                    "error": (
+                        "eval runner not configured on this worker: a distributed "
+                        "eval requires the build_challenge pipeline (deferred); the "
+                        "single-host runner must be injected"
+                    ),
+                }
+            )
+
+        try:
+            report = self._eval_runner.run(
+                definition_slug=definition_slug,
+                version_no=version_no,
+                profile=profile,
+                adversarial=adversarial,
+                now=now,
+            )
+        except Exception as exc:  # noqa: BLE001 - a failed eval is an advisory result
+            _LOG.warning("agent eval failed for run %s", eval_run_id, exc_info=True)
+            return _DispatchOutcome(
+                result={
+                    "eval_run_id": eval_run_id,
+                    "error": _redact_eval_text(f"{type(exc).__name__}: {exc}"),
+                }
+            )
+
+        return _DispatchOutcome(
+            result=self._eval_result(eval_run_id, adversarial, report)
+        )
+
+    @staticmethod
+    def _eval_result(
+        eval_run_id: str, adversarial: bool, report
+    ) -> dict:
+        """Project a raw eval report into the allowlisted, secret-free result.
+
+        For a plain profile the report is an ``AgentEvalReport``
+        (solved/steps/notes). For an adversarial run it is an
+        ``AdversarialDeltaReport``: ``solved``/``steps`` reflect the BASELINE
+        (undefended "can it be solved at all") leg and ``success_dropped`` /
+        ``step_delta`` are the advisory live-defense signal. Every forwarded note
+        is redacted; nothing else from the report crosses into the result."""
+        if adversarial:
+            baseline = report.baseline
+            raw_notes = list(report.notes)
+            result: dict = {
+                "eval_run_id": eval_run_id,
+                "solved": bool(baseline.solved),
+                "steps": int(baseline.steps),
+                "success_dropped": bool(report.success_dropped),
+                "step_delta": int(report.step_delta),
+            }
+        else:
+            raw_notes = list(report.notes)
+            result = {
+                "eval_run_id": eval_run_id,
+                "solved": bool(report.solved),
+                "steps": int(report.steps),
+            }
+        result["notes"] = [
+            _redact_eval_text(str(note)) for note in raw_notes[:_MAX_EVAL_NOTES]
+        ]
+        return result
 
     def _current_container(self, instance_id: str) -> str | None:
         # Via the Protocol -- keeps docker-CLI verbs inside the adapter and scopes
