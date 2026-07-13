@@ -136,6 +136,12 @@ ignore = ["E501"] # line length is enforced by the formatter, not the linter
 # sandbox-escape PoC path literals (never written -- assert the MCP sandbox REJECTS
 # them) + the import-firewall subprocess running a fixed snippet via sys.executable.
 "tests/test_mcp_server.py" = ["S108", "S603"]
+# M17 slice-17a: the round-trip test DRIVES real pg_dump/pg_restore (host or via
+# `docker exec`) -- S603/S607 (subprocess + partial paths) are inherent. The
+# scripts smoke test spawns bash and carries a FAKE secret DSN it asserts never
+# leaks (S105/S603/S607).
+"tests/test_restore_verify_integration.py" = ["S603", "S607"]
+"tests/test_backup_scripts_smoke.py" = ["S105", "S603", "S607"]
 "tests/test_worker_dispatch.py" = ["S105", "S106"] # fake bearer-token fixtures, not real secrets
 "tests/test_worker_agent_eval_dispatch.py" = ["S105", "S106"] # fake bearer-token fixtures, not real secrets
 # The OIDC flow/security tests mint ID tokens, drive PKCE, and carry fake client
