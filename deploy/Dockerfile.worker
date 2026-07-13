@@ -1,0 +1,56 @@
+# CTFGenerator EXECUTION-PLANE worker image (M18 18a).
+#
+# The worker is the ONLY process that runs challenge containers. It packages the
+# `ctfgen-worker` run loop (workers.worker:main) with its [worker] extra (httpx,
+# the HttpControlPlaneClient transport) and the docker CLI so it can drive a
+# rootless engine on its host.
+#
+# RUNTIME HOST REQUIREMENTS (documented, NOT satisfiable by the image alone):
+#   * A ROOTLESS docker/container engine on the host, reached via a socket the
+#     worker mounts at RUN time (e.g. the rootless dockerd socket). The engine is
+#     HOST-PROVIDED -- it is NOT a pip/image dependency.
+#   * NET_ADMIN (or an equivalent) at RUN time so the worker's DockerRuntimeBackend
+#     can install the HOST-BLOCK iptables floor (M8 slice 2). If that floor cannot
+#     be enforced, the backend REFUSES to launch (fail-safe) -- so a host without
+#     NET_ADMIN runs no challenges rather than running them unisolated.
+#   * The worker holds NO control-plane DB credential and NO session key -- only
+#     its scoped bearer token (CTFGEN_WORKER_TOKEN) + the gateway URL.
+#
+# SEPARATION (REQ-INV-010): this image, its docker CLI, and its host socket are
+# DISJOINT from the control-plane image (Dockerfile.api), which has none of them.
+# Run this on a SEPARATE host from the control plane. This rootful arm64 build
+# host cannot fully certify the rootless + NET_ADMIN runtime posture (honest, per
+# the M8 precedent, docs/security/runtime-isolation.md); the image only PACKAGES
+# the worker.
+FROM python:3.12-slim
+
+ENV PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONUNBUFFERED=1 \
+    PIP_NO_CACHE_DIR=1 \
+    PIP_DISABLE_PIP_VERSION_CHECK=1
+
+# The docker CLI ONLY (docker.io ships the client + drops in the daemon binaries;
+# the worker uses the CLI to drive the HOST's rootless engine over a mounted
+# socket -- this image runs no daemon of its own). Pinned base keeps it minimal.
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends docker.io \
+    && rm -rf /var/lib/apt/lists/*
+
+WORKDIR /app
+
+COPY pyproject.toml README.md LICENSE ./
+COPY src ./src
+
+# Install with the NETWORKED-worker extra only (httpx). No db, no api, no engine
+# python deps -- the engine is the host's.
+RUN pip install ".[worker]"
+
+# Run as a non-root user. NOTE: at RUN time this user must be able to reach the
+# host's rootless docker socket (map/mount it accordingly); the image cannot
+# grant host socket access by itself.
+RUN useradd --system --create-home --uid 10002 ctfworker
+USER ctfworker
+
+# The run loop reads CTFGEN_WORKER_* from the env (transport/url/token/name).
+# No secret is baked here.
+ENTRYPOINT ["ctfgen-worker"]

@@ -1,0 +1,23 @@
+# Build-context hygiene for the deploy images (M18 18a). Keep the context tiny
+# and NEVER ship secrets, virtualenvs, caches, or the test suite into an image.
+.git
+.github
+.venv
+venv
+**/__pycache__
+**/*.py[cod]
+.pytest_cache
+.mypy_cache
+.ruff_cache
+*.egg-info
+dist
+build
+tests
+scratch_poc
+scratchpad
+# Secrets / local state must never enter the build context.
+.env
+*.env
+!deploy/.env.example
+# Generated challenge output at the repo root.
+/challenges

@@ -73,6 +73,30 @@ cli = ["httpx>=0.27"]
 # Lint / type / security tooling used by CI (.github/workflows/pr.yml). Kept out
 # of `dev` so `pip install .[dev]` for running tests stays minimal.
 ci = ["ruff>=0.6", "mypy>=1.11", "bandit>=1.7", "pip-audit>=2.7", "build>=1.2", "twine>=5"]
+# --- M18 18a: supported-deployment bundles ------------------------------------
+# `deploy` = the CONTROL-PLANE production bundle: everything an API + web + auth
+# control plane needs to RUN in one install. It is the UNION of the runtime
+# extras (api = fastapi/uvicorn/pydantic/httpx; db = sqlalchemy/alembic/psycopg;
+# web = jinja2; oidc = pyjwt[crypto]; postgres driver) -- deliberately expressed
+# by REFERENCE so it can never drift from the individual extras. It carries NO
+# execution engine and NO docker client (REQ-INV-010/COMP-015: the control plane
+# is docker-FREE); those live only on the worker host.
+deploy = ["ctf-generator[api,db,web,oidc,postgres]"]
+# `worker` = the NETWORKED worker runtime. Its only PYTHON dependency is httpx
+# (the HttpControlPlaneClient transport). The docker engine it drives is
+# HOST-provided (a rootless daemon + the docker CLI on the worker image), NOT a
+# pip dependency; and the worker does NOT need `db` -- it never holds a
+# control-plane DB credential (it talks to the gateway over HTTP with a scoped
+# bearer token).
+worker = ["httpx>=0.27"]
+#
+# Entry-point -> extra coupling (see [project.scripts] below):
+#   * ctfgen (platform CLI areas) / uvicorn ...api.app:app + ...worker_app:worker_app
+#       -> [deploy]  (the control-plane server bundle)
+#   * ctfgen-worker (workers.worker:main, the networked run loop)
+#       -> [worker]  (httpx transport; + a host docker engine at RUNTIME)
+#   * ctfgen-admin (bootstrap-admin etc., talks to the DB directly)
+#       -> [db]      (sqlalchemy/alembic/psycopg -- part of [deploy])
 
 [project.scripts]
 ctfgen = "ctf_generator.interfaces.cli.entry:main"
