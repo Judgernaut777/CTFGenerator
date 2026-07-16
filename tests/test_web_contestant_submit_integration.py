@@ -76,13 +76,17 @@ def _place_eve_on_red(db) -> None:
     ws.place_on_team(db, ws.EVE, ws.COMP_A, "Red")
 
 
-def _submit_path(slug: str, ver: int, cid: str = ws.COMP_A) -> str:
+def _submit_path(slug: str, ver: int, cid: str | None = None) -> str:
+    # Default resolved INSIDE the body -- ``ws`` does not exist when the extras
+    # are absent, and a default-argument ``ws.COMP_A`` evaluates at import time.
+    if cid is None:
+        cid = ws.COMP_A
     return f"/app/competitions/{cid}/challenges/{slug}/{ver}/submit"
 
 
 @unittest.skipUnless(_ENABLED, _SKIP_REASON)
 class ContestantSubmitWebTests(unittest.TestCase):
-    def _open_form(self, client, slug, ver, cid=ws.COMP_A):
+    def _open_form(self, client, slug, ver, cid=None):
         """GET the submit form, returning (response, csrf_token, nonce)."""
         resp = client.get(_submit_path(slug, ver, cid))
         return resp, ws.extract_csrf(resp.text), _extract_nonce(resp.text)

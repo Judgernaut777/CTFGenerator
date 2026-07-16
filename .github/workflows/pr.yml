@@ -7,10 +7,12 @@ name: pr
 # the pre-existing ~10k-line flat package): lint, type check, SAST, dep audit.
 # Promote these to required as each is driven to green.
 
+# Runs on EVERY push (main included) so the repository tip is never unverified;
+# main was previously exercised only by the scheduled nightly.
 on:
   pull_request:
   push:
-    branches-ignore: [main]
+    branches: ["**"]  # all branches, but NOT tag pushes (release.yml owns tags)
 
 concurrency:
   group: pr-${{ github.ref }}
