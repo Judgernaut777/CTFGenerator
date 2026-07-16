@@ -248,9 +248,20 @@ class ControlPlanePurityTests(unittest.TestCase):
         src = str(Path(__file__).resolve().parent.parent / "src")
         code = (
             "import sys\n"
-            "import ctf_generator.workers.worker\n"
-            "import ctf_generator.application.evaluation.projector\n"
-            "import ctf_generator.workers.eval_runner\n"  # even the runner MODULE
+            "try:\n"
+            "    import ctf_generator.workers.worker\n"
+            "    import ctf_generator.application.evaluation.projector\n"
+            "    import ctf_generator.workers.eval_runner\n"  # even the runner MODULE
+            "except ModuleNotFoundError as exc:\n"
+            # Only the KNOWN [db]/[api] extras downgrade to skip -- any other
+            # missing module (ctf_generator itself, or a third-party dep leaked
+            # onto this graph by a future eager import) must still FAIL.
+            "    _extras = {'sqlalchemy', 'alembic', 'psycopg', 'fastapi',\n"
+            "               'pydantic', 'httpx', 'starlette'}\n"
+            "    if (exc.name or '').split('.')[0] not in _extras:\n"
+            "        raise\n"
+            "    sys.stderr.write('MISSING_EXTRA=%s\\n' % exc.name)\n"
+            "    sys.exit(2)\n"
             "loaded = 'ctf_generator.agent_eval' in sys.modules\n"
             "sys.stderr.write('AGENT_EVAL_LOADED=%s\\n' % loaded)\n"
             "sys.exit(1 if loaded else 0)\n"
@@ -261,6 +272,11 @@ class ControlPlanePurityTests(unittest.TestCase):
             capture_output=True,
             text=True,
         )
+        if proc.returncode == 2:
+            self.skipTest(
+                "import graph needs the [db]/[api] extras installed: "
+                + proc.stderr.strip()
+            )
         self.assertEqual(
             proc.returncode,
             0,

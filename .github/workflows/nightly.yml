@@ -96,4 +96,11 @@ jobs:
       - name: SQLAlchemy engine/session + Alembic up/down against real Postgres
         env:
           CTFGEN_TEST_DATABASE_URL: postgresql+psycopg://postgres:pw@localhost:5432/postgres
-        run: PYTHONPATH=src:tests python -m unittest test_database_integration -v
+        # Tripwire: this job exists to RUN the PG suite, so an all-skip pass
+        # (missing extra, bad DB URL, gating bug) must FAIL, not go green.
+        run: |
+          set -o pipefail
+          PYTHONPATH=src:tests python -m unittest test_database_integration -v 2>&1 | tee /tmp/db-tests.log
+          if ! grep -qE '^(ok|OK)$|\.\.\. ok' /tmp/db-tests.log; then
+            echo "::error::PG integration suite ran 0 tests (everything skipped)"; exit 1
+          fi
