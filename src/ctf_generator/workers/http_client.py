@@ -43,7 +43,7 @@ from ctf_generator.application.execution.worker_job_service import (
     WorkerStaleError,
 )
 from ctf_generator.application.worker_enrollment import ScopeError
-from ctf_generator.domain.execution.runtime import BuildBundle
+from ctf_generator.domain.execution.runtime import BuildBundle, MAX_BUILD_BUNDLE_BYTES
 from ctf_generator.domain.instances.models import (
     HealthObservation,
     Instance,
@@ -258,14 +258,54 @@ class HttpControlPlaneClient:
     # -- build bundle (build_challenge) -----------------------------------------
 
     def fetch_build_bundle(
-        self, definition_slug: str, version_no: int, now: datetime
+        self,
+        definition_slug: str,
+        version_no: int,
+        job_id: str,
+        lease_token: str,
+        now: datetime,
     ) -> BuildBundle:
-        response = self._get(f"/worker/builds/{definition_slug}/{version_no}/bundle")
-        self._raise_for_status(response)
+        """Fetch the FULL bundle, proving via ``job_id``/``lease_token`` query
+        params that this worker holds a live lease on a matching
+        build_challenge job (the lease-fence BLOCKER fix -- see
+        ``WorkerBuildService``). Streamed rather than buffered by ``httpx`` in
+        one shot, so the body is bounded against ``MAX_BUILD_BUNDLE_BYTES`` as
+        it arrives -- both via an early ``Content-Length`` check and a running
+        total across ``iter_bytes`` -- rather than trusting an unbounded
+        response to fit in memory."""
+        url = f"{self._prefix}/worker/builds/{definition_slug}/{version_no}/bundle"
+        with self._client.stream(
+            "GET",
+            url,
+            params={"job_id": job_id, "lease_token": lease_token},
+            headers=self._headers(),
+        ) as response:
+            if response.status_code >= 400:
+                response.read()  # a small JSON error envelope -- safe to buffer
+                self._raise_for_status(response)
+            content_length = response.headers.get("content-length")
+            if content_length is not None:
+                try:
+                    declared = int(content_length)
+                except ValueError:
+                    declared = None
+                if declared is not None and declared > MAX_BUILD_BUNDLE_BYTES:
+                    raise ValueError(
+                        f"build bundle Content-Length {declared} exceeds the "
+                        f"{MAX_BUILD_BUNDLE_BYTES}-byte ceiling; refusing to fetch"
+                    )
+            chunks = bytearray()
+            for chunk in response.iter_bytes():
+                chunks += chunk
+                if len(chunks) > MAX_BUILD_BUNDLE_BYTES:
+                    raise ValueError(
+                        f"build bundle body exceeds the {MAX_BUILD_BUNDLE_BYTES}-byte "
+                        "ceiling; refusing to fetch"
+                    )
+            bundle_sha256 = response.headers.get("x-bundle-sha256", "")
+            spec_sha256 = response.headers.get("x-spec-sha256", "")
         return BuildBundle(
-            data=response.content,
-            bundle_sha256=response.headers.get("x-bundle-sha256", ""),
-            spec_sha256=response.headers.get("x-spec-sha256", ""),
+            data=bytes(chunks), bundle_sha256=bundle_sha256, spec_sha256=spec_sha256
         )
 
     def close(self) -> None:  # pragma: no cover - lifecycle convenience

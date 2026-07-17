@@ -255,20 +255,35 @@ def replace_instance(
     },
 )
 def fetch_build_bundle(
+    request: Request,
     definition_slug: str,
     version_no: int,
+    job_id: str,
+    lease_token: str,
     ctx: WorkerAuthContext = Depends(require_worker),
     service=Depends(get_worker_build_service),
 ):
-    """Stream a version's FULL bundle to an ``artifacts:pull``-scoped worker,
-    for the ``build_challenge`` job. NEVER exposed to a contestant -- this is
-    the flag/solution-bearing bundle, gated only by worker credential + scope
-    (see ``WorkerBuildService``). The content hash + the version's current
-    ``spec_sha256`` travel as headers (never inside a JSON envelope, which
-    would force attacker-influenced bytes through a base64 round-trip) so the
-    worker can verify BEFORE trusting a single byte
-    (``docs/architecture/build-challenge-worker-pipeline.md``)."""
-    bundle = service.fetch_build_bundle(ctx.token, definition_slug, version_no, _now())
+    """Stream a version's FULL bundle to an ``artifacts:pull``-scoped worker
+    that also proves -- via ``job_id``/``lease_token`` query params, mirroring
+    the ``lease_token`` fence every job verb applies -- it holds a LIVE lease
+    on a matching ``build_challenge`` job (see ``WorkerBuildService``). NEVER
+    exposed to a contestant -- this is the flag/solution-bearing bundle;
+    credential + scope alone is NOT sufficient (``artifacts:pull`` is a
+    fleet-wide default scope every enrolled worker carries). ``job_id``/
+    ``lease_token`` travel as query params (not path/body) because this is a
+    GET serving raw bytes; worker IDENTITY still comes ONLY from the
+    credential (``ctx.token``/``ctx.name``), never the request. The content
+    hash + the version's current ``spec_sha256`` travel as headers (never
+    inside a JSON envelope, which would force attacker-influenced bytes
+    through a base64 round-trip) so the worker can verify BEFORE trusting a
+    single byte (``docs/architecture/build-challenge-worker-pipeline.md``)."""
+    bundle = service.fetch_build_bundle(
+        ctx.token, definition_slug, version_no, job_id, lease_token, _now()
+    )
+    _audit(
+        request, ctx.name, "worker.build.fetch_bundle",
+        f"{definition_slug}:v{version_no}",
+    )
     return Response(
         content=bundle.data,
         media_type="application/x-tar",

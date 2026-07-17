@@ -44,6 +44,7 @@ from pathlib import Path
 from ctf_generator.domain.execution.runtime import BuildBundle
 from ctf_generator.domain.work.models import Job, JobLease
 from ctf_generator.infrastructure.runtime.docker_backend import (
+    DockerCommandError,
     UnsupportedRuntimeError,
 )
 from ctf_generator.workers.worker import Worker, WorkerConfig
@@ -137,8 +138,8 @@ class _FakeClient:
     def fail(self, token, job_id, lease_token, error_class, error_detail, retryable, now):
         self.failed.append((job_id, error_class, error_detail, retryable))
 
-    def fetch_build_bundle(self, definition_slug, version_no, now):
-        self.fetch_calls.append((definition_slug, version_no))
+    def fetch_build_bundle(self, definition_slug, version_no, job_id, lease_token, now):
+        self.fetch_calls.append((definition_slug, version_no, job_id, lease_token))
         if self.bundle is None:
             raise LookupError(f"no bundle for {definition_slug!r} v{version_no}")
         return self.bundle
@@ -372,6 +373,78 @@ class BuildChallengeDispatchTests(unittest.TestCase):
         _job_id, error_class, error_detail, _retryable = client.failed[0]
         self.assertEqual(error_class, "internal")
         self.assertIn("unsafe path", error_detail)
+
+    def test_absolute_path_member_is_refused(self) -> None:
+        buf = io.BytesIO()
+        with tarfile.open(fileobj=buf, mode="w") as tar:
+            info = tarfile.TarInfo(name="/etc/passwd")
+            info.size = 3
+            tar.addfile(info, io.BytesIO(b"bad"))
+        data = buf.getvalue()
+        client = _FakeClient(bundle=_valid_bundle(data), claim_lease=_build_lease(_build_payload()))
+        backend = _FakeBuildBackend()
+        worker = _worker(client, backend)
+
+        worker.run_once()
+
+        self.assertEqual(backend.calls, [])
+        self.assertEqual(len(client.completed), 0)
+        self.assertEqual(len(client.failed), 1)
+        _job_id, error_class, error_detail, _retryable = client.failed[0]
+        self.assertEqual(error_class, "internal")
+        self.assertIn("unsafe path", error_detail)
+
+    def test_symlink_member_is_refused(self) -> None:
+        buf = io.BytesIO()
+        with tarfile.open(fileobj=buf, mode="w") as tar:
+            info = tarfile.TarInfo(name="innocuous_link")
+            info.type = tarfile.SYMTYPE
+            info.linkname = "/etc/passwd"
+            tar.addfile(info)
+        data = buf.getvalue()
+        client = _FakeClient(bundle=_valid_bundle(data), claim_lease=_build_lease(_build_payload()))
+        backend = _FakeBuildBackend()
+        worker = _worker(client, backend)
+
+        worker.run_once()
+
+        self.assertEqual(backend.calls, [])
+        self.assertEqual(len(client.completed), 0)
+        self.assertEqual(len(client.failed), 1)
+        _job_id, error_class, error_detail, _retryable = client.failed[0]
+        self.assertEqual(error_class, "internal")
+        self.assertIn("not a regular file", error_detail)
+
+    def test_docker_build_failure_redacts_stderr_from_error_detail(self) -> None:
+        # A DockerCommandError's message embeds up to 400 chars of captured
+        # `docker build` stderr -- since the build context is hostile-by-
+        # construction generated content, that stderr can echo flag-adjacent
+        # material. The persisted error_detail must NEVER forward it.
+        data = _tiny_bundle()
+        secret_stderr = (
+            f"COPY failed: cat private/solution.md; the flag is {_PLANTED_FLAG}"
+        )
+        client = _FakeClient(bundle=_valid_bundle(data), claim_lease=_build_lease(_build_payload()))
+        backend = _FakeBuildBackend(
+            raises=DockerCommandError(("docker", "build", "."), 1, secret_stderr)
+        )
+        worker = _worker(client, backend)
+
+        worker.run_once()
+
+        self.assertEqual(len(client.completed), 0)
+        self.assertEqual(len(client.failed), 1)
+        job_id, error_class, error_detail, retryable = client.failed[0]
+        self.assertEqual(job_id, "job-build-1")
+        # Class/retryable semantics are UNCHANGED from the generic handler.
+        self.assertEqual(error_class, "internal")
+        self.assertTrue(retryable)
+        self.assertNotIn(secret_stderr, error_detail)
+        self.assertNotIn(_PLANTED_FLAG, error_detail)
+        self.assertNotIn("solution.md", error_detail)
+        # The sanitized argv + exit code still make it in, for diagnosis.
+        self.assertIn("docker", error_detail)
+        self.assertIn("exit 1", error_detail)
 
 
 class DispatchableJobsTests(unittest.TestCase):

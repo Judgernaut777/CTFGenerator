@@ -195,6 +195,29 @@ def _enqueue_launch_job(db, *, key=None, instance_id=None) -> str:
     return job.job_id
 
 
+def _enqueue_build_job(
+    db, *, definition_slug="sqli", version_no=1, spec_sha256="h1", key=None
+) -> str:
+    payload = {
+        "definition_slug": definition_slug,
+        "version_no": version_no,
+        "spec_sha256": spec_sha256,
+    }
+    job = Job(
+        job_id=str(uuid.uuid4()),
+        job_type="build_challenge",
+        idempotency_key=key or f"build-key-{uuid.uuid4().hex}",
+        available_at=_now() - timedelta(seconds=5),
+        required_capabilities=("build_challenge",),
+        payload=payload,
+        definition_slug=definition_slug,
+        version_no=version_no,
+    )
+    with db.session_scope() as s:
+        SqlAlchemyJobQueue(s).enqueue(job)
+    return job.job_id
+
+
 def _ensure_parents(db) -> None:
     """Seed the competition / team / challenge version an instance references
     (idempotent: a no-op once the competition exists)."""
@@ -577,6 +600,149 @@ class WorkerHttpLeaseAndOwnershipTests(unittest.TestCase):
             self.assertNotIn(_SEED_SECRET, r.text)
             self.assertNotIn(_CRED_SECRET, r.text)
             self.assertNotIn("registry.example", r.text)
+
+
+@unittest.skipUnless(_ENABLED, _SKIP_REASON)
+class WorkerHttpBundleFetchTests(unittest.TestCase):
+    """The BLOCKER fix: ``GET /worker/builds/{slug}/{version}/bundle`` must
+    prove the caller holds a LIVE lease on a MATCHING ``build_challenge`` job
+    before it renders the FULL (flag/solver-bearing) bundle -- credential +
+    the fleet-wide default ``artifacts:pull`` scope alone is NOT enough (that
+    was the pre-fix behavior: any enrolled worker could pull any bundle)."""
+
+    def _claim(self, client, token, job_id) -> str:
+        claim = client.post(
+            "/api/v1/worker/jobs/claim", headers=_bearer(token), json={}
+        )
+        self.assertEqual(claim.status_code, 200, claim.text)
+        lease = claim.json()
+        self.assertEqual(lease["job_id"], job_id)
+        return lease["lease_token"]
+
+    def test_matching_lease_returns_the_bundle(self) -> None:
+        with _client_and_db() as (client, db):
+            _ensure_parents(db)
+            token = _enroll_worker(db, caps=("build_challenge",))
+            job_id = _enqueue_build_job(db)
+            lease_token = self._claim(client, token, job_id)
+
+            r = client.get(
+                "/api/v1/worker/builds/sqli/1/bundle",
+                headers=_bearer(token),
+                params={"job_id": job_id, "lease_token": lease_token},
+            )
+            self.assertEqual(r.status_code, 200, r.text)
+            headers_lower = {k.lower(): v for k, v in r.headers.items()}
+            self.assertIn("x-bundle-sha256", headers_lower)
+            self.assertIn("x-spec-sha256", headers_lower)
+            self.assertTrue(len(r.content) > 0)
+
+    def test_missing_credential_is_401(self) -> None:
+        with _client_and_db() as (client, db):
+            _ensure_parents(db)
+            r = client.get(
+                "/api/v1/worker/builds/sqli/1/bundle",
+                params={
+                    "job_id": str(uuid.uuid4()),
+                    "lease_token": str(uuid.uuid4()),
+                },
+            )
+            self.assertEqual(r.status_code, 401, r.text)
+
+    def test_missing_scope_is_403(self) -> None:
+        with _client_and_db() as (client, db):
+            _ensure_parents(db)
+            # jobs:claim only -- no artifacts:pull.
+            token = _enroll_worker(
+                db, caps=("build_challenge",), scopes=("jobs:claim",)
+            )
+            job_id = _enqueue_build_job(db)
+            r = client.get(
+                "/api/v1/worker/builds/sqli/1/bundle",
+                headers=_bearer(token),
+                params={"job_id": job_id, "lease_token": str(uuid.uuid4())},
+            )
+            self.assertEqual(r.status_code, 403, r.text)
+
+    def test_no_held_lease_is_refused_and_leaks_nothing(self) -> None:
+        """A valid artifacts:pull credential with NO live lease on ANY job
+        must be refused -- the pre-fix behavior was a bare 200 with the full
+        bundle for this exact request shape."""
+        with _client_and_db() as (client, db):
+            _ensure_parents(db)
+            token = _enroll_worker(db, caps=("build_challenge",))
+            _enqueue_build_job(db)  # left unclaimed
+
+            r = client.get(
+                "/api/v1/worker/builds/sqli/1/bundle",
+                headers=_bearer(token),
+                params={
+                    "job_id": str(uuid.uuid4()),
+                    "lease_token": str(uuid.uuid4()),
+                },
+            )
+            self.assertEqual(r.status_code, 404, r.text)
+            self.assertNotIn("Dockerfile", r.text)
+
+    def test_another_workers_lease_is_refused(self) -> None:
+        with _client_and_db() as (client, db):
+            _ensure_parents(db)
+            token = _enroll_worker(db, name=_WORKER, caps=("build_challenge",))
+            other_token = _enroll_worker(
+                db, name=_OTHER_WORKER, caps=("build_challenge",)
+            )
+            job_id = _enqueue_build_job(db)
+            # w2 claims the job; w1 (a validly-credentialed worker) tries to
+            # use w2's lease_token -- a foreign lease, not one w1 holds.
+            lease_token = self._claim(client, other_token, job_id)
+
+            r = client.get(
+                "/api/v1/worker/builds/sqli/1/bundle",
+                headers=_bearer(token),
+                params={"job_id": job_id, "lease_token": lease_token},
+            )
+            self.assertEqual(r.status_code, 404, r.text)
+            self.assertNotIn("Dockerfile", r.text)
+
+    def test_lease_for_a_different_version_is_refused(self) -> None:
+        """A live lease on a build_challenge job for v1 must not unlock the
+        bundle for a DIFFERENT (slug, version) -- the payload must match, not
+        just the job_type."""
+        with _client_and_db() as (client, db):
+            _ensure_parents(db)
+            token = _enroll_worker(db, caps=("build_challenge",))
+            job_id = _enqueue_build_job(db, definition_slug="sqli", version_no=1)
+            lease_token = self._claim(client, token, job_id)
+
+            with db.session_scope() as s:
+                SqlAlchemyChallengeVersionRepository(s).add(
+                    ChallengeVersion(
+                        definition_slug="sqli", version_no=2, state="draft",
+                        family_version="1.0", seed="s2", spec_sha256="h2",
+                        spec={"t": 2}, spec_version="1.0",
+                    )
+                )
+
+            r = client.get(
+                "/api/v1/worker/builds/sqli/2/bundle",
+                headers=_bearer(token),
+                params={"job_id": job_id, "lease_token": lease_token},
+            )
+            self.assertEqual(r.status_code, 404, r.text)
+
+    def test_wrong_lease_token_for_the_right_job_is_refused(self) -> None:
+        with _client_and_db() as (client, db):
+            _ensure_parents(db)
+            token = _enroll_worker(db, caps=("build_challenge",))
+            job_id = _enqueue_build_job(db)
+            self._claim(client, token, job_id)  # holds the real lease now
+
+            r = client.get(
+                "/api/v1/worker/builds/sqli/1/bundle",
+                headers=_bearer(token),
+                params={"job_id": job_id, "lease_token": str(uuid.uuid4())},
+            )
+            self.assertEqual(r.status_code, 404, r.text)
 
 
 @unittest.skipUnless(_ENABLED, _SKIP_REASON)
