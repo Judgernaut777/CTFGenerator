@@ -43,6 +43,7 @@ from ctf_generator.application.execution.worker_job_service import (
     WorkerStaleError,
 )
 from ctf_generator.application.worker_enrollment import ScopeError
+from ctf_generator.domain.execution.runtime import BuildBundle
 from ctf_generator.domain.instances.models import (
     HealthObservation,
     Instance,
@@ -253,6 +254,19 @@ class HttpControlPlaneClient:
             {"to_state": to_state, "reason": reason},
         )
         self._raise_for_status(response)
+
+    # -- build bundle (build_challenge) -----------------------------------------
+
+    def fetch_build_bundle(
+        self, definition_slug: str, version_no: int, now: datetime
+    ) -> BuildBundle:
+        response = self._get(f"/worker/builds/{definition_slug}/{version_no}/bundle")
+        self._raise_for_status(response)
+        return BuildBundle(
+            data=response.content,
+            bundle_sha256=response.headers.get("x-bundle-sha256", ""),
+            spec_sha256=response.headers.get("x-spec-sha256", ""),
+        )
 
     def close(self) -> None:  # pragma: no cover - lifecycle convenience
         self._client.close()

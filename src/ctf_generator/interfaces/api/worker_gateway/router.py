@@ -37,6 +37,7 @@ from ..audit import audit
 from ..schemas.common import ERROR_RESPONSES
 from .deps import (
     WorkerAuthContext,
+    get_worker_build_service,
     get_worker_instance_service,
     get_worker_job_service,
     require_worker,
@@ -240,6 +241,44 @@ def replace_instance(
     instance = service.replace_instance(ctx.token, instance_id, _now())
     _audit(request, ctx.name, "worker.instance.replace", instance_id)
     return WorkerInstanceView(**instance_to_worker_view(instance))
+
+
+# -- build bundle (build_challenge, M-buildpipeline) ---------------------------
+
+
+@router.get(
+    "/worker/builds/{definition_slug}/{version_no}/bundle",
+    response_model=None,
+    responses={
+        200: {"description": "The FULL (buildable, private-inclusive) bundle tar"},
+        **{k: ERROR_RESPONSES[k] for k in (401, 403, 404, 422, 429)},
+    },
+)
+def fetch_build_bundle(
+    definition_slug: str,
+    version_no: int,
+    ctx: WorkerAuthContext = Depends(require_worker),
+    service=Depends(get_worker_build_service),
+):
+    """Stream a version's FULL bundle to an ``artifacts:pull``-scoped worker,
+    for the ``build_challenge`` job. NEVER exposed to a contestant -- this is
+    the flag/solution-bearing bundle, gated only by worker credential + scope
+    (see ``WorkerBuildService``). The content hash + the version's current
+    ``spec_sha256`` travel as headers (never inside a JSON envelope, which
+    would force attacker-influenced bytes through a base64 round-trip) so the
+    worker can verify BEFORE trusting a single byte
+    (``docs/architecture/build-challenge-worker-pipeline.md``)."""
+    bundle = service.fetch_build_bundle(ctx.token, definition_slug, version_no, _now())
+    return Response(
+        content=bundle.data,
+        media_type="application/x-tar",
+        headers={
+            "X-Bundle-Sha256": bundle.bundle_sha256,
+            "X-Spec-Sha256": bundle.spec_sha256,
+            "Content-Length": str(len(bundle.data)),
+            "Cache-Control": "no-store",
+        },
+    )
 
 
 # -- instance fact reports + transition ---------------------------------------

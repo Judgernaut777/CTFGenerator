@@ -18,12 +18,16 @@ from __future__ import annotations
 
 from datetime import datetime, timedelta
 
+from ctf_generator.application.execution.worker_build_service import (
+    WorkerBuildService,
+)
 from ctf_generator.application.execution.worker_instance_service import (
     WorkerInstanceService,
 )
 from ctf_generator.application.execution.worker_job_service import WorkerJobService
 from ctf_generator.application.instances.service import InstanceLifecycleService
 from ctf_generator.application.scheduling.service import SchedulingService
+from ctf_generator.domain.execution.runtime import BuildBundle
 from ctf_generator.domain.instances.models import (
     HealthObservation,
     Instance,
@@ -58,6 +62,7 @@ class LocalControlPlaneClient:
         token: str,
         architecture: str,
         reservation_ttl_hours: int = 2,
+        builds: WorkerBuildService | None = None,
     ) -> None:
         self._jobs = jobs
         self._instances = instances
@@ -66,6 +71,10 @@ class LocalControlPlaneClient:
         self._token = token
         self._architecture = architecture
         self._reservation_ttl_hours = reservation_ttl_hours
+        # Optional: only a worker dispatching build_challenge needs this. Kept
+        # optional so existing call sites that never build (e.g. the launch/
+        # stop/health test wiring) are unaffected.
+        self._builds = builds
 
     # -- credential ------------------------------------------------------------
 
@@ -151,4 +160,23 @@ class LocalControlPlaneClient:
     ) -> None:
         self._instances.transition_instance(
             self._token, instance_id, to_state, reason=reason, now=now
+        )
+
+    # -- build bundle (build_challenge) -----------------------------------------
+
+    def fetch_build_bundle(
+        self, definition_slug: str, version_no: int, now: datetime
+    ) -> BuildBundle:
+        if self._builds is None:
+            raise RuntimeError(
+                "LocalControlPlaneClient was constructed without a "
+                "WorkerBuildService; cannot dispatch build_challenge"
+            )
+        view = self._builds.fetch_build_bundle(
+            self._token, definition_slug, version_no, now
+        )
+        return BuildBundle(
+            data=view.data,
+            bundle_sha256=view.bundle_sha256,
+            spec_sha256=view.spec_sha256,
         )
