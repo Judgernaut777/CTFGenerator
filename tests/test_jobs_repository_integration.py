@@ -20,6 +20,7 @@ try:
     import sqlalchemy as sa
     from alembic import command
     from alembic.config import Config as AlembicConfig
+    from sqlalchemy import event
     from sqlalchemy.engine import make_url
     from sqlalchemy.exc import IntegrityError, ProgrammingError
 
@@ -27,11 +28,25 @@ try:
         JobIdempotencyConflictError,
         JobService,
     )
+    from ctf_generator.domain.authoring.models import (
+        ChallengeDefinition,
+        ChallengeVersion,
+    )
+    from ctf_generator.domain.challenges.models import CompetitionConfig
     from ctf_generator.domain.work.models import (
         LEGAL_JOB_TRANSITIONS,
         TERMINAL_JOB_STATUSES,
         VALID_JOB_STATUSES,
         Job,
+    )
+    from ctf_generator.infrastructure.database.challenge_definition_repository import (
+        SqlAlchemyChallengeDefinitionRepository,
+    )
+    from ctf_generator.infrastructure.database.challenge_version_repository import (
+        SqlAlchemyChallengeVersionRepository,
+    )
+    from ctf_generator.infrastructure.database.competition_repository import (
+        SqlAlchemyCompetitionRepository,
     )
     from ctf_generator.infrastructure.database.config import DatabaseConfig
     from ctf_generator.infrastructure.database.job_queue_repository import (
@@ -88,6 +103,22 @@ def _migrated_database():
             yield db, url
         finally:
             db.dispose()
+
+
+@contextmanager
+def _count_statements(engine):
+    """Counts SQL statements executed against ``engine`` for the duration of
+    the ``with`` block (a query-count oracle for the N+1 regression test)."""
+    counter = {"n": 0}
+
+    def _before_cursor_execute(conn, cursor, statement, parameters, context, executemany):
+        counter["n"] += 1
+
+    event.listen(engine, "before_cursor_execute", _before_cursor_execute)
+    try:
+        yield counter
+    finally:
+        event.remove(engine, "before_cursor_execute", _before_cursor_execute)
 
 
 def _job(idempotency_key: str | None = None, **overrides) -> Job:
@@ -600,6 +631,198 @@ class LeaseExpiryTests(unittest.TestCase):
                 got = SqlAlchemyJobQueue(s).get(job.job_id)
         self.assertEqual(got.status, "succeeded")
         self.assertEqual(got.result_json, {"winner": "w2"})
+
+
+@unittest.skipUnless(_ENABLED, _SKIP_REASON)
+class AuditRefBatchTests(unittest.TestCase):
+    """``list_dead_letter``/``reap_expired`` resolve the optional audit
+    linkage (competition slug; definition slug + version_no) via a BATCHED
+    ``IN`` lookup -- two queries total regardless of row count -- instead of
+    the old per-row ``_audit_refs`` N+1 (up to two point SELECTs per job).
+    These tests prove the batch path returns results identical to the
+    pre-existing per-row path (``get()`` -> ``_to_domain`` -> ``_audit_refs``,
+    used here as the oracle) and that the read-only ``list_dead_letter``
+    query count stays constant as row count N grows."""
+
+    _SLUG_PREFIX = "batch-slug"
+
+    def _seed_catalog(self, db, n: int) -> tuple[str, list[tuple[str, int]]]:
+        """One competition plus ``n`` distinct published (definition_slug,
+        version_no) pairs for jobs to carry as audit linkage."""
+        competition_id = f"batch-cup-{uuid.uuid4().hex[:8]}"
+        with db.session_scope() as s:
+            SqlAlchemyCompetitionRepository(s).add(
+                CompetitionConfig(
+                    competition_id=competition_id,
+                    name="Batch Cup",
+                    start_time=_NOW,
+                    end_time=_NOW + timedelta(hours=48),
+                )
+            )
+        versions: list[tuple[str, int]] = []
+        for i in range(n):
+            slug = f"{self._SLUG_PREFIX}-{uuid.uuid4().hex[:8]}-{i}"
+            with db.session_scope() as s:
+                SqlAlchemyChallengeDefinitionRepository(s).add(
+                    ChallengeDefinition(family="web", slug=slug, title=f"Chal {i}")
+                )
+                SqlAlchemyChallengeVersionRepository(s).add(
+                    ChallengeVersion(
+                        definition_slug=slug,
+                        version_no=1,
+                        state="draft",
+                        family_version="1.0",
+                        seed=f"seed-{i}",
+                        spec_sha256=f"spec-hash-{i}",
+                        spec={"title": f"Chal {i}"},
+                        spec_version="1.0",
+                        mode="red",
+                        published_at=None,
+                    )
+                )
+            versions.append((slug, 1))
+        return competition_id, versions
+
+    def _dead_letter_job(
+        self, db, competition_id: str, slug: str, version_no: int
+    ) -> str:
+        """Enqueue, claim, start, and fail-to-exhaustion a single job carrying
+        the given audit linkage, returning its job_id."""
+        job = _job(
+            max_attempts=1,
+            competition_id=competition_id,
+            definition_slug=slug,
+            version_no=version_no,
+        )
+        with db.session_scope() as s:
+            SqlAlchemyJobQueue(s).enqueue(job)
+        with db.session_scope() as s:
+            lease = SqlAlchemyJobQueue(s).claim("w1", frozenset(), 60, _NOW)
+        with db.session_scope() as s:
+            SqlAlchemyJobQueue(s).start(job.job_id, lease.lease_token, _NOW)
+        with db.session_scope() as s:
+            SqlAlchemyJobQueue(s).fail(
+                job.job_id, lease.lease_token, "internal", "boom", True, _NOW
+            )
+        return job.job_id
+
+    def test_list_dead_letter_matches_per_row_lookup(self) -> None:
+        with _migrated_database() as (db, _url):
+            n = 6
+            competition_id, versions = self._seed_catalog(db, n)
+            job_ids = [
+                self._dead_letter_job(db, competition_id, slug, version_no)
+                for slug, version_no in versions
+            ]
+
+            # The pre-existing per-row path (get() -> _to_domain ->
+            # _audit_refs) is the oracle: the batch path must return
+            # byte-identical Jobs.
+            with db.session_scope() as s:
+                queue = SqlAlchemyJobQueue(s)
+                expected = [queue.get(job_id) for job_id in job_ids]
+
+            with db.session_scope() as s:
+                dead = SqlAlchemyJobQueue(s).list_dead_letter()
+
+        self.assertEqual(
+            sorted(dead, key=lambda j: j.job_id),
+            sorted(expected, key=lambda j: j.job_id),
+        )
+        for job in dead:
+            self.assertEqual(job.competition_id, competition_id)
+            self.assertIsNotNone(job.definition_slug)
+            self.assertEqual(job.version_no, 1)
+
+    def test_list_dead_letter_query_count_is_constant_in_row_count(self) -> None:
+        counts: dict[int, int] = {}
+        for n in (1, 8):
+            with _migrated_database() as (db, _url):
+                competition_id, versions = self._seed_catalog(db, n)
+                for slug, version_no in versions:
+                    self._dead_letter_job(db, competition_id, slug, version_no)
+                with db.session_scope() as s:
+                    with _count_statements(db.engine) as counter:
+                        dead = SqlAlchemyJobQueue(s).list_dead_letter()
+                self.assertEqual(len(dead), n)
+                counts[n] = counter["n"]
+        # 1 SELECT for the dead_letter rows + at most 2 batch "IN" lookups
+        # (competitions, challenge-versions) -- NOT one extra pair of point
+        # SELECTs per row (the old N+1 would make this grow with N).
+        self.assertLessEqual(counts[1], 3)
+        self.assertEqual(
+            counts[1],
+            counts[8],
+            "list_dead_letter query count must not grow with row count "
+            f"(1 row: {counts[1]} queries, 8 rows: {counts[8]} queries)",
+        )
+
+    def test_reap_expired_matches_per_row_lookup(self) -> None:
+        with _migrated_database() as (db, _url):
+            n = 4
+            competition_id, versions = self._seed_catalog(db, n)
+            job_ids: list[str] = []
+            for slug, version_no in versions:
+                job = _job(
+                    max_attempts=3,
+                    backoff_base_seconds=30,
+                    competition_id=competition_id,
+                    definition_slug=slug,
+                    version_no=version_no,
+                )
+                job_ids.append(job.job_id)
+                with db.session_scope() as s:
+                    SqlAlchemyJobQueue(s).enqueue(job)
+                with db.session_scope() as s:
+                    SqlAlchemyJobQueue(s).claim("w1", frozenset(), 60, _NOW)
+
+            reap_at = _NOW + timedelta(minutes=5)
+            with db.session_scope() as s:
+                reaped = SqlAlchemyJobQueue(s).reap_expired(reap_at, limit=100)
+
+            # Oracle: the pre-existing per-row get() path, evaluated after the
+            # same state change, must agree with what reap_expired returned.
+            with db.session_scope() as s:
+                queue = SqlAlchemyJobQueue(s)
+                expected = [queue.get(job_id) for job_id in job_ids]
+
+        self.assertEqual(len(reaped), n)
+        self.assertEqual(
+            sorted(reaped, key=lambda j: j.job_id),
+            sorted(expected, key=lambda j: j.job_id),
+        )
+        for job in reaped:
+            self.assertEqual(job.status, "queued")
+            self.assertEqual(job.competition_id, competition_id)
+            self.assertIsNotNone(job.definition_slug)
+            self.assertEqual(job.version_no, 1)
+
+    def test_list_dead_letter_and_reap_expired_handle_no_linkage(self) -> None:
+        """Rows with neither competition_id nor challenge_version_id set must
+        not trigger any batch lookup query and must map to (None, None,
+        None), matching the old per-row behavior."""
+        with _migrated_database() as (db, _url):
+            plain = _job(max_attempts=1)
+            with db.session_scope() as s:
+                SqlAlchemyJobQueue(s).enqueue(plain)
+            with db.session_scope() as s:
+                lease = SqlAlchemyJobQueue(s).claim("w1", frozenset(), 60, _NOW)
+            with db.session_scope() as s:
+                SqlAlchemyJobQueue(s).start(plain.job_id, lease.lease_token, _NOW)
+            with db.session_scope() as s:
+                SqlAlchemyJobQueue(s).fail(
+                    plain.job_id, lease.lease_token, "internal", "boom", True, _NOW
+                )
+            with db.session_scope() as s:
+                with _count_statements(db.engine) as counter:
+                    dead = SqlAlchemyJobQueue(s).list_dead_letter()
+        self.assertEqual([j.job_id for j in dead], [plain.job_id])
+        self.assertIsNone(dead[0].competition_id)
+        self.assertIsNone(dead[0].definition_slug)
+        self.assertIsNone(dead[0].version_no)
+        # No linkage on the only row -> no batch lookup query, just the one
+        # SELECT for the dead_letter rows themselves.
+        self.assertEqual(counter["n"], 1)
 
 
 @unittest.skipUnless(_ENABLED, _SKIP_REASON)
