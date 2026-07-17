@@ -25,13 +25,19 @@ the control plane BEFORE the container is started.
 
 from __future__ import annotations
 
+import hashlib
+import io
 import logging
 import os
+import re
 import signal
+import tarfile
+import tempfile
 import time
 from collections.abc import Sequence
 from dataclasses import dataclass
 from datetime import UTC, datetime
+from pathlib import Path
 from typing import TYPE_CHECKING, Protocol
 
 if TYPE_CHECKING:  # typing-only: importing these at runtime would pull the
@@ -39,6 +45,8 @@ if TYPE_CHECKING:  # typing-only: importing these at runtime would pull the
     from ctf_generator.agent_eval import AdversarialDeltaReport, AgentEvalReport
 
 from ctf_generator.domain.execution.runtime import (
+    BuildBackend,
+    BuildBundle,
     ContainerPolicy,
     ContainerRequest,
     RuntimeBackend,
@@ -77,6 +85,11 @@ LOG_JOBS = frozenset({"collect_logs"})
 # version_no, profile, adversarial) and NO instance_id -- so _dispatch branches
 # it BEFORE the instance_id extraction.
 EVAL_JOBS = frozenset({"run_agent_evaluation"})
+# The build job (composite-seam pipeline, docs/architecture/
+# build-challenge-worker-pipeline.md). Also NOT instance-scoped -- its payload
+# carries (definition_slug, version_no, spec_sha256), the same shape
+# BuildService.trigger_build already enqueues.
+BUILD_JOBS = frozenset({"build_challenge"})
 
 DISPATCHABLE_JOBS = (
     LAUNCH_JOBS
@@ -87,7 +100,13 @@ DISPATCHABLE_JOBS = (
     | HEALTH_JOBS
     | LOG_JOBS
     | EVAL_JOBS
+    | BUILD_JOBS
 )
+
+# Tag component sanitization: a docker repository name must be lowercase
+# [a-z0-9._-]. definition_slug is a validated business id already, but this is
+# defense-in-depth (mirrors artifact_download._sanitize_filename's posture).
+_TAG_UNSAFE = re.compile(r"[^a-z0-9._-]")
 
 # The agent transcript an eval reports back (AgentEvalReport.notes) can quote a
 # discovered ``ctf{...}`` flag or an SDK error carrying a provider key. The worker
@@ -113,6 +132,67 @@ def _redact_eval_text(text: str) -> str:
 
 def _now() -> datetime:
     return datetime.now(UTC)
+
+
+def _build_tag(definition_slug: str, version_no: int, bundle_sha256: str) -> str:
+    """A deterministic, docker-tag-safe reference for a build's output image."""
+    safe_slug = _TAG_UNSAFE.sub("-", definition_slug.lower()).strip("-") or "challenge"
+    return f"ctfgen-build/{safe_slug}:v{version_no}-{bundle_sha256[:16]}"
+
+
+def _safe_extract_bundle(data: bytes, dest: Path) -> None:
+    """Extract a build bundle tar into ``dest`` after validating every member.
+
+    Generated challenge content is HOSTILE input by construction (ADR-001) --
+    this does not trust the bytes just because they came from the control
+    plane's own renderer. Every member must be a plain regular file whose
+    resolved path stays strictly inside ``dest``: no absolute paths, no ``..``
+    traversal, no symlinks/devices/directories-as-files. Refuses (raises
+    ``ValueError``) BEFORE writing anything if any member fails the check.
+    Deliberately does not rely on ``tarfile.extractall``'s stdlib ``filter=``
+    kwarg (version-gated across supported Python patch releases) -- the checks
+    below are explicit and portable."""
+    dest_root = dest.resolve()
+    with tarfile.open(fileobj=io.BytesIO(data)) as tar:
+        members = tar.getmembers()
+        for member in members:
+            if not member.isfile():
+                raise ValueError(
+                    f"build bundle member is not a regular file: {member.name!r}"
+                )
+            name = member.name
+            if name.startswith("/") or ".." in Path(name).parts:
+                raise ValueError(f"build bundle member has an unsafe path: {name!r}")
+            resolved = (dest_root / name).resolve()
+            if resolved != dest_root and dest_root not in resolved.parents:
+                raise ValueError(
+                    f"build bundle member escapes the build context: {name!r}"
+                )
+        tar.extractall(dest_root, members=members)  # noqa: S202 - validated above
+
+
+def _select_build_context(bundle_root: Path) -> Path:
+    """Pick the docker build context inside an extracted bundle: a root-level
+    ``Dockerfile`` if present, else the lexicographically-first
+    ``services/<name>/Dockerfile``'s directory. A known simplification -- see
+    ``docs/architecture/build-challenge-worker-pipeline.md`` -- matching the
+    current single-``image_ref``-per-instance launch model; a bundle with no
+    buildable Dockerfile anywhere is a clean payload/content error, never a
+    silent no-op."""
+    root_dockerfile = bundle_root / "Dockerfile"
+    if root_dockerfile.is_file():
+        return bundle_root
+    services_dir = bundle_root / "services"
+    if services_dir.is_dir():
+        candidates = sorted(
+            p.parent for p in services_dir.glob("*/Dockerfile") if p.is_file()
+        )
+        if candidates:
+            return candidates[0]
+    raise ValueError(
+        "build bundle contains no buildable Dockerfile "
+        "(checked the bundle root and services/*/)"
+    )
 
 
 class WorkerControlPlaneClient(Protocol):
@@ -178,6 +258,17 @@ class WorkerControlPlaneClient(Protocol):
     ) -> None:
         ...
 
+    def fetch_build_bundle(
+        self, definition_slug: str, version_no: int, now: datetime
+    ) -> BuildBundle:
+        """Fetch the FULL (buildable, private-inclusive) bundle for a
+        ``build_challenge`` job. The worker holds no DB credential and no
+        filesystem reach into control-plane storage -- this is its ONLY path to
+        the bytes (``docs/architecture/build-challenge-worker-pipeline.md``).
+        Like ``get_instance``/``report_health``, no explicit ``token`` param: an
+        implementation carries its own credential."""
+        ...
+
 
 class EvalJobRunner(Protocol):
     """The effectful arm of a ``run_agent_evaluation`` job, injected as a seam.
@@ -239,6 +330,7 @@ class Worker:
         policy: ContainerPolicy = DEFAULT_POLICY,
         command: Sequence[str] | None = None,
         eval_runner: EvalJobRunner | None = None,
+        build_backend: BuildBackend | None = None,
         clock=_now,
     ) -> None:
         self._config = config
@@ -250,6 +342,14 @@ class Worker:
         # host + DB with the control plane); a networked worker leaves it None
         # until the distributed build_challenge pipeline exists.
         self._eval_runner = eval_runner
+        # Optional: only a worker whose credential carries the build_challenge
+        # capability is ever handed such a job (the queue's capability-claim
+        # gate); a worker not configured to build simply never claims one. Kept
+        # optional so every existing call site (launch/stop/health-only
+        # workers) is unaffected. DockerRuntimeBackend already satisfies
+        # BuildBackend structurally -- main() passes the same instance for both
+        # ``backend`` and ``build_backend``.
+        self._build_backend = build_backend
         self._clock = clock
         self._draining = False
 
@@ -354,6 +454,10 @@ class Worker:
         # instance_id" for a valid eval payload.
         if job_type in EVAL_JOBS:
             return self._do_agent_eval(payload, now)
+        # The build job is also NOT instance-scoped -- same reasoning as the
+        # eval branch above; must precede the instance_id extraction.
+        if job_type in BUILD_JOBS:
+            return self._do_build_challenge(payload, now)
         instance_id = payload.get("instance_id")
         if not isinstance(instance_id, str) or not instance_id:
             raise ValueError(f"{job_type} payload missing instance_id")
@@ -664,6 +768,79 @@ class Worker:
         ]
         return result
 
+    # -- build (M-buildpipeline, NOT instance-scoped) ---------------------------
+
+    def _do_build_challenge(self, payload: dict, now: datetime) -> _DispatchOutcome:
+        """Fetch a version's FULL bundle, verify it, build an isolated Docker
+        image from it, and report the resulting image reference.
+
+        Payload validation -> malformed payload fails the job cleanly ('internal'
+        via the generic exception handler in ``_process``, same as every other
+        dispatch branch). A content-hash mismatch (either check) REFUSES with NO
+        build attempted -- both checks run before ``_safe_extract_bundle`` is
+        even called. An infrastructure error from the build backend
+        (``UnsupportedRuntimeError`` -- e.g. an oversized image) is classified
+        'infrastructure'/non-retryable by ``_process``'s existing branch, the
+        same path ``_do_launch`` already exercises.
+
+        Never logs the fetched bundle bytes (may embed the flag/solution) or the
+        job payload wholesale -- only ``definition_slug``/``version_no``, like
+        every other handler's error logging."""
+        definition_slug = payload.get("definition_slug")
+        version_no = payload.get("version_no")
+        spec_sha256 = payload.get("spec_sha256")
+        if not isinstance(definition_slug, str) or not definition_slug:
+            raise ValueError("build_challenge payload missing definition_slug")
+        if not isinstance(version_no, int):
+            raise ValueError("build_challenge payload missing version_no")
+        if not isinstance(spec_sha256, str) or not spec_sha256:
+            raise ValueError("build_challenge payload missing spec_sha256")
+        if self._build_backend is None:
+            raise RuntimeError(
+                "worker has no BuildBackend configured; cannot dispatch "
+                "build_challenge"
+            )
+
+        bundle = self._client.fetch_build_bundle(definition_slug, version_no, now)
+
+        # -- content-address verification BEFORE trusting any byte -----------
+        recomputed = hashlib.sha256(bundle.data).hexdigest()
+        if recomputed != bundle.bundle_sha256:
+            raise ValueError(
+                f"build bundle content hash mismatch for {definition_slug!r} "
+                f"v{version_no}: refusing to build"
+            )
+        if bundle.spec_sha256 != spec_sha256:
+            raise ValueError(
+                f"build bundle spec hash does not match the job's enqueue-time "
+                f"spec_sha256 for {definition_slug!r} v{version_no}: refusing "
+                "to build (the version changed between enqueue and fetch)"
+            )
+
+        with tempfile.TemporaryDirectory(prefix="ctfgen-build-") as tmp_dir:
+            bundle_root = Path(tmp_dir) / "bundle"
+            bundle_root.mkdir()
+            _safe_extract_bundle(bundle.data, bundle_root)
+            context_dir = _select_build_context(bundle_root)
+            tag = _build_tag(definition_slug, version_no, bundle.bundle_sha256)
+            # network=False: the generated Dockerfile is hostile input; no
+            # egress during the build unless a future capability-acknowledged
+            # posture explicitly allows it (not implemented -- see the design
+            # note's documented limitation on families needing package fetch).
+            digest = self._build_backend.build_image(
+                context_dir=str(context_dir), tag=tag, network=False
+            )
+
+        return _DispatchOutcome(
+            result={
+                "definition_slug": definition_slug,
+                "version_no": version_no,
+                "bundle_sha256": bundle.bundle_sha256,
+                "image_ref": tag,
+                "digest": digest,
+            }
+        )
+
     def _current_container(self, instance_id: str) -> str | None:
         # Via the Protocol -- keeps docker-CLI verbs inside the adapter and scopes
         # the lookup to THIS worker's containers.
@@ -725,7 +902,10 @@ def main(argv: Sequence[str] | None = None) -> int:  # pragma: no cover - entryp
     config = WorkerConfig(worker_name=name, lease_seconds=lease_seconds)
     client = HttpControlPlaneClient(base_url=base_url, token=token)
     backend = DockerRuntimeBackend()
-    worker = Worker(config, client, backend)
+    # DockerRuntimeBackend already satisfies the BuildBackend Protocol
+    # structurally (build_image/is_available) -- one instance serves both
+    # roles; see docs/architecture/build-challenge-worker-pipeline.md.
+    worker = Worker(config, client, backend, build_backend=backend)
     worker.install_signal_handlers()
     worker.run_forever()
     return 0

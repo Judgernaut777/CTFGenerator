@@ -26,6 +26,9 @@ from datetime import UTC, datetime
 
 from fastapi import Depends, Request
 
+from ctf_generator.application.execution.worker_build_service import (
+    WorkerBuildService,
+)
 from ctf_generator.application.execution.worker_instance_service import (
     WorkerAuthenticationError,
     WorkerInstanceService,
@@ -77,6 +80,12 @@ def get_worker_job_service(
     database: Database = Depends(get_database),
 ) -> WorkerJobService:
     return WorkerJobService(database, WorkerEnrollmentService(database))
+
+
+def get_worker_build_service(
+    database: Database = Depends(get_database),
+) -> WorkerBuildService:
+    return WorkerBuildService(database, WorkerEnrollmentService(database))
 
 
 def get_worker_instance_service(

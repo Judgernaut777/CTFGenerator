@@ -351,3 +351,56 @@ class RuntimeBackend(Protocol):
         sweep), scoped by the worker label so peers' live containers are untouched.
         Returns the count reaped."""
         ...
+
+
+@dataclass(frozen=True)
+class BuildBundle:
+    """The FULL (buildable, private-inclusive) bundle bytes for one challenge
+    version, fetched by a worker through the control-plane client -- NEVER
+    directly from the DB or control-plane filesystem (``docs/architecture/
+    build-challenge-worker-pipeline.md``).
+
+    ``bundle_sha256`` is the content address of ``data`` computed by the
+    control plane at fetch time and carried alongside the bytes. ``spec_sha256``
+    is the version's spec hash read fresh from the DB at fetch time. Together
+    they support the worker's two-part verification BEFORE any byte is trusted:
+    recompute ``sha256(data)`` against ``bundle_sha256`` (catches in-transit
+    corruption/tampering), and compare ``spec_sha256`` against the job
+    payload's own ``spec_sha256`` recorded at enqueue time (catches the version
+    drifting between enqueue and fetch). ``data`` may embed the challenge's
+    flag/solution material -- it must NEVER be logged."""
+
+    data: bytes
+    bundle_sha256: str
+    spec_sha256: str
+
+    def __post_init__(self) -> None:
+        if not isinstance(self.data, (bytes, bytearray)):
+            raise ValueError("data must be bytes")
+        _require_nonempty(self.bundle_sha256, "bundle_sha256")
+        _require_nonempty(self.spec_sha256, "spec_sha256")
+
+
+@runtime_checkable
+class BuildBackend(Protocol):
+    """The image-BUILD seam a worker's concrete adapter implements for the
+    ``build_challenge`` job (never reachable from the control plane -- ADR-001).
+
+    Interface only: no method here has an implementation, and this module
+    imports no docker/subprocess code. ``DockerRuntimeBackend`` already
+    satisfies this Protocol STRUCTURALLY (its existing ``build_image`` /
+    ``is_available`` methods match this shape) -- no new adapter class is
+    required; see ``docs/architecture/build-challenge-worker-pipeline.md``."""
+
+    def build_image(self, *, context_dir: str, tag: str, network: bool = ...) -> str:
+        """Build an image from ``context_dir`` and return its content-addressed
+        digest (``sha256:...``). MUST default to no network access during the
+        build (the generated Dockerfile is hostile input) and MUST refuse
+        (never silently accept) an oversized result rather than leave it
+        behind."""
+        ...
+
+    def is_available(self) -> bool:
+        """Whether this backend's build runtime is reachable (a capability
+        probe, mirroring ``RuntimeBackend.detect_capabilities``'s spirit)."""
+        ...
