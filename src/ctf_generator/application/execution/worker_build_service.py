@@ -121,7 +121,9 @@ class WorkerBuildService:
         if auth is None:
             raise WorkerAuthenticationError("worker authentication failed")
         require_scope(auth, _ARTIFACTS_PULL_SCOPE)
-        self._verify_build_lease(job_id, lease_token, definition_slug, version_no, now)
+        self._verify_build_lease(
+            auth.worker.name, job_id, lease_token, definition_slug, version_no, now
+        )
         bundle = self._full_bundles.render(definition_slug, version_no)
         return BuildBundleView(
             data=bundle.data,
@@ -131,21 +133,27 @@ class WorkerBuildService:
 
     def _verify_build_lease(
         self,
+        worker_name: str,
         job_id: str,
         lease_token: str,
         definition_slug: str,
         version_no: int,
         now: datetime,
     ) -> None:
-        """Prove the caller holds a LIVE lease on ``job_id`` -- via
-        ``JobQueue.heartbeat``, the SAME lease-fenced check
+        """Prove the AUTHENTICATED worker holds a LIVE lease on ``job_id`` --
+        via ``JobQueue.heartbeat``, the SAME lease-fenced check
         ``WorkerJobService.complete``/``.fail`` use (not a new mechanism) --
         and that the leased job is a ``build_challenge`` for exactly this
         ``(definition_slug, version_no)``. A missing job or a stale/mismatched
         ``lease_token`` raises :class:`LookupError` from ``heartbeat`` itself
-        (unchanged, un-caught); a live lease on the WRONG job/version raises
-        the identical :class:`LookupError` here, so both cases surface as the
+        (unchanged, un-caught); a live lease on the WRONG job/version, or a
+        job whose claiming ``worker_id`` is not this caller, raises the
+        identical :class:`LookupError` here, so every case surfaces as the
         same 404 a bad lease already produces on every other queue verb.
+        Because this endpoint serves the flag/solution-bearing bundle, it
+        binds the fence to the credential's identity too (``claimed_by ==
+        worker_name``) -- strictly stronger than the queue's lease-token-only
+        fencing, so a caller cannot ride a FOREIGN worker's leaked lease token.
         Changes nothing on refusal (the whole check runs in one transaction
         that is rolled back on any raise)."""
         with self._database.session_scope() as session:
@@ -159,8 +167,9 @@ class WorkerBuildService:
                 or job.job_type != _BUILD_JOB_TYPE
                 or job.definition_slug != definition_slug
                 or job.version_no != version_no
+                or job.claimed_by != worker_name
             ):
                 raise LookupError(
-                    f"job {job_id!r} is not a live build_challenge lease for "
-                    f"{definition_slug!r} v{version_no}"
+                    f"job {job_id!r} is not a live build_challenge lease held by "
+                    f"{worker_name!r} for {definition_slug!r} v{version_no}"
                 )
