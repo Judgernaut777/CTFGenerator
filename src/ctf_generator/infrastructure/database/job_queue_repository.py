@@ -23,6 +23,7 @@ domain objects only; ORM rows never escape.
 from __future__ import annotations
 
 import uuid
+from collections.abc import Sequence
 from datetime import datetime, timedelta
 
 import sqlalchemy as sa
@@ -102,6 +103,73 @@ class SqlAlchemyJobQueue:
     def _to_domain(self, row: JobRow) -> Job:
         competition_slug, definition_slug, version_no = self._audit_refs(row)
         return job_from_orm(row, competition_slug, definition_slug, version_no)
+
+    def _audit_refs_batch(
+        self, rows: Sequence[JobRow]
+    ) -> tuple[dict[uuid.UUID, str], dict[uuid.UUID, tuple[str, int]]]:
+        """Batch form of ``_audit_refs``: resolves the audit-linkage business
+        keys for many rows with two queries TOTAL (one ``IN`` per referenced
+        table) instead of up to two point SELECTs per row -- avoids the N+1
+        that list paths (``list_dead_letter``, ``reap_expired``) otherwise
+        pay per row. The lookups still run as separate follow-up queries
+        after the caller's locking SELECT has already fetched ``rows`` --
+        claim/reap lock only the jobs row via FOR UPDATE, so no JOIN may be
+        folded into that locking SELECT itself."""
+        competition_ids = {
+            row.competition_id for row in rows if row.competition_id is not None
+        }
+        version_ids = {
+            row.challenge_version_id
+            for row in rows
+            if row.challenge_version_id is not None
+        }
+        competition_slugs: dict[uuid.UUID, str] = {}
+        if competition_ids:
+            competition_slugs = dict(
+                self._session.execute(
+                    select(Competition.id, Competition.slug).where(
+                        Competition.id.in_(competition_ids)
+                    )
+                ).all()
+            )
+        version_refs: dict[uuid.UUID, tuple[str, int]] = {}
+        if version_ids:
+            version_refs = {
+                version_id: (definition_slug, version_no)
+                for definition_slug, version_no, version_id in self._session.execute(
+                    select(
+                        ChallengeDefinitionRow.slug,
+                        ChallengeVersionRow.version_no,
+                        ChallengeVersionRow.id,
+                    )
+                    .join(
+                        ChallengeVersionRow,
+                        ChallengeVersionRow.definition_id == ChallengeDefinitionRow.id,
+                    )
+                    .where(ChallengeVersionRow.id.in_(version_ids))
+                ).all()
+            }
+        return competition_slugs, version_refs
+
+    def _to_domain_many(self, rows: Sequence[JobRow]) -> list[Job]:
+        """Batch form of ``_to_domain`` for multi-row list paths -- resolves
+        audit refs for every row with the two queries from
+        ``_audit_refs_batch`` rather than the N+1 that per-row ``_to_domain``
+        would issue."""
+        competition_slugs, version_refs = self._audit_refs_batch(rows)
+        result: list[Job] = []
+        for row in rows:
+            competition_slug = (
+                competition_slugs[row.competition_id]
+                if row.competition_id is not None
+                else None
+            )
+            if row.challenge_version_id is not None:
+                definition_slug, version_no = version_refs[row.challenge_version_id]
+            else:
+                definition_slug, version_no = None, None
+            result.append(job_from_orm(row, competition_slug, definition_slug, version_no))
+        return result
 
     def _record(
         self,
@@ -471,12 +539,10 @@ class SqlAlchemyJobQueue:
             .limit(limit)
             .with_for_update(skip_locked=True)
         ).all()
-        reaped: list[Job] = []
         for row in rows:
             self._requeue_or_dead_letter(row, now, "lease_expired", None)
-            self._session.flush()
-            reaped.append(self._to_domain(row))
-        return reaped
+        self._session.flush()
+        return self._to_domain_many(rows)
 
     def list_dead_letter(self) -> list[Job]:
         rows = self._session.scalars(
@@ -484,7 +550,7 @@ class SqlAlchemyJobQueue:
             .where(JobRow.status == "dead_letter")
             .order_by(JobRow.finished_at.asc())
         ).all()
-        return [self._to_domain(row) for row in rows]
+        return self._to_domain_many(rows)
 
     def retry_dead_letter(self, job_id: str, now: datetime) -> Job:
         row = self._locked_row(job_id)
