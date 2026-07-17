@@ -42,6 +42,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from ctf_generator import generator as _generator_module
+from ctf_generator.domain.execution.runtime import MAX_BUILD_BUNDLE_BYTES
 from ctf_generator.infrastructure.database.challenge_version_repository import (
     SqlAlchemyChallengeVersionRepository,
 )
@@ -142,6 +143,15 @@ class FullBundleService:
             all_files = _collect_all_files(bundle_root)
 
         tar_bytes = _deterministic_tar(all_files)
+        if len(tar_bytes) > MAX_BUILD_BUNDLE_BYTES:
+            # Refuse BEFORE handing an oversized bundle to any worker -- the
+            # earliest possible stage of the end-to-end size ceiling (see
+            # ``MAX_BUILD_BUNDLE_BYTES``'s docstring).
+            raise ValueError(
+                f"rendered bundle for {definition_slug!r} v{version_no} is "
+                f"{len(tar_bytes)} bytes, over the {MAX_BUILD_BUNDLE_BYTES}-byte "
+                "ceiling; refusing to serve it"
+            )
         bundle_sha256 = hashlib.sha256(tar_bytes).hexdigest()
         return FullBundle(
             data=tar_bytes,

@@ -165,8 +165,12 @@ class EvalDispatchTests(unittest.TestCase):
         # payload with NO instance_id returns an outcome instead of raising.
         runner = _FakeEvalRunner(_plain_report())
         worker = _worker(_FakeClient(), runner)
+        # The eval branch doesn't consume job_id/lease_token (only the build
+        # branch does) -- pass placeholders since _dispatch now threads them
+        # through unconditionally for the build_challenge lease fence.
         outcome = worker._dispatch(
-            "run_agent_evaluation", _eval_payload(), _NOW
+            "run_agent_evaluation", _eval_payload(), _NOW,
+            job_id="job-eval-1", lease_token="lease-eval-1",
         )
         self.assertIsNotNone(outcome.result)
         self.assertEqual(outcome.result["eval_run_id"], "eval-1")

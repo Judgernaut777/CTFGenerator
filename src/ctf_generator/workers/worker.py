@@ -49,6 +49,7 @@ from ctf_generator.domain.execution.runtime import (
     BuildBundle,
     ContainerPolicy,
     ContainerRequest,
+    MAX_BUILD_BUNDLE_BYTES,
     RuntimeBackend,
     RuntimeLaunch,
 )
@@ -60,6 +61,7 @@ from ctf_generator.domain.instances.models import (
 )
 from ctf_generator.domain.work.models import JobLease
 from ctf_generator.infrastructure.runtime.docker_backend import (
+    DockerCommandError,
     UnsupportedRuntimeError,
 )
 from ctf_generator.observability.secrets import EVAL_SECRET_PATTERNS
@@ -130,6 +132,34 @@ def _redact_eval_text(text: str) -> str:
     return text
 
 
+def _build_challenge_error_detail(exc: Exception) -> str:
+    """The failure detail persisted for a ``build_challenge`` job's generic
+    dispatch failure -- deliberately NOT ``f"{type(exc).__name__}: {exc}"``
+    (the generic handler's own formatting).
+
+    A :class:`~ctf_generator.infrastructure.runtime.docker_backend.DockerCommandError`
+    embeds up to 400 chars of captured ``docker build`` stderr in its message;
+    since the build context is HOSTILE input by construction (a generated,
+    unreviewed Dockerfile/build), that stderr can echo file or flag-adjacent
+    content (e.g. a failed ``COPY``/``RUN`` quoting a source line) into the
+    durable, cross-worker-readable job record. This forwards only the
+    sanitized argv (never env/secrets, per ``DockerCommandError``'s own
+    contract) and the exit code -- NEVER the captured output. Any other
+    exception's message is passed through the SAME redaction the eval path
+    already uses (defense in depth: a crafted ``ValueError`` could in
+    principle quote bundle content too)."""
+    if isinstance(exc, DockerCommandError):
+        argv_preview = " ".join(exc.argv[:3])
+        detail = (
+            f"DockerCommandError: docker build failed (exit {exc.returncode}) "
+            f"running {argv_preview!r}; build output redacted (the build "
+            "context is hostile-by-construction generated content)"
+        )
+    else:
+        detail = f"{type(exc).__name__}: {exc}"
+    return _redact_eval_text(detail)
+
+
 def _now() -> datetime:
     return datetime.now(UTC)
 
@@ -147,14 +177,22 @@ def _safe_extract_bundle(data: bytes, dest: Path) -> None:
     this does not trust the bytes just because they came from the control
     plane's own renderer. Every member must be a plain regular file whose
     resolved path stays strictly inside ``dest``: no absolute paths, no ``..``
-    traversal, no symlinks/devices/directories-as-files. Refuses (raises
-    ``ValueError``) BEFORE writing anything if any member fails the check.
+    traversal, no symlinks/devices/directories-as-files. The SUM of every
+    member's declared size is refused (``ValueError``) if it exceeds
+    ``MAX_BUILD_BUNDLE_BYTES`` -- the same end-to-end ceiling the HTTP fetch
+    and the render path enforce, so a hostile/oversized bundle is never fully
+    extracted onto disk. Refuses BEFORE writing anything if any member fails a
+    check. Opened with ``mode="r:"`` -- forced UNCOMPRESSED, no transparent
+    gzip/bz2/xz -- matching the deterministic USTAR wire format the control
+    plane always sends (``full_bundle.py``'s ``_deterministic_tar``); a
+    compressed member is refused rather than silently decompressed.
     Deliberately does not rely on ``tarfile.extractall``'s stdlib ``filter=``
     kwarg (version-gated across supported Python patch releases) -- the checks
     below are explicit and portable."""
     dest_root = dest.resolve()
-    with tarfile.open(fileobj=io.BytesIO(data)) as tar:
+    with tarfile.open(fileobj=io.BytesIO(data), mode="r:") as tar:
         members = tar.getmembers()
+        total_size = 0
         for member in members:
             if not member.isfile():
                 raise ValueError(
@@ -167,6 +205,12 @@ def _safe_extract_bundle(data: bytes, dest: Path) -> None:
             if resolved != dest_root and dest_root not in resolved.parents:
                 raise ValueError(
                     f"build bundle member escapes the build context: {name!r}"
+                )
+            total_size += member.size
+            if total_size > MAX_BUILD_BUNDLE_BYTES:
+                raise ValueError(
+                    f"build bundle exceeds the {MAX_BUILD_BUNDLE_BYTES}-byte "
+                    "extraction ceiling; refusing to extract"
                 )
         tar.extractall(dest_root, members=members)  # noqa: S202 - validated above
 
@@ -259,13 +303,24 @@ class WorkerControlPlaneClient(Protocol):
         ...
 
     def fetch_build_bundle(
-        self, definition_slug: str, version_no: int, now: datetime
+        self,
+        definition_slug: str,
+        version_no: int,
+        job_id: str,
+        lease_token: str,
+        now: datetime,
     ) -> BuildBundle:
         """Fetch the FULL (buildable, private-inclusive) bundle for a
         ``build_challenge`` job. The worker holds no DB credential and no
         filesystem reach into control-plane storage -- this is its ONLY path to
         the bytes (``docs/architecture/build-challenge-worker-pipeline.md``).
-        Like ``get_instance``/``report_health``, no explicit ``token`` param: an
+        ``job_id``/``lease_token`` are the SAME lease the worker holds for this
+        job (from the ``JobLease`` returned by ``claim``) -- the control plane
+        proves this caller holds a live lease on a matching build_challenge job
+        before rendering the bundle (the lease-fence BLOCKER fix); a missing/
+        foreign/mismatched lease raises :class:`LookupError`, exactly like a
+        bad lease on ``start``/``heartbeat``/``complete``/``fail``. Like
+        ``get_instance``/``report_health``, no explicit ``token`` param: an
         implementation carries its own credential."""
         ...
 
@@ -412,7 +467,13 @@ class Worker:
         # claimed -> running (lease-fenced) before any runtime work begins.
         self._client.start(token, job.job_id, lease.lease_token, now)
         try:
-            outcome = self._dispatch(job.job_type, dict(job.payload), now)
+            outcome = self._dispatch(
+                job.job_type,
+                dict(job.payload),
+                now,
+                job_id=job.job_id,
+                lease_token=lease.lease_token,
+            )
         except UnsupportedRuntimeError as exc:
             # A hardening (seccomp / the isolated-network host-block) cannot be
             # applied on this host: NON-retryable (a retry on the same host fails
@@ -430,9 +491,14 @@ class Worker:
             # (a valid queue error class -- the exception type is in error_detail;
             # passing type(exc).__name__ as the class would be rejected).
             _LOG.exception("job %s failed", job.job_id)
+            detail = (
+                _build_challenge_error_detail(exc)
+                if job.job_type in BUILD_JOBS
+                else f"{type(exc).__name__}: {exc}"
+            )
             self._client.fail(
                 token, job.job_id, lease.lease_token, "internal",
-                f"{type(exc).__name__}: {exc}", True, self._clock(),
+                detail, True, self._clock(),
             )
             return
         # Renew the lease right before completing so a slow launch cannot lose its
@@ -448,7 +514,15 @@ class Worker:
 
     # -- dispatch table --------------------------------------------------------
 
-    def _dispatch(self, job_type: str, payload: dict, now: datetime) -> _DispatchOutcome:
+    def _dispatch(
+        self,
+        job_type: str,
+        payload: dict,
+        now: datetime,
+        *,
+        job_id: str,
+        lease_token: str,
+    ) -> _DispatchOutcome:
         # The eval job is NOT instance-scoped -- it MUST branch before the
         # instance_id extraction below, which would otherwise raise "missing
         # instance_id" for a valid eval payload.
@@ -457,7 +531,7 @@ class Worker:
         # The build job is also NOT instance-scoped -- same reasoning as the
         # eval branch above; must precede the instance_id extraction.
         if job_type in BUILD_JOBS:
-            return self._do_build_challenge(payload, now)
+            return self._do_build_challenge(payload, job_id, lease_token, now)
         instance_id = payload.get("instance_id")
         if not isinstance(instance_id, str) or not instance_id:
             raise ValueError(f"{job_type} payload missing instance_id")
@@ -770,7 +844,9 @@ class Worker:
 
     # -- build (M-buildpipeline, NOT instance-scoped) ---------------------------
 
-    def _do_build_challenge(self, payload: dict, now: datetime) -> _DispatchOutcome:
+    def _do_build_challenge(
+        self, payload: dict, job_id: str, lease_token: str, now: datetime
+    ) -> _DispatchOutcome:
         """Fetch a version's FULL bundle, verify it, build an isolated Docker
         image from it, and report the resulting image reference.
 
@@ -782,6 +858,13 @@ class Worker:
         (``UnsupportedRuntimeError`` -- e.g. an oversized image) is classified
         'infrastructure'/non-retryable by ``_process``'s existing branch, the
         same path ``_do_launch`` already exercises.
+
+        ``job_id``/``lease_token`` (THIS job's own lease, from the claim that
+        triggered this dispatch) are threaded into ``fetch_build_bundle`` so
+        the control plane can verify this worker holds a live lease on exactly
+        this build_challenge job before it renders the bundle (the lease-fence
+        BLOCKER fix) -- never request-supplied identity, always the lease this
+        dispatch is already operating under.
 
         Never logs the fetched bundle bytes (may embed the flag/solution) or the
         job payload wholesale -- only ``definition_slug``/``version_no``, like
@@ -801,7 +884,9 @@ class Worker:
                 "build_challenge"
             )
 
-        bundle = self._client.fetch_build_bundle(definition_slug, version_no, now)
+        bundle = self._client.fetch_build_bundle(
+            definition_slug, version_no, job_id, lease_token, now
+        )
 
         # -- content-address verification BEFORE trusting any byte -----------
         recomputed = hashlib.sha256(bundle.data).hexdigest()

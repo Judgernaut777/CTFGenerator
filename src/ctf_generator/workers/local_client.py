@@ -165,7 +165,12 @@ class LocalControlPlaneClient:
     # -- build bundle (build_challenge) -----------------------------------------
 
     def fetch_build_bundle(
-        self, definition_slug: str, version_no: int, now: datetime
+        self,
+        definition_slug: str,
+        version_no: int,
+        job_id: str,
+        lease_token: str,
+        now: datetime,
     ) -> BuildBundle:
         if self._builds is None:
             raise RuntimeError(
@@ -173,7 +178,7 @@ class LocalControlPlaneClient:
                 "WorkerBuildService; cannot dispatch build_challenge"
             )
         view = self._builds.fetch_build_bundle(
-            self._token, definition_slug, version_no, now
+            self._token, definition_slug, version_no, job_id, lease_token, now
         )
         return BuildBundle(
             data=view.data,

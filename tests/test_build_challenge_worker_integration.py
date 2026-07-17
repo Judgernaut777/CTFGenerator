@@ -78,7 +78,7 @@ class _FakeClient:
     def fail(self, token, job_id, lease_token, error_class, error_detail, retryable, now):
         self.failed.append((job_id, error_class, error_detail, retryable))
 
-    def fetch_build_bundle(self, definition_slug, version_no, now):
+    def fetch_build_bundle(self, definition_slug, version_no, job_id, lease_token, now):
         return self.bundle
 
 

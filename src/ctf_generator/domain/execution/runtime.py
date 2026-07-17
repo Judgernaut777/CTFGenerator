@@ -353,6 +353,19 @@ class RuntimeBackend(Protocol):
         ...
 
 
+# The FULL build bundle is SOURCE content only (Dockerfiles / service code /
+# configs) -- no base-image layers -- so this ceiling is deliberately far
+# below ``DockerRuntimeBackend``'s built-IMAGE ceiling (``max_image_mb``,
+# default 2048MB): generous headroom for any real bundle while still bounding
+# worst-case memory/disk use for a malicious or misbehaving bundle end to end.
+# The SAME number is enforced at every stage of the pipeline: the render path
+# (``FullBundleService.render``) refuses to hand out an oversized bundle in
+# the first place, the HTTP fetch (``HttpControlPlaneClient.fetch_build_bundle``)
+# refuses to buffer a body over the cap, and the extraction guard
+# (``workers/worker.py`` ``_safe_extract_bundle``) refuses to extract one.
+MAX_BUILD_BUNDLE_BYTES = 256 * 1024 * 1024  # 256MB
+
+
 @dataclass(frozen=True)
 class BuildBundle:
     """The FULL (buildable, private-inclusive) bundle bytes for one challenge
