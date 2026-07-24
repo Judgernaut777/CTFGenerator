@@ -44,6 +44,9 @@ from ctf_generator.domain.scheduling.models import (
     ReservationItem,
     WorkerRequirements,
 )
+from ctf_generator.infrastructure.database.challenge_build_image_repository import (
+    SqlAlchemyChallengeBuildImageRepository,
+)
 from ctf_generator.infrastructure.database.instance_repository import (
     SqlAlchemyInstanceRepository,
 )
@@ -71,11 +74,15 @@ class InstanceLifecycleService:
         repository_factory: Callable[
             [Session], InstanceRepository
         ] = SqlAlchemyInstanceRepository,
+        build_image_repository_factory: Callable[
+            [Session], SqlAlchemyChallengeBuildImageRepository
+        ] = SqlAlchemyChallengeBuildImageRepository,
     ) -> None:
         self._database = database
         self._scheduling = scheduling
         self._jobs = jobs
         self._repo = repository_factory
+        self._build_images = build_image_repository_factory
 
     # -- creation + placement ------------------------------------------------
 
@@ -119,7 +126,32 @@ class InstanceLifecycleService:
         restarts clean. A retry that carries a DIFFERENT business identity, or one
         for an instance already past ``requested``, is a genuine idempotency
         conflict (:class:`IdempotencyConflictError` -> 409).
+
+        BUILT-IMAGE RESOLUTION (build_challenge slice 2): when the caller does not
+        pass an explicit ``image_ref``, the freshly-built image for
+        ``(definition_slug, version_no)`` is resolved from the
+        ``challenge_build_images`` registry a worker populates at build-completion
+        time, and threaded into BOTH the persisted ``Instance.image_ref`` and the
+        scheduler's ``image_ref`` affinity hint. This is a pure DB read (no Docker,
+        no challenge code -- ADR-001). A miss (no successful build recorded yet)
+        leaves ``image_ref`` ``None``, preserving the prior behaviour: the instance
+        is created but the launch job fails deterministically at the worker's
+        ``_build_request`` until a build lands -- rather than being rejected at
+        create time (a hard create-time reject is a separable API-contract change).
+        A caller that passes ``image_ref`` explicitly (e.g. a test) bypasses the
+        lookup entirely.
         """
+        if image_ref is None:
+            with self._database.session_scope() as session:
+                image_ref = self._build_images(session).latest_image_ref_for_version(
+                    definition_slug, version_no
+                )
+        # Feed the resolved image to the scheduler's affinity ranking too, unless
+        # the caller pinned a scheduling hint explicitly. Affinity only reorders
+        # candidates (never a placement gate), so a None here is harmless.
+        if scheduling_image_ref is None:
+            scheduling_image_ref = image_ref
+
         with self._database.session_scope() as session:
             repo = self._repo(session)
             existing = repo.get(instance_id)

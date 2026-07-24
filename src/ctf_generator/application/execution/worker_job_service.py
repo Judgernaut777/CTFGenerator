@@ -34,6 +34,9 @@ from datetime import datetime, timedelta
 
 from sqlalchemy.orm import Session
 
+from ctf_generator.application.execution.build_completion import (
+    parse_build_completion,
+)
 from ctf_generator.application.worker_enrollment import (
     AuthenticatedWorker,
     WorkerEnrollmentService,
@@ -41,10 +44,16 @@ from ctf_generator.application.worker_enrollment import (
 )
 from ctf_generator.domain.repositories import JobQueue
 from ctf_generator.domain.work.models import Job, JobLease
+from ctf_generator.infrastructure.database.challenge_build_image_repository import (
+    SqlAlchemyChallengeBuildImageRepository,
+)
 from ctf_generator.infrastructure.database.job_queue_repository import (
     SqlAlchemyJobQueue,
 )
 from ctf_generator.infrastructure.database.session import Database
+from ctf_generator.infrastructure.database.worker_image_cache_repository import (
+    SqlAlchemyWorkerImageCacheRepository,
+)
 from ctf_generator.infrastructure.database.worker_repository import (
     SqlAlchemyWorkerRegistry,
 )
@@ -191,14 +200,49 @@ class WorkerJobService:
         """``running`` -> ``succeeded``. Permitted while draining (finish
         leases). Results carry references/hashes only, never secrets. NOT
         liveness-gated: refusing a real outcome for a held lease because the
-        worker's heartbeat aged would reap the lease and double-execute the job."""
-        self._authorize(
+        worker's heartbeat aged would reap the lease and double-execute the job.
+
+        BUILD SIDE EFFECTS (build_challenge slice 2): when the result carries a
+        built ``image_ref`` (and only then -- gated by
+        :func:`parse_build_completion`, so the verb stays job-type-agnostic in
+        spirit), two idempotent writes ride the SAME unit of work as the job
+        terminalization, so the job succeeds iff both land:
+
+        * the worker-affinity cache (``worker_image_cache``), keyed to THIS
+          authenticated worker -- the only point where the worker's credential
+          identity and its reported image coincide (a terminal job's
+          ``claimed_by`` is NULL, so no later projector could attribute it); and
+        * the version->image registry (``challenge_build_images``), read at
+          launch time to run the freshly-built image -- written only when the
+          build reported a content digest.
+
+        Worker identity comes EXCLUSIVELY from the authenticated credential
+        (``auth.worker.name``), never from the (worker-supplied) result payload.
+        Both writes are references/hashes only; the payload is never logged."""
+        auth = self._authorize(
             token, now, scope="jobs:complete", forbid_drain=False, check_liveness=False
         )
+        completion = parse_build_completion(result_json)
         with self._database.session_scope() as session:
             self._queue_factory(session).complete(
                 job_id, lease_token, result_json, result_ref, log_ref, now
             )
+            if completion is not None:
+                # Affinity cache: keyed to the AUTHENTICATED worker, not the
+                # result payload. image_ref is validated non-empty by the parser.
+                SqlAlchemyWorkerImageCacheRepository(session).record(
+                    auth.worker.name, completion.image_ref, now
+                )
+                if completion.has_image_digest:
+                    # Version->image registry: launch-time lookup source.
+                    SqlAlchemyChallengeBuildImageRepository(session).add(
+                        completion.definition_slug,
+                        completion.version_no,
+                        completion.image_ref,
+                        completion.image_digest,
+                        completion.bundle_sha256,
+                        now,
+                    )
 
     def fail(
         self,
