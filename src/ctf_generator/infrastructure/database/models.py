@@ -441,6 +441,70 @@ class ChallengeBuild(Base):
     )
 
 
+class ChallengeBuildImage(Base):
+    """The worker-built runnable image for a version (build_challenge slice 2).
+
+    Maps a ``challenge_version`` to the Docker image a worker built from its FULL
+    bundle: ``image_ref`` (the launch reference, e.g. ``ctfgen-build/<slug>:v<n>-
+    <sha16>``), ``image_digest`` (the content-addressed ``sha256:...`` the build
+    returned), and ``bundle_sha256`` (the full-bundle content hash the image was
+    built from). Written at build-job completion time (the only point where the
+    worker's authenticated identity and its reported image coincide); read at
+    instance-launch time to resolve the image a freshly-built instance should run.
+
+    References/hashes only -- never a flag, seed, or secret. APPEND-ONLY: the
+    shared ``reject_mutation`` guard (owned by 0004) is attached as BEFORE UPDATE
+    OR DELETE + BEFORE TRUNCATE triggers, so a recorded mapping can never be
+    altered, deleted, or truncated. Uniqueness is keyed on the DETERMINISTIC
+    ``image_ref`` (which folds in ``bundle_sha256[:16]``), so a rebuild of the
+    same frozen version yields the same ``image_ref`` and collapses via ON
+    CONFLICT DO NOTHING -- keeping the row count bounded -- while a genuinely
+    different build (a re-drafted version -> new bundle -> new ``image_ref``)
+    appends a new row. The Docker ``image_digest`` is recorded for provenance but
+    is NOT reproducible across rebuilds, so it is deliberately not the collapse
+    key. The launch reader takes the newest row by ``created_at``."""
+
+    __tablename__ = "challenge_build_images"
+
+    id: Mapped[uuid.UUID] = mapped_column(sa.Uuid, primary_key=True, default=uuid.uuid4)
+    challenge_version_id: Mapped[uuid.UUID] = mapped_column(
+        sa.Uuid,
+        # Explicit (shorter) FK name: the convention-generated
+        # ``fk_challenge_build_images_challenge_version_id_challenge_versions``
+        # is 64 chars, over PostgreSQL's 63-char identifier limit.
+        ForeignKey(
+            "challenge_versions.id",
+            ondelete="RESTRICT",
+            name="fk_challenge_build_images_challenge_version_id",
+        ),
+        nullable=False,
+    )
+    image_ref: Mapped[str] = mapped_column(sa.Text, nullable=False)
+    image_digest: Mapped[str] = mapped_column(sa.Text, nullable=False)
+    bundle_sha256: Mapped[str] = mapped_column(sa.Text, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        sa.DateTime(timezone=True), nullable=False, server_default=sa.func.now()
+    )
+
+    __table_args__ = (
+        # One row per (version, deterministic image_ref): a rebuild of the same
+        # frozen version yields the same image_ref and collapses via ON CONFLICT.
+        UniqueConstraint(
+            "challenge_version_id",
+            "image_ref",
+            name="uq_challenge_build_images_challenge_version_id_image_ref",
+        ),
+        # Bare suffixes: the ``ck`` naming convention expands each to
+        # ``ck_challenge_build_images_<name>`` (matching the migration's names).
+        CheckConstraint(r"image_ref !~ '^\s*$'", name="image_ref_non_empty"),
+        CheckConstraint(r"image_digest !~ '^\s*$'", name="image_digest_non_empty"),
+        Index(
+            "ix_challenge_build_images_challenge_version_id",
+            "challenge_version_id",
+        ),
+    )
+
+
 class EvalRun(Base):
     """Persistent form of the domain ``EvalRun`` -- the durable, operator-visible
     agent-evaluation platform record (M15). ``id`` is the business ``eval_run_id``

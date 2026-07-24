@@ -231,6 +231,49 @@ class CandidateSelectionTests(unittest.TestCase):
             self.assertEqual(cands[0].worker_name, "warm")
             self.assertTrue(cands[0].image_cached)
 
+    def test_writer_produced_cache_row_ranks_that_worker_first(self) -> None:
+        # build_challenge slice 2: the affinity ranking above is fed by rows the
+        # (previously producer-less) worker_image_cache writer emits at
+        # build-completion time. Prove the WRITER's row -- not just a raw INSERT
+        # -- makes the scheduler rank the caching worker first.
+        from ctf_generator.infrastructure.database.worker_image_cache_repository import (
+            SqlAlchemyWorkerImageCacheRepository,
+        )
+
+        with _migrated_database() as (db, _url):
+            _make_worker(db, "cold", heartbeat=_NOW)
+            _make_worker(db, "warm", heartbeat=_NOW)
+            with db.session_scope() as s:
+                SqlAlchemyWorkerImageCacheRepository(s).record(
+                    "warm", "img:app@sha256:abc", _NOW
+                )
+            with db.session_scope() as s:
+                cands = SqlAlchemyScheduler(s).candidate_workers(
+                    _requirements(), _NOW, 60, image_ref="img:app@sha256:abc"
+                )
+            self.assertEqual(cands[0].worker_name, "warm")
+            self.assertTrue(cands[0].image_cached)
+
+    def test_writer_is_idempotent_on_repeat(self) -> None:
+        # The deterministic build tag collides on UNIQUE(worker_id, image_ref);
+        # a repeat UPSERTs last_used_at rather than raising or duplicating.
+        from ctf_generator.infrastructure.database.worker_image_cache_repository import (
+            SqlAlchemyWorkerImageCacheRepository,
+        )
+
+        with _migrated_database() as (db, _url):
+            _make_worker(db, "warm", heartbeat=_NOW)
+            for _ in range(2):
+                with db.session_scope() as s:
+                    SqlAlchemyWorkerImageCacheRepository(s).record(
+                        "warm", "img:app@sha256:abc", _NOW
+                    )
+            with db.session_scope() as s:
+                count = s.execute(
+                    sa.text("SELECT count(*) FROM worker_image_cache")
+                ).scalar_one()
+            self.assertEqual(count, 1)
+
     def test_free_capacity_reports_capacity_without_quota(self) -> None:
         with _migrated_database() as (db, _url):
             _make_worker(db, "w", capacity=4)
