@@ -209,6 +209,56 @@ slice larger than "the single most important missing seam" asks for. The job
 `result` JSON is durable or worker completion; a follow-up projector (the
 `EvalResultProjector` pattern) is the natural next step.
 
+## Slice 2 — control-plane consumption + launch wiring (landed)
+
+The deferrals above are now closed. One design decision **diverged** from the
+"follow-up projector" suggestion, for a reason only visible once the seams were
+mapped: the `EvalResultProjector` pattern drains a bounded domain source-of-work
+(`EvalRun.list_non_terminal()`) that has **no build analogue**, and `JobService`
+exposes no list-succeeded-by-type query — so a projector would have to *invent* a
+source-of-work. More decisively, the `worker_image_cache` write **must** happen at
+complete-time regardless: a terminal job's `claimed_by` is NULLed by the
+`lease_state` CHECK, so no post-hoc pass can attribute the built image to its
+builder. Both writes therefore ride `WorkerJobService.complete`, in the same unit
+of work as the job's terminalization.
+
+* **`challenge_build_images`** (migration `0015`) — a NEW append-only registry
+  (`image_ref` + `image_digest` + `bundle_sha256`, FK to `challenge_versions`,
+  shared `reject_mutation` triggers). It is **not** a column on `challenge_builds`:
+  that table is immutable, is keyed by the public-bundle `build_sha256` (never
+  equal to the worker's full-bundle `bundle_sha256`), and does not exist for
+  draft/test builds — three independent blockers. Uniqueness/ON-CONFLICT is keyed
+  on the **deterministic `image_ref`** (which folds in `bundle_sha256[:16]`), not
+  the non-reproducible Docker digest, so a rebuild of a frozen version collapses
+  to one row instead of the append-only table growing per rebuild.
+* **`worker_image_cache` writer** — an idempotent `UPSERT(worker_id, image_ref)`
+  keyed to the **authenticated** `auth.worker.name` (never a payload field),
+  finally giving the M8 scheduler-affinity LEFT JOIN a producer.
+* **`WorkerJobService.complete`** — keeps two identities strictly separate, since
+  a worker is hostile input by construction: the **worker** is the authenticated
+  credential; the **target version** is the JOB's own recorded `(definition_slug,
+  version_no)`, read back from the job row — **never** the worker-supplied
+  `result_json` slug/version (trusting the payload would let any worker holding
+  any build lease poison another challenge's version→image mapping). Both writes
+  are gated on the authoritative job being a `build_challenge` job. The pure,
+  host-tested `parse_build_completion` extracts only the build *outputs*
+  (image_ref/digest/bundle) and **never raises**, so a malformed worker payload
+  can never veto its own job's terminalization. The registry row is written only
+  when the build reported both a digest and a bundle hash; a digest-less
+  completion still writes the affinity cache (a documented
+  cache-hit-without-registry-mapping).
+* **`InstanceLifecycleService.request_instance`** — resolves the latest built
+  `image_ref` for `(definition_slug, version_no)` (a pure DB read; ADR-001) when
+  the caller passes none, onto both `Instance.image_ref` and the scheduler's image
+  affinity. A registry miss leaves `image_ref` `None` (prior behaviour preserved);
+  a **hard create-time reject** on "no built image yet" is a deliberate,
+  documented non-goal here (it changes the API contract).
+
+**Still deferred** (honest scope): digest-pinning at launch (verifying the pulled
+image's digest matches the recorded one), a compose-aware multi-image build/launch
+model, and the build-time package-mirror that would let network-dependent families
+build under `network=none` — all named in slice 1 above and unchanged.
+
 ## Security posture summary (checklist against the hard rules)
 
 * Content-hash verify before any build attempt — implemented, two independent

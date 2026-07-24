@@ -9,6 +9,55 @@ Release CI enforces that every tagged version has an entry here (see
 
 ## [Unreleased]
 
+### Added — `build_challenge` control-plane consumption (slice 2)
+
+Closes the control-plane half of v1.0 blocker #4 (`docs/RELEASE_QUALIFICATION.md`
+§7.4): the worker-side `build_challenge` pipeline (slice 1) built an image and
+reported `{definition_slug, version_no, bundle_sha256, image_ref, digest}` on job
+completion, but nothing consumed it. This slice consumes that result and wires the
+freshly-built image into instance launch — joining internal-alpha Half A + Half B
+into one flow.
+
+- **New `challenge_build_images` registry** (`models.py`, migration
+  `0015_challenge_build_images`): an append-only, version-keyed record of the
+  runnable image a worker built (`image_ref` + `image_digest` + `bundle_sha256`),
+  guarded by the shared `reject_mutation` triggers (owned by `0004`). Deliberately
+  a **new** table, not a column on the immutable `challenge_builds`: that row is
+  keyed by a different content address (`build_sha256`, the public bundle) than the
+  worker reports (`bundle_sha256`, the full bundle), is immutable, and may not
+  exist for draft/test builds. Uniqueness is keyed on the **deterministic
+  `image_ref`** (not the non-reproducible Docker digest), so a rebuild of a frozen
+  version collapses to one row rather than growing the append-only table per
+  rebuild.
+- **`worker_image_cache` writer** (`worker_image_cache_repository.py`): the
+  scheduler-affinity table that had no producer since M8 is now populated. Written
+  at build-completion time — the only point where the worker's **authenticated**
+  identity (`auth.worker.name`, never the payload) and its reported `image_ref`
+  coexist in one transaction (a terminal job's `claimed_by` is NULL, so no
+  post-hoc projector could attribute the image to its builder).
+- **`WorkerJobService.complete`**: when a `build_challenge` job's result carries a
+  built `image_ref`, records the cache row and — when a digest + bundle are present
+  — the registry row, in the **same unit of work** as the job terminalization. Two
+  identities are kept strictly separate (a worker is hostile input by construction):
+  the **worker** is the authenticated credential, and the **target version** is the
+  **job's own** `(definition_slug, version_no)` read back from the job row — never
+  the worker-supplied `result_json` slug/version, which would otherwise let a worker
+  poison another challenge's version→image mapping. The pure, host-tested
+  `parse_build_completion` extracts only build outputs and **never raises**, so a
+  malformed payload can never veto its job's terminalization. References/hashes
+  only, never a secret, ever logged.
+- **`InstanceLifecycleService.request_instance`**: resolves the latest built
+  `image_ref` for `(definition_slug, version_no)` from the registry when the caller
+  passes none, threading it onto `Instance.image_ref` (on both the create **and**
+  the resume path) and the scheduler's image affinity. A pure DB read (ADR-001). A
+  miss leaves `image_ref` `None`, preserving prior behaviour (no hard create-time
+  reject — a separable API-contract change).
+- Tests: host (`test_build_completion.py`) plus PG-integration for the registry
+  repository, the complete-time writes (including worker-payload-poisoning and
+  malformed-payload-still-terminalizes regression cases), the scheduler-affinity
+  writer, and the launch wiring (including resume-after-build). Verified against
+  real PostgreSQL 16, including the migration↔ORM drift/lockstep guard.
+
 ### Added — Milestone 22: Release qualification + final report
 
 - `docs/RELEASE_QUALIFICATION.md`: the authoritative capstone sign-off. Adjudicates
