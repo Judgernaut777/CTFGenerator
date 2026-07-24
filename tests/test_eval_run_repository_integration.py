@@ -134,10 +134,15 @@ def _pending(profile: str = "writeup_replay", adversarial: bool = False) -> Eval
 
 @unittest.skipUnless(_ENABLED, _SKIP_REASON)
 class EvalRunRepositoryTests(unittest.TestCase):
-    def test_head_is_eval_runs(self) -> None:
+    def test_eval_runs_migration_is_in_the_chain(self) -> None:
+        # This aggregate's migration must exist and be reachable. (Asserting it is
+        # the GLOBAL head rotted the moment 0014 landed; the single-head +
+        # code-head guard lives in test_migration_head_constant.py.)
         cfg = _alembic_config(_TEST_URL)
-        head = ScriptDirectory.from_config(cfg).get_current_head()
-        self.assertEqual(head, "0013_eval_runs")
+        sd = ScriptDirectory.from_config(cfg)
+        self.assertEqual(
+            sd.get_revision("0013_eval_runs").revision, "0013_eval_runs"
+        )
 
     def test_add_get_round_trip_returns_domain(self) -> None:
         with _migrated_database() as (db, _url):

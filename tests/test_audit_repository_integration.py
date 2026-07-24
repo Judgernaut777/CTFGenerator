@@ -107,10 +107,15 @@ def _event(
 
 @unittest.skipUnless(_ENABLED, _SKIP_REASON)
 class AuditRepositoryTests(unittest.TestCase):
-    def test_head_is_audit_events(self) -> None:
+    def test_audit_events_migration_is_in_the_chain(self) -> None:
+        # This aggregate's migration must exist and be reachable. (Asserting it is
+        # the GLOBAL head would rot on every later migration; the single-head +
+        # code-head guard lives in test_migration_head_constant.py.)
         cfg = _alembic_config(_TEST_URL)
-        head = ScriptDirectory.from_config(cfg).get_current_head()
-        self.assertEqual(head, "0014_audit_events")
+        sd = ScriptDirectory.from_config(cfg)
+        self.assertEqual(
+            sd.get_revision("0014_audit_events").revision, "0014_audit_events"
+        )
 
     def test_add_and_list_returns_domain_newest_first(self) -> None:
         with _migrated_database() as (db, _url):
