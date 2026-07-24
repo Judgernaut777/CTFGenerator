@@ -45,12 +45,15 @@ class SqlAlchemyChallengeBuildImageRepository:
         now: datetime,
     ) -> None:
         """Record the built image for ``(definition_slug, version_no)``. Raises
-        :class:`LookupError` if the version is unknown. Idempotent: a repeat of
-        the same ``(version, image_digest)`` collapses via ON CONFLICT DO NOTHING
-        (a deterministic rebuild reports the same digest), so re-driving a
-        completed build job records nothing new and never raises on a duplicate.
-        ``created_at`` uses the DB ``server_default`` (now()); ``now`` is accepted
-        for a uniform writer signature and future provenance use."""
+        :class:`LookupError` if the version is unknown -- callers pass the JOB's
+        own ``(definition_slug, version_no)`` (which always resolve via the job's
+        FK), never a worker-supplied payload, so this is a corruption signal, not
+        a routine miss. Idempotent: a repeat of the same ``(version, image_ref)``
+        collapses via ON CONFLICT DO NOTHING (``image_ref`` is deterministic from
+        the bundle hash, so a rebuild of the same frozen version reports the same
+        reference), so re-driving a completed build job records nothing new and
+        never raises on a duplicate. ``created_at`` is set from the injected
+        ``now`` so the launch reader's newest-wins ordering is deterministic."""
         version_uuid = _resolve.version_uuid(
             self._session, definition_slug, version_no
         )
@@ -61,9 +64,10 @@ class SqlAlchemyChallengeBuildImageRepository:
                 image_ref=image_ref,
                 image_digest=image_digest,
                 bundle_sha256=bundle_sha256,
+                created_at=now,
             )
             .on_conflict_do_nothing(
-                constraint="uq_challenge_build_images_challenge_version_id_image_digest"
+                constraint="uq_challenge_build_images_challenge_version_id_image_ref"
             )
         )
         self._session.execute(stmt)

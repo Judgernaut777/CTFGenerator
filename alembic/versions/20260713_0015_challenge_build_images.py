@@ -11,9 +11,11 @@ SECRET-FREE by construction: every column is a slug/hash/reference/timestamp --
 there is NO flag/token/seed column, so a secret cannot be persisted here.
 APPEND-ONLY / tamper-evident: the shared ``reject_mutation`` guard (from 0004) is
 attached as BEFORE UPDATE OR DELETE + BEFORE TRUNCATE triggers, so a recorded
-mapping can never be altered, deleted, or truncated -- rebuild provenance is
-preserved and a re-completion of the same (version, digest) collapses via ON
-CONFLICT DO NOTHING at the writer.
+mapping can never be altered, deleted, or truncated. Uniqueness is keyed on the
+DETERMINISTIC ``image_ref`` (which folds in ``bundle_sha256``), so a rebuild of
+the same frozen version collapses via ON CONFLICT DO NOTHING at the writer, while
+a different build appends a new row (the non-reproducible Docker ``image_digest``
+is recorded for provenance only, not the collapse key).
 
 Constraint/index/trigger names mirror the ORM metadata NAMING_CONVENTION exactly
 (autogenerate-clean); reversible. ``reject_mutation`` is owned by 0004 (created
@@ -59,8 +61,8 @@ def upgrade() -> None:
         ),
         sa.UniqueConstraint(
             "challenge_version_id",
-            "image_digest",
-            name="uq_challenge_build_images_challenge_version_id_image_digest",
+            "image_ref",
+            name="uq_challenge_build_images_challenge_version_id_image_ref",
         ),
         sa.CheckConstraint(
             r"image_ref !~ '^\s*$'",

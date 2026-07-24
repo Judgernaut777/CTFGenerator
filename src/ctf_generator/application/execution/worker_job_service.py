@@ -63,6 +63,10 @@ from ctf_generator.infrastructure.database.worker_repository import (
 # refresh before it may operate again.
 DEFAULT_HEARTBEAT_MAX_AGE_SECONDS = 60
 
+# The one job type whose completion carries a built image to record. Kept in
+# lockstep with ``application.authoring.build_service._BUILD_JOB_TYPE``.
+_BUILD_JOB_TYPE = "build_challenge"
+
 
 class WorkerAuthenticationError(PermissionError):
     """The presented credential is invalid, expired, revoked, or belongs to a
@@ -202,11 +206,9 @@ class WorkerJobService:
         liveness-gated: refusing a real outcome for a held lease because the
         worker's heartbeat aged would reap the lease and double-execute the job.
 
-        BUILD SIDE EFFECTS (build_challenge slice 2): when the result carries a
-        built ``image_ref`` (and only then -- gated by
-        :func:`parse_build_completion`, so the verb stays job-type-agnostic in
-        spirit), two idempotent writes ride the SAME unit of work as the job
-        terminalization, so the job succeeds iff both land:
+        BUILD SIDE EFFECTS (build_challenge slice 2): when a ``build_challenge``
+        job's result carries a built ``image_ref``, two idempotent writes ride the
+        SAME unit of work as the job terminalization:
 
         * the worker-affinity cache (``worker_image_cache``), keyed to THIS
           authenticated worker -- the only point where the worker's credential
@@ -214,35 +216,58 @@ class WorkerJobService:
           ``claimed_by`` is NULL, so no later projector could attribute it); and
         * the version->image registry (``challenge_build_images``), read at
           launch time to run the freshly-built image -- written only when the
-          build reported a content digest.
+          build reported both a content digest and a bundle hash.
 
-        Worker identity comes EXCLUSIVELY from the authenticated credential
-        (``auth.worker.name``), never from the (worker-supplied) result payload.
-        Both writes are references/hashes only; the payload is never logged."""
+        Two identities are kept strictly separate, because a worker is hostile
+        input by construction (ADR-001):
+
+        * the WORKER is ``auth.worker.name`` -- the authenticated credential,
+          never a payload field;
+        * the TARGET VERSION is the JOB's own recorded ``(definition_slug,
+          version_no)`` -- read back from the job row, never the worker-supplied
+          ``result_json`` slug/version. Trusting the payload here would let any
+          worker holding any build lease poison another challenge's version->image
+          mapping. Both writes are also gated on the job actually being a
+          ``build_challenge`` job (from the authoritative job row).
+
+        Non-fatal to terminalization: ``parse_build_completion`` never raises, and
+        the registry write keys on the job's own version (which always resolves,
+        via the job's FK), so a malformed or misreporting worker payload cannot
+        roll back an otherwise-successful completion. References/hashes only; the
+        payload is never logged."""
         auth = self._authorize(
             token, now, scope="jobs:complete", forbid_drain=False, check_liveness=False
         )
         completion = parse_build_completion(result_json)
         with self._database.session_scope() as session:
-            self._queue_factory(session).complete(
+            queue = self._queue_factory(session)
+            queue.complete(
                 job_id, lease_token, result_json, result_ref, log_ref, now
             )
             if completion is not None:
-                # Affinity cache: keyed to the AUTHENTICATED worker, not the
-                # result payload. image_ref is validated non-empty by the parser.
-                SqlAlchemyWorkerImageCacheRepository(session).record(
-                    auth.worker.name, completion.image_ref, now
-                )
-                if completion.has_image_digest:
-                    # Version->image registry: launch-time lookup source.
-                    SqlAlchemyChallengeBuildImageRepository(session).add(
-                        completion.definition_slug,
-                        completion.version_no,
-                        completion.image_ref,
-                        completion.image_digest,
-                        completion.bundle_sha256,
-                        now,
+                # Bind the side effects to the AUTHORITATIVE job, not the payload.
+                job = queue.get(job_id)
+                if job is not None and job.job_type == _BUILD_JOB_TYPE:
+                    # Affinity cache: keyed to the authenticated worker.
+                    SqlAlchemyWorkerImageCacheRepository(session).record(
+                        auth.worker.name, completion.image_ref, now
                     )
+                    # Version->image registry: keyed to the JOB's own version
+                    # (never the payload), and only when the build carries the
+                    # digest + bundle the NOT-NULL registry columns require.
+                    if (
+                        completion.can_record_image
+                        and job.definition_slug is not None
+                        and job.version_no is not None
+                    ):
+                        SqlAlchemyChallengeBuildImageRepository(session).add(
+                            job.definition_slug,
+                            job.version_no,
+                            completion.image_ref,
+                            completion.image_digest,
+                            completion.bundle_sha256,
+                            now,
+                        )
 
     def fail(
         self,

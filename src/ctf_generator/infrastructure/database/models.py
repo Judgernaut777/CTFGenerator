@@ -455,9 +455,14 @@ class ChallengeBuildImage(Base):
     References/hashes only -- never a flag, seed, or secret. APPEND-ONLY: the
     shared ``reject_mutation`` guard (owned by 0004) is attached as BEFORE UPDATE
     OR DELETE + BEFORE TRUNCATE triggers, so a recorded mapping can never be
-    altered, deleted, or truncated -- full rebuild provenance is preserved and a
-    re-completion of the same (version, digest) collapses via ON CONFLICT DO
-    NOTHING. The launch reader takes the newest row by ``created_at``."""
+    altered, deleted, or truncated. Uniqueness is keyed on the DETERMINISTIC
+    ``image_ref`` (which folds in ``bundle_sha256[:16]``), so a rebuild of the
+    same frozen version yields the same ``image_ref`` and collapses via ON
+    CONFLICT DO NOTHING -- keeping the row count bounded -- while a genuinely
+    different build (a re-drafted version -> new bundle -> new ``image_ref``)
+    appends a new row. The Docker ``image_digest`` is recorded for provenance but
+    is NOT reproducible across rebuilds, so it is deliberately not the collapse
+    key. The launch reader takes the newest row by ``created_at``."""
 
     __tablename__ = "challenge_build_images"
 
@@ -482,12 +487,12 @@ class ChallengeBuildImage(Base):
     )
 
     __table_args__ = (
-        # One row per (version, built-image digest): a deterministic rebuild of
-        # the same version yields the same digest and collapses idempotently.
+        # One row per (version, deterministic image_ref): a rebuild of the same
+        # frozen version yields the same image_ref and collapses via ON CONFLICT.
         UniqueConstraint(
             "challenge_version_id",
-            "image_digest",
-            name="uq_challenge_build_images_challenge_version_id_image_digest",
+            "image_ref",
+            name="uq_challenge_build_images_challenge_version_id_image_ref",
         ),
         # Bare suffixes: the ``ck`` naming convention expands each to
         # ``ck_challenge_build_images_<name>`` (matching the migration's names).

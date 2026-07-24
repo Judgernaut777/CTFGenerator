@@ -37,6 +37,7 @@ try:
     from ctf_generator.domain.challenges.models import CompetitionConfig
     from ctf_generator.domain.execution.models import Worker
     from ctf_generator.domain.identity.models import Team
+    from ctf_generator.domain.instances.models import Instance
     from ctf_generator.domain.scheduling.models import (
         PLATFORM_SCOPE_KEY,
         ReservationItem,
@@ -227,6 +228,39 @@ class InstanceLaunchImageWiringTests(unittest.TestCase):
                 stored = SqlAlchemyInstanceRepository(s).get(iid)
         self.assertIsNone(placed.image_ref)
         self.assertIsNone(stored.image_ref)
+
+    def test_resume_after_build_persists_the_resolved_image_ref(self) -> None:
+        # The target scenario: an instance is created BEFORE any build exists
+        # (image_ref=None persisted), a build lands, then the launch is resumed
+        # with the same instance_id. The resolved image must be persisted onto the
+        # existing row on the resume path -- otherwise the launch job reads
+        # image_ref=None off the row and fails despite a built image existing.
+        with _migrated_database() as db:
+            _seed_parents(db)
+            iid = str(uuid.uuid4())
+            # First attempt: create the 'requested' row with no image (no build).
+            with db.session_scope() as s:
+                SqlAlchemyInstanceRepository(s).add(
+                    Instance(
+                        instance_id=iid,
+                        competition_id="cup",
+                        team_name="Red",
+                        definition_slug="sql",
+                        version_no=1,
+                        state="requested",
+                        desired_state="active",
+                        image_ref=None,
+                        expires_at=_LATER,
+                    ),
+                    _NOW,
+                )
+            # A build lands, then the launch is resumed.
+            _record_build_image(db)
+            placed = _request(_lifecycle(db), iid)
+            with db.session_scope() as s:
+                stored = SqlAlchemyInstanceRepository(s).get(iid)
+        self.assertEqual(placed.image_ref, _IMG)
+        self.assertEqual(stored.image_ref, _IMG)
 
     def test_explicit_image_ref_bypasses_the_lookup(self) -> None:
         with _migrated_database() as db:

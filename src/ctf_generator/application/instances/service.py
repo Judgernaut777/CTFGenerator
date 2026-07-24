@@ -190,6 +190,16 @@ class InstanceLifecycleService:
                         f"instance {instance_id!r} already exists in state "
                         f"{existing.state!r} (placement is not resumable)"
                     )
+                # RESUME after a build landed: the first attempt may have
+                # persisted image_ref=None (no build existed yet). If a build has
+                # since been recorded and the row still lacks an image, persist
+                # the freshly resolved one now -- otherwise the launch job would
+                # read image_ref=None off this row and fail at the worker despite
+                # a built image existing. Honors the 'threaded into BOTH the
+                # persisted Instance.image_ref and the scheduler affinity' contract
+                # on the resume path, not just on first creation.
+                if image_ref is not None and existing.image_ref is None:
+                    repo.set_runtime_facts(instance_id, now, image_ref=image_ref)
                 # A matching pre-placement 'requested' row -> resume placement.
 
         # Reserve + place. Any failure leaves the instance in 'requested'.
