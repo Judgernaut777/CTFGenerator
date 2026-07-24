@@ -41,6 +41,9 @@ try:
     )
     from ctf_generator.domain.execution.models import Worker
     from ctf_generator.domain.work.models import Job
+    from ctf_generator.infrastructure.database.challenge_build_image_repository import (
+        SqlAlchemyChallengeBuildImageRepository,
+    )
     from ctf_generator.infrastructure.database.challenge_definition_repository import (
         SqlAlchemyChallengeDefinitionRepository,
     )
@@ -154,6 +157,10 @@ def _enqueue_build_job(db) -> str:
         available_at=_NOW,
         required_capabilities=("build_challenge",),
         payload={"definition_slug": _SLUG, "version_no": 1, "spec_sha256": "x"},
+        # The AUTHORITATIVE build target (recorded at enqueue by BuildService):
+        # the completion side effects key on THESE, never the worker's payload.
+        definition_slug=_SLUG,
+        version_no=1,
     )
     with db.session_scope() as s:
         SqlAlchemyJobQueue(s).enqueue(job)
@@ -246,6 +253,64 @@ class BuildCompletionSideEffectTests(unittest.TestCase):
                 registry = list(s.scalars(sa.select(ChallengeBuildImageRow)))
         self.assertEqual(cache, [])
         self.assertEqual(registry, [])
+
+    def test_registry_keyed_to_the_job_version_not_the_payload(self) -> None:
+        # SECURITY: a worker that LIES in its result payload about which version
+        # it built must not poison another challenge's version->image mapping.
+        # The registry keys on the JOB's authoritative (slug, version), so the
+        # image lands only under the job's target and the payload's claim is inert
+        # (and does not even need to resolve -- no LookupError, no rollback).
+        with _migrated_database() as db:
+            _seed_version(db)
+            enrollment = WorkerEnrollmentService(db)
+            token = _enroll(db, enrollment, "wbuild")
+            svc = WorkerJobService(db, enrollment)
+            _enqueue_build_job(db)  # job targets (invoice-drift, 1)
+            _run_to_completion(
+                svc,
+                token,
+                {**_BUILD_RESULT, "definition_slug": "attacker-x", "version_no": 999},
+            )
+            with db.session_scope() as s:
+                repo = SqlAlchemyChallengeBuildImageRepository(s)
+                for_job = repo.latest_image_ref_for_version(_SLUG, 1)
+                for_payload = repo.latest_image_ref_for_version("attacker-x", 999)
+                rows = list(s.scalars(sa.select(ChallengeBuildImageRow)))
+        self.assertEqual(len(rows), 1)
+        self.assertEqual(for_job, _IMG)  # keyed to the JOB's version
+        self.assertIsNone(for_payload)  # NOT the payload's claimed version
+
+    def test_malformed_build_payload_still_terminalizes_the_job(self) -> None:
+        # AVAILABILITY: a malformed result payload must never veto its own job's
+        # terminalization (that would re-lease the finished build forever). The
+        # parser is lenient, and the registry keys on the job's own version.
+        with _migrated_database() as db:
+            _seed_version(db)
+            enrollment = WorkerEnrollmentService(db)
+            token = _enroll(db, enrollment, "wbuild")
+            svc = WorkerJobService(db, enrollment)
+            _enqueue_build_job(db)
+            svc.ping(token, _NOW)
+            lease = svc.claim(token, 60, _NOW)
+            job_id = lease.job.job_id
+            svc.start(token, job_id, lease.lease_token, _NOW)
+            # image_ref valid, but version_no a string and no bundle/digest.
+            svc.complete(
+                token,
+                job_id,
+                lease.lease_token,
+                {"image_ref": _IMG, "version_no": "not-an-int"},
+                None,
+                None,
+                _NOW,
+            )
+            with db.session_scope() as s:
+                status = SqlAlchemyJobQueue(s).get(job_id).status
+                cache = list(s.scalars(sa.select(WorkerImageCacheRow)))
+                registry = list(s.scalars(sa.select(ChallengeBuildImageRow)))
+        self.assertEqual(status, "succeeded")  # terminalized despite the payload
+        self.assertEqual(len(cache), 1)  # image_ref valid -> cache still written
+        self.assertEqual(registry, [])  # no digest/bundle -> registry skipped
 
     def test_completion_without_digest_writes_cache_but_not_registry(self) -> None:
         with _migrated_database() as db:

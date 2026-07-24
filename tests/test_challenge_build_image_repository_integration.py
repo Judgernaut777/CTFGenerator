@@ -16,7 +16,7 @@ import os
 import unittest
 import uuid
 from contextlib import contextmanager
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 
 try:
     import sqlalchemy as sa
@@ -58,6 +58,7 @@ _SKIP_REASON = (
 _ENABLED = _IMPORT_ERROR is None and bool(_TEST_URL)
 
 _NOW = datetime(2026, 7, 13, 12, 0, tzinfo=UTC)
+_LATER = _NOW + timedelta(minutes=5)
 _SLUG = "invoice-drift"
 _IMG_A = "ctfgen-build/invoice-drift:v1-aaaaaaaaaaaaaaaa"
 _IMG_B = "ctfgen-build/invoice-drift:v1-bbbbbbbbbbbbbbbb"
@@ -155,11 +156,11 @@ class ChallengeBuildImageRepositoryTests(unittest.TestCase):
                 ).latest_image_ref_for_version("no-such-slug", 99)
         self.assertIsNone(got)
 
-    def test_add_is_idempotent_on_same_version_and_digest(self) -> None:
+    def test_add_is_idempotent_on_same_version_and_image_ref(self) -> None:
         with _migrated_database() as db:
             _seed_version(db)
-            # Two completions of the same deterministic build (same digest) must
-            # collapse to ONE row via ON CONFLICT DO NOTHING -- never raise.
+            # Two completions of the same deterministic build (same image_ref)
+            # must collapse to ONE row via ON CONFLICT DO NOTHING -- never raise.
             for _ in range(2):
                 with db.session_scope() as s:
                     SqlAlchemyChallengeBuildImageRepository(s).add(
@@ -171,18 +172,39 @@ class ChallengeBuildImageRepositoryTests(unittest.TestCase):
                 )
         self.assertEqual(count, 1)
 
-    def test_latest_returns_newest_by_created_at(self) -> None:
+    def test_same_image_ref_different_digest_collapses(self) -> None:
+        # A rebuild of the same frozen version yields the same DETERMINISTIC
+        # image_ref but a fresh (non-reproducible) Docker digest. The row must
+        # collapse on image_ref, NOT append per-digest -- otherwise the
+        # append-only table grows unbounded on every rebuild.
         with _migrated_database() as db:
             _seed_version(db)
-            # Two DISTINCT digests in two separate transactions -> distinct
-            # transaction-start now() -> deterministic newest.
             with db.session_scope() as s:
                 SqlAlchemyChallengeBuildImageRepository(s).add(
                     _SLUG, 1, _IMG_A, _DIGEST_A, _BUNDLE, _NOW
                 )
             with db.session_scope() as s:
                 SqlAlchemyChallengeBuildImageRepository(s).add(
-                    _SLUG, 1, _IMG_B, _DIGEST_B, _BUNDLE, _NOW
+                    _SLUG, 1, _IMG_A, _DIGEST_B, _BUNDLE, _LATER
+                )
+            with db.session_scope() as s:
+                count = s.scalar(
+                    sa.select(sa.func.count()).select_from(ChallengeBuildImageRow)
+                )
+        self.assertEqual(count, 1)
+
+    def test_latest_returns_newest_by_created_at(self) -> None:
+        with _migrated_database() as db:
+            _seed_version(db)
+            # Two DISTINCT image_refs with explicit, distinct created_at (the
+            # writer stamps the injected clock) -> deterministic newest.
+            with db.session_scope() as s:
+                SqlAlchemyChallengeBuildImageRepository(s).add(
+                    _SLUG, 1, _IMG_A, _DIGEST_A, _BUNDLE, _NOW
+                )
+            with db.session_scope() as s:
+                SqlAlchemyChallengeBuildImageRepository(s).add(
+                    _SLUG, 1, _IMG_B, _DIGEST_B, _BUNDLE, _LATER
                 )
             with db.session_scope() as s:
                 got = SqlAlchemyChallengeBuildImageRepository(
