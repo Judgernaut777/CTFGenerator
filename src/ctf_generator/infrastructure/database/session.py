@@ -25,6 +25,12 @@ class Database:
             config.url,
             echo=config.echo,
             pool_pre_ping=config.pool_pre_ping,
+            # Size the pool above the API server's concurrent-request count so a
+            # request never queues on connection acquisition before it can start
+            # (the library default of 5+10=15 serializes ~29 threads). See
+            # DatabaseConfig. The control plane is PostgreSQL-only (ADR-002).
+            pool_size=config.pool_size,
+            max_overflow=config.max_overflow,
             future=True,
             # Pin READ COMMITTED explicitly. It is the PostgreSQL default, but
             # the submission service's post-lock solve re-check relies on the

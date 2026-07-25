@@ -3,11 +3,15 @@
 Exactly ONE ``Database.session_scope()`` unit of work per submission
 (repositories flush; the UoW commits once). The script:
 
-1.  Resolve the competition and take a competition-scoped
-    ``pg_advisory_xact_lock`` (auto-released at commit/rollback) as the first
-    write-side statement -- all submission processing for one competition is
-    serialized, so the solve-existence re-check below is authoritative and
-    the schema's UNIQUE + trigger remain pure backstops.
+1.  Resolve the competition and take a ``(competition, team, challenge-
+    version)``-scoped ``pg_advisory_xact_lock`` (auto-released at commit/
+    rollback) as the first write-side statement -- so the solve-existence
+    re-check below is authoritative for THIS team+challenge while submissions
+    for other teams/challenges (and a concurrent projector refold) run
+    unblocked. The schema's UNIQUE + trigger remain the correctness backstops;
+    the lock is only a throughput optimization (see
+    ``infrastructure/database/locks.acquire_submission_lock``), which is why it
+    can be this fine-grained rather than competition-wide.
 2.  Idempotency short-circuit: a known ``submission_id`` returns the stored
     outcome (``replay=True``) without writing; an identity-tuple mismatch is
     an :class:`IdempotencyConflictError`.
@@ -58,7 +62,7 @@ from ctf_generator.infrastructure.database.challenge_publication_repository impo
 from ctf_generator.infrastructure.database.challenge_version_repository import (
     SqlAlchemyChallengeVersionRepository,
 )
-from ctf_generator.infrastructure.database.locks import acquire_competition_lock
+from ctf_generator.infrastructure.database.locks import acquire_submission_lock
 from ctf_generator.infrastructure.database.score_ledger_repository import (
     SqlAlchemyScoreLedger,
 )
@@ -94,7 +98,16 @@ class SubmissionProcessingService:
 
     def process_submission(self, request: SubmissionRequest) -> SubmissionOutcome:
         with self._database.session_scope() as session:
-            acquire_competition_lock(session, request.competition_id)
+            # Fine-grained (competition, team, challenge-version) lock: different
+            # teams/challenges never serialize against each other. Correctness is
+            # the uq_solves_* UNIQUE + the SAVEPOINT retry below, not this lock.
+            acquire_submission_lock(
+                session,
+                request.competition_id,
+                request.team_name,
+                request.definition_slug,
+                request.version_no,
+            )
 
             submissions = SqlAlchemyLedgerSubmissionRepository(session)
             solves = SqlAlchemySolveRepository(session)
