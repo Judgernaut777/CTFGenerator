@@ -37,11 +37,20 @@ class _FakeProc:
 class _FakeBackend:
     """Records runtime calls; returns canned observations."""
 
-    def __init__(self, *, launch_phase: str = "running", raise_unsupported: bool = False):
+    def __init__(
+        self,
+        *,
+        launch_phase: str = "running",
+        raise_unsupported: bool = False,
+        image_local_id: str | None = None,
+    ):
         self.calls: list[tuple] = []
         self.launch_phase = launch_phase
         self.raise_unsupported = raise_unsupported
         self.container_id = "cid1234567890"
+        # The local image id image_id() reports (for digest-pinning tests);
+        # None => "image absent locally".
+        self.image_local_id = image_local_id
 
     def launch(self, request: ContainerRequest, *, command=None) -> LaunchResult:
         self.calls.append(("launch", request.instance_id))
@@ -74,6 +83,10 @@ class _FakeBackend:
     def collect_logs(self, instance_id, container_id, *, tail=2000):
         return "line1\nline2\n"
 
+    def image_id(self, image_ref):
+        self.calls.append(("image_id", image_ref))
+        return self.image_local_id
+
     def find_container(self, instance_id):
         self.calls.append(("find_container", instance_id))
         return self.container_id
@@ -99,6 +112,9 @@ class _FakeClient:
     # Defaults to "w1" (this worker); set to a different name to simulate the
     # control plane placing the instance on ANOTHER worker.
     replace_to_worker: str = "w1"
+    # The recorded build digest the control plane returns for digest-pinning;
+    # None => nothing recorded, so pinning is skipped.
+    expected_digest: str | None = None
 
     def authenticate(self, now):
         return self.token
@@ -121,6 +137,9 @@ class _FakeClient:
 
     def get_instance(self, instance_id):
         return self.instance
+
+    def expected_image_digest(self, instance_id, now):
+        return self.expected_digest
 
     def replace_instance(self, instance_id, now):
         self.replaced = True
@@ -253,6 +272,61 @@ class LaunchDispatchTests(unittest.TestCase):
         self.assertEqual(error_class, "infrastructure")
         self.assertFalse(retryable)  # never retry a host that can't isolate
         self.assertEqual(client.completed, [])
+
+    def test_digest_pinning_launches_when_local_image_matches(self) -> None:
+        digest = "sha256:" + "ab" * 32
+        client = _FakeClient(instance=_instance(), expected_digest=digest)
+        client.claim_lease = _lease(
+            "launch_instance", {"instance_id": "inst-1", "generation": 1, "action": "launch"}
+        )
+        backend = _FakeBackend(image_local_id=digest)  # local image matches
+        _worker(client, backend).run_once()
+        self.assertIn(("launch", "inst-1"), backend.calls)
+        self.assertEqual(len(client.completed), 1)
+        self.assertEqual(client.failed, [])
+
+    def test_digest_pinning_refuses_a_mismatched_image(self) -> None:
+        client = _FakeClient(
+            instance=_instance(), expected_digest="sha256:" + "ab" * 32
+        )
+        client.claim_lease = _lease(
+            "launch_instance", {"instance_id": "inst-1", "generation": 1, "action": "launch"}
+        )
+        backend = _FakeBackend(image_local_id="sha256:" + "cd" * 32)  # tampered
+        _worker(client, backend).run_once()
+        # Refused BEFORE launch, non-retryably (a tampered image cannot be fixed).
+        self.assertNotIn(("launch", "inst-1"), backend.calls)
+        self.assertEqual(len(client.failed), 1)
+        _job, error_class, retryable = client.failed[0]
+        self.assertEqual(error_class, "infrastructure")
+        self.assertFalse(retryable)
+        self.assertEqual(client.completed, [])
+
+    def test_digest_pinning_refuses_a_missing_local_image(self) -> None:
+        client = _FakeClient(
+            instance=_instance(), expected_digest="sha256:" + "ab" * 32
+        )
+        client.claim_lease = _lease(
+            "launch_instance", {"instance_id": "inst-1", "generation": 1, "action": "launch"}
+        )
+        backend = _FakeBackend(image_local_id=None)  # recorded image absent
+        _worker(client, backend).run_once()
+        self.assertNotIn(("launch", "inst-1"), backend.calls)
+        self.assertEqual(len(client.failed), 1)
+        self.assertEqual(client.completed, [])
+
+    def test_no_recorded_digest_skips_pinning(self) -> None:
+        # Nothing recorded (expected None) -> pinning skipped -> launch proceeds
+        # even though the backend would report a different id (never consulted).
+        client = _FakeClient(instance=_instance(), expected_digest=None)
+        client.claim_lease = _lease(
+            "launch_instance", {"instance_id": "inst-1", "generation": 1, "action": "launch"}
+        )
+        backend = _FakeBackend(image_local_id="sha256:" + "cd" * 32)
+        _worker(client, backend).run_once()
+        self.assertIn(("launch", "inst-1"), backend.calls)
+        self.assertEqual(len(client.completed), 1)
+        self.assertNotIn(("image_id", "alpine:latest"), backend.calls)
 
 
 class OtherDispatchTests(unittest.TestCase):

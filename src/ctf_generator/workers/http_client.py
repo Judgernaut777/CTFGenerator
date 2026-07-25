@@ -206,6 +206,17 @@ class HttpControlPlaneClient:
         self._raise_for_status(response)
         return _instance_from_wire(response.json())
 
+    def expected_image_digest(self, instance_id: str, now: datetime) -> str | None:
+        response = self._get(
+            f"/worker/instances/{instance_id}/expected-image-digest"
+        )
+        if response.status_code == 404:
+            # Instance vanished between fetch and pin -> skip pinning (the launch
+            # itself will surface the missing instance), mirroring get_instance.
+            return None
+        self._raise_for_status(response)
+        return response.json().get("image_digest")
+
     def report_health(self, observation: HealthObservation, now: datetime) -> None:
         # The worker field is NOT sent -- the gateway stamps it from the credential.
         response = self._post(

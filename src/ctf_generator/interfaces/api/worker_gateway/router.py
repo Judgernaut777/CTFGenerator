@@ -55,6 +55,7 @@ from .schemas import (
     StartRequest,
     TransitionRequest,
     WorkerAuthResponse,
+    WorkerExpectedDigestView,
     WorkerInstanceView,
     endpoint_from_request,
     instance_to_worker_view,
@@ -222,6 +223,23 @@ def get_instance(
 ):
     instance = service.get_owned_instance(ctx.token, instance_id, _now())
     return WorkerInstanceView(**instance_to_worker_view(instance))
+
+
+@router.get(
+    "/worker/instances/{instance_id}/expected-image-digest",
+    response_model=WorkerExpectedDigestView,
+    responses={
+        200: {"model": WorkerExpectedDigestView, "description": "OK"},
+        **_INSTANCE_ERRORS,
+    },
+)
+def expected_image_digest(
+    instance_id: str,
+    ctx: WorkerAuthContext = Depends(require_worker),
+    service=Depends(get_worker_instance_service),
+):
+    digest = service.expected_image_digest(ctx.token, instance_id, _now())
+    return WorkerExpectedDigestView(image_digest=digest)
 
 
 @router.post(

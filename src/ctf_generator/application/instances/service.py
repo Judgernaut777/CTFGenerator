@@ -233,6 +233,20 @@ class InstanceLifecycleService:
         )
         return placed
 
+    def image_digest_for(
+        self, definition_slug: str, version_no: int, image_ref: str
+    ) -> str | None:
+        """The recorded build digest for a specific ``(version, image_ref)``, or
+        ``None`` when none is recorded. A pure DB read of the
+        ``challenge_build_images`` registry (ADR-001; no Docker, no challenge
+        code) -- the launch-time digest-pinning source. Keyed on the exact
+        ``image_ref`` the instance carries, so it pins the image actually about to
+        run, not merely the newest build."""
+        with self._database.session_scope() as session:
+            return self._build_images(session).digest_for_version_image(
+                definition_slug, version_no, image_ref
+            )
+
     # -- transitions ---------------------------------------------------------
 
     def apply_transition(
