@@ -55,6 +55,9 @@ from ctf_generator.domain.execution.runtime import (
     MAX_BUILD_BUNDLE_BYTES,
     RuntimeBackend,
     RuntimeLaunch,
+    StackContainerSpec,
+    StackRequest,
+    StackServiceImage,
 )
 from ctf_generator.domain.instances.models import (
     HealthObservation,
@@ -184,6 +187,42 @@ def _stack_service_tag(
     return f"ctfgen-build/{safe_slug}-{safe_svc}:v{version_no}-{bundle_sha256[:16]}"
 
 
+def _expose_ports(expose: tuple[str, ...]) -> tuple[int, ...]:
+    """The numeric, in-range ports from a service's compose ``expose`` list;
+    non-numeric / out-of-range entries are dropped."""
+    ports: list[int] = []
+    for raw in expose:
+        text = str(raw).split("/")[0].strip()  # tolerate "9443/tcp"
+        if text.isdigit() and 1 <= int(text) <= 65535:
+            ports.append(int(text))
+    return tuple(ports)
+
+
+def _order_stack(
+    stack: tuple[StackServiceImage, ...],
+) -> tuple[StackServiceImage, ...]:
+    """Order services so each starts AFTER its ``depends_on`` (Kahn, name-sorted
+    for determinism). An unknown dependency or a cycle is not fatal here (the
+    manifest parser already refused those at build time) -- any unplaced services
+    are appended in name order so launch still proceeds."""
+    by_name = {s.service_name: s for s in stack}
+    remaining = {
+        s.service_name: {d for d in s.depends_on if d in by_name} for s in stack
+    }
+    ordered: list[StackServiceImage] = []
+    while remaining:
+        ready = sorted(n for n, deps in remaining.items() if not deps)
+        if not ready:  # a cycle slipped through -> append the rest deterministically
+            ordered.extend(by_name[n] for n in sorted(remaining))
+            break
+        for name in ready:
+            ordered.append(by_name[name])
+            del remaining[name]
+            for deps in remaining.values():
+                deps.discard(name)
+    return tuple(ordered)
+
+
 def _safe_extract_bundle(data: bytes, dest: Path) -> None:
     """Extract a build bundle tar into ``dest`` after validating every member.
 
@@ -303,6 +342,14 @@ class WorkerControlPlaneClient(Protocol):
         """The recorded build digest to pin ``instance_id``'s launch to, or
         ``None`` when none is recorded (pinning is then skipped). Authenticated +
         ownership-checked control-plane read of the build-image registry."""
+        ...
+
+    def launch_stack_services(
+        self, instance_id: str, now: datetime
+    ) -> tuple[StackServiceImage, ...]:
+        """The multi-service stack to launch for ``instance_id`` (per-service
+        images + digests + depends_on/expose), or ``()`` for a single-image
+        instance. Authenticated + ownership-checked read of the stack registry."""
         ...
 
     def report_health(self, observation: HealthObservation, now: datetime) -> None:
@@ -653,11 +700,17 @@ class Worker:
                 f"{instance.assigned_worker!r}, not this worker "
                 f"{self._config.worker_name!r}; refusing to launch"
             )
-        request = self._build_request(instance)
-        # Digest-pin BEFORE starting a container: if the control plane recorded a
-        # build digest for this image, the local image MUST match it or we refuse.
-        self._verify_image_digest(instance_id, instance.image_ref, now)
-        launched = self._backend.launch(request, command=self._command)
+        # A multi-service (compose) instance launches the WHOLE stack; a
+        # single-image instance keeps the original one-container path.
+        stack = self._client.launch_stack_services(instance_id, now)
+        if stack:
+            launched = self._launch_stack(instance, stack)
+        else:
+            request = self._build_request(instance)
+            # Digest-pin BEFORE starting: if the control plane recorded a build
+            # digest for this image, the local image MUST match it or we refuse.
+            self._verify_image_digest(instance_id, instance.image_ref, now)
+            launched = self._backend.launch(request, command=self._command)
         container_id = launched.observation.container_id
         try:
             # Persist the runtime resources + endpoints + health IMMEDIATELY, then
@@ -697,7 +750,17 @@ class Worker:
 
         Reusable per image, so the compose-aware multi-image launch pins each
         service's container against its own recorded digest."""
-        expected = self._client.expected_image_digest(instance_id, now)
+        self._refuse_on_digest_mismatch(
+            image_ref, self._client.expected_image_digest(instance_id, now)
+        )
+
+    def _refuse_on_digest_mismatch(
+        self, image_ref: str, expected: str | None
+    ) -> None:
+        """Refuse (``UnsupportedRuntimeError``) if a recorded ``expected`` digest
+        does not match the local image's id, or the image is absent locally. No
+        recorded digest => skip. Shared by the single-image pin and the per-service
+        stack pin (image ids/digests are references, never secrets)."""
         if expected is None:
             return
         actual = self._backend.image_id(image_ref)
@@ -707,6 +770,33 @@ class Worker:
                 f"recorded build digest {expected!r}; refusing to launch a "
                 "mutated or substituted image"
             )
+
+    def _launch_stack(
+        self, instance: Instance, stack: tuple[StackServiceImage, ...]
+    ) -> RuntimeLaunch:
+        """Digest-pin every service image, then launch the whole stack in
+        dependency (start) order on one isolated per-instance network."""
+        for svc in stack:
+            # Stack rows always carry a digest -> every service is pinned.
+            self._refuse_on_digest_mismatch(svc.image_ref, svc.image_digest)
+        ordered = _order_stack(stack)
+        containers = tuple(
+            StackContainerSpec(
+                service_name=svc.service_name,
+                image_ref=svc.image_ref,
+                expected_digest=svc.image_digest,
+                exposed_ports=_expose_ports(svc.expose),
+            )
+            for svc in ordered
+        )
+        team_key = f"{instance.competition_id}:{instance.team_name}"
+        request = StackRequest(
+            instance_id=instance.instance_id,
+            team_key=team_key,
+            policy=self._policy,
+            containers=containers,
+        )
+        return self._backend.launch_stack(request, command=self._command)
 
     def _do_reset(self, instance_id: str, now: datetime) -> _DispatchOutcome:
         # A reset is a clean rebuild: tear down the old runtime objects, relaunch.

@@ -15,29 +15,20 @@ the write path; the read path is a non-raising miss.
 
 from __future__ import annotations
 
-from dataclasses import dataclass
 from datetime import datetime
 
 from sqlalchemy import select
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.orm import Session
 
+from ctf_generator.domain.execution.runtime import StackServiceImage
+
 from . import _resolve
 from .models import ChallengeBuildStackImage as StackImageRow
 from .models import ChallengeDefinition as ChallengeDefinitionRow
 from .models import ChallengeVersion as ChallengeVersionRow
 
-
-@dataclass(frozen=True)
-class StackServiceImage:
-    """The launch-time view of one service's built image (references only)."""
-
-    service_name: str
-    image_ref: str
-    image_digest: str
-    depends_on: tuple[str, ...]
-    expose: tuple[str, ...]
-    is_primary: bool
+__all__ = ["SqlAlchemyChallengeBuildStackImageRepository", "StackServiceImage"]
 
 
 class SqlAlchemyChallengeBuildStackImageRepository:

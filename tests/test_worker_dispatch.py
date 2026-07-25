@@ -65,6 +65,18 @@ class _FakeBackend:
             ),
         )
 
+    def launch_stack(self, request, *, command=None):
+        self.calls.append(("launch_stack", request.instance_id,
+                           tuple(c.service_name for c in request.containers)))
+        obs = RuntimeObservation(request.instance_id, self.container_id, self.launch_phase)
+        return LaunchResult(
+            observation=obs,
+            runtime_resources=(
+                RuntimeResourceRef("container", self.container_id),
+                RuntimeResourceRef("network", "net999"),
+            ),
+        )
+
     def observe(self, instance_id, container_id):
         return RuntimeObservation(instance_id, container_id, "running")
 
@@ -96,6 +108,18 @@ class _FakeBackend:
         return 0
 
 
+class _StackBackend(_FakeBackend):
+    """A fake backend whose image_id() answers per image_ref (for stack pinning)."""
+
+    def __init__(self, ref_to_digest: dict, **kw):
+        super().__init__(**kw)
+        self._ref_to_digest = ref_to_digest
+
+    def image_id(self, image_ref):
+        self.calls.append(("image_id", image_ref))
+        return self._ref_to_digest.get(image_ref)
+
+
 @dataclass
 class _FakeClient:
     instance: Instance
@@ -115,6 +139,8 @@ class _FakeClient:
     # The recorded build digest the control plane returns for digest-pinning;
     # None => nothing recorded, so pinning is skipped.
     expected_digest: str | None = None
+    # The multi-service launch stack (empty => single-image launch path).
+    stack: tuple = ()
 
     def authenticate(self, now):
         return self.token
@@ -140,6 +166,9 @@ class _FakeClient:
 
     def expected_image_digest(self, instance_id, now):
         return self.expected_digest
+
+    def launch_stack_services(self, instance_id, now):
+        return self.stack
 
     def replace_instance(self, instance_id, now):
         self.replaced = True
@@ -314,6 +343,60 @@ class LaunchDispatchTests(unittest.TestCase):
         self.assertNotIn(("launch", "inst-1"), backend.calls)
         self.assertEqual(len(client.failed), 1)
         self.assertEqual(client.completed, [])
+
+    def test_stack_instance_launches_the_whole_stack(self) -> None:
+        from ctf_generator.domain.execution.runtime import StackServiceImage
+
+        stack = (
+            StackServiceImage(
+                service_name="edge", image_ref="ir-edge",
+                image_digest="sha256:" + "ee" * 32, depends_on=("internal",),
+                expose=("8080",), is_primary=True,
+            ),
+            StackServiceImage(
+                service_name="internal", image_ref="ir-internal",
+                image_digest="sha256:" + "11" * 32, expose=("9443",),
+            ),
+        )
+        client = _FakeClient(instance=_instance(), stack=stack)
+        client.claim_lease = _lease(
+            "launch_instance", {"instance_id": "inst-1", "generation": 1, "action": "launch"}
+        )
+        # Backend image ids match each service's recorded digest by default? No --
+        # image_local_id is a single value; make it match by returning the expected
+        # per call is not possible with this fake, so record digests match via a
+        # backend that echoes the ref->digest. Use a custom backend.
+        backend = _StackBackend({"ir-edge": "sha256:" + "ee" * 32,
+                                 "ir-internal": "sha256:" + "11" * 32})
+        _worker(client, backend).run_once()
+        # launch_stack was called with BOTH services, dependency-ordered
+        # (internal before edge).
+        stack_calls = [c for c in backend.calls if c[0] == "launch_stack"]
+        self.assertEqual(len(stack_calls), 1)
+        self.assertEqual(stack_calls[0][2], ("internal", "edge"))
+        self.assertNotIn(("launch", "inst-1"), backend.calls)  # not the single path
+        self.assertEqual(len(client.completed), 1)
+
+    def test_stack_refuses_when_a_service_image_is_tampered(self) -> None:
+        from ctf_generator.domain.execution.runtime import StackServiceImage
+
+        stack = (
+            StackServiceImage(
+                service_name="edge", image_ref="ir-edge",
+                image_digest="sha256:" + "ee" * 32, is_primary=True,
+            ),
+        )
+        client = _FakeClient(instance=_instance(), stack=stack)
+        client.claim_lease = _lease(
+            "launch_instance", {"instance_id": "inst-1", "generation": 1, "action": "launch"}
+        )
+        backend = _StackBackend({"ir-edge": "sha256:" + "ff" * 32})  # mismatch
+        _worker(client, backend).run_once()
+        self.assertNotIn("launch_stack", [c[0] for c in backend.calls])
+        self.assertEqual(len(client.failed), 1)
+        _job, error_class, retryable = client.failed[0]
+        self.assertEqual(error_class, "infrastructure")
+        self.assertFalse(retryable)
 
     def test_no_recorded_digest_skips_pinning(self) -> None:
         # Nothing recorded (expected None) -> pinning skipped -> launch proceeds

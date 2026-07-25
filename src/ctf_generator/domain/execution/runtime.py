@@ -212,6 +212,68 @@ class ContainerRequest:
 
 
 @dataclass(frozen=True)
+class StackServiceImage:
+    """The launch-time registry view of one service image of a multi-service
+    build: its ``image_ref`` + recorded ``image_digest`` (to pin), the manifest
+    ``depends_on``/``expose`` the launch needs, and whether it is the primary
+    (ingress) service. References/hashes only. Lives in the domain so the
+    networked worker (no DB) can carry it across the transport seam."""
+
+    service_name: str
+    image_ref: str
+    image_digest: str
+    depends_on: tuple[str, ...] = ()
+    expose: tuple[str, ...] = ()
+    is_primary: bool = False
+
+
+@dataclass(frozen=True)
+class StackContainerSpec:
+    """One service's launch spec within a multi-service (compose) stack. Carries
+    references only: the ``service_name`` (also the in-network DNS alias sibling
+    services reach it by), its ``image_ref``, an optional ``expected_digest`` to
+    pin against, and the ports it exposes. No secrets."""
+
+    service_name: str
+    image_ref: str
+    expected_digest: str | None = None
+    exposed_ports: tuple[int, ...] = ()
+
+    def __post_init__(self) -> None:
+        _require_nonempty(self.service_name, "service_name")
+        _require_nonempty(self.image_ref, "image_ref")
+        for port in self.exposed_ports:
+            if not isinstance(port, int) or not (1 <= port <= 65535):
+                raise ValueError(f"exposed_ports entries must be 1..65535, got {port!r}")
+
+
+@dataclass(frozen=True)
+class StackRequest:
+    """A multi-service launch request: N :class:`StackContainerSpec` for ONE
+    instance, in dependency (start) order, sharing one per-instance isolated
+    network. The ``ContainerPolicy`` applies to EVERY container identically (the
+    generated compose's own runtime directives are never honored). References
+    only; no secrets."""
+
+    instance_id: str
+    team_key: str
+    policy: ContainerPolicy
+    containers: tuple[StackContainerSpec, ...] = ()
+    labels: tuple[tuple[str, str], ...] = ()
+
+    def __post_init__(self) -> None:
+        _require_nonempty(self.instance_id, "instance_id")
+        _require_nonempty(self.team_key, "team_key")
+        if not isinstance(self.policy, ContainerPolicy):
+            raise ValueError("policy must be a ContainerPolicy")
+        if not self.containers:
+            raise ValueError("a stack request needs at least one container")
+        names = [c.service_name for c in self.containers]
+        if len(names) != len(set(names)):
+            raise ValueError("stack service names must be unique")
+
+
+@dataclass(frozen=True)
 class RuntimeEndpoint:
     """A reachable address a launched container publishes (host:port for one
     exposed container port)."""
@@ -311,6 +373,18 @@ class RuntimeBackend(Protocol):
         acknowledged gaps). Refuses (``UnsupportedRuntimeError``) BEFORE creating
         anything if a required hardening -- seccomp or the isolated-network
         host-block -- cannot be enforced on this host."""
+        ...
+
+    def launch_stack(
+        self, request: StackRequest, *, command: Sequence[str] | None = ...
+    ) -> RuntimeLaunch:
+        """Launch a multi-service stack: N policy-constrained containers on ONE
+        shared per-instance isolated network, each reachable by its service name.
+        Returns an aggregate :class:`RuntimeLaunch` (all container + network
+        resources; healthy iff every container is running). Refuses
+        (``UnsupportedRuntimeError``) BEFORE creating anything if the host cannot
+        enforce the isolation floor, and removes everything it created on any
+        mid-launch failure (no partial stack leaks)."""
         ...
 
     def stop(self, instance_id: str, container_id: str) -> None:

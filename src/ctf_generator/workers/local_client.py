@@ -124,6 +124,9 @@ class LocalControlPlaneClient:
     def expected_image_digest(self, instance_id: str, now: datetime) -> str | None:
         return self._instances.expected_image_digest(self._token, instance_id, now)
 
+    def launch_stack_services(self, instance_id: str, now: datetime):
+        return self._instances.launch_stack_services(self._token, instance_id, now)
+
     def replace_instance(self, instance_id: str, now: datetime) -> Instance:
         """Re-place + re-reserve an unassigned instance (the slice-2 launch
         contract). Reuses ``SchedulingService`` keyed on ``instance_id`` (so the

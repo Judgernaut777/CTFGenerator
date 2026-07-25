@@ -57,6 +57,7 @@ from ctf_generator.domain.execution.runtime import (
     RuntimeEndpoint,
     RuntimeObservation,
     RuntimeResourceRef,
+    StackRequest,
 )
 
 _LOG = logging.getLogger("ctf_generator.worker.runtime")
@@ -72,6 +73,9 @@ INSTANCE_LABEL = "ctfgen.instance"
 # The owning worker name -- a reaper/recovery sweep is scoped to THIS worker's
 # label so a multi-worker host never reaps another worker's live containers.
 WORKER_LABEL = "ctfgen.worker"
+# The compose service a stack container implements (informational; cleanup is by
+# INSTANCE_LABEL, which every service container of one instance shares).
+STACK_SERVICE_LABEL = "ctfgen.service"
 
 # The firewall helper image: a minimal image carrying an ``iptables`` binary,
 # run with ``--net=host --cap-add=NET_ADMIN`` to install the host-block rules in
@@ -1006,6 +1010,104 @@ class DockerRuntimeBackend:
             observation=observation,
             runtime_resources=resources,
             endpoints=endpoints,
+            acknowledged_gaps=acked,
+        )
+
+    def launch_stack(
+        self, request: StackRequest, *, command: Sequence[str] | None = None
+    ) -> LaunchResult:
+        """Launch N policy-constrained containers on ONE shared per-instance
+        isolated network (each reachable by its ``service_name`` via a network
+        alias), in the order given. Every container gets the SAME hardening from
+        ``ContainerPolicy`` (the generated compose's own runtime directives are
+        never honored). Refuses BEFORE creating anything if the host cannot enforce
+        the isolated-network host-block floor, and removes the whole (partial)
+        stack on any mid-launch failure so nothing leaks."""
+        probe = self.probe()
+        acked = self._gate(request.policy, probe)
+        hardening = policy_to_run_flags(
+            request.policy, probe, non_root_uid=self._non_root_uid
+        )
+        # A stack needs inter-service networking, so it always uses the isolated
+        # per-instance network -- which REQUIRES the host-block firewall floor.
+        if not self.firewall_available():
+            raise UnsupportedRuntimeError(
+                "a multi-service stack requires an enforceable host-block firewall "
+                "but this host has none; refusing to launch"
+            )
+        # A ContainerRequest for the network primitives (naming/subnet/host-block).
+        net_request = ContainerRequest(
+            instance_id=request.instance_id,
+            team_key=request.team_key,
+            image_ref=request.containers[0].image_ref,
+            policy=request.policy,
+        )
+        network_name, network_id = self._ensure_network(net_request)
+        base_name = self._container_name(request.instance_id)
+
+        resources: list[RuntimeResourceRef] = [
+            RuntimeResourceRef("network", network_id)
+        ]
+        endpoints: list[RuntimeEndpoint] = []
+        observations: list[RuntimeObservation] = []
+        try:
+            for spec in request.containers:
+                safe_svc = _slug(spec.service_name, maxlen=24)
+                args: list[str] = [
+                    "run", "-d",
+                    "--name", f"{base_name}-{safe_svc}",
+                    "--network", network_name,
+                    # Sibling services resolve each other by service name.
+                    "--network-alias", spec.service_name,
+                    "--label", f"{MANAGED_LABEL}=true",
+                    "--label", f"{INSTANCE_LABEL}={request.instance_id}",
+                    "--label", f"{WORKER_LABEL}={self._worker_name}",
+                    "--label", f"{STACK_SERVICE_LABEL}={spec.service_name}",
+                    "--restart", "no",
+                ]
+                args += hardening
+                for port in spec.exposed_ports:
+                    args += ["--expose", str(port)]
+                for key, value in request.labels:
+                    args += ["--label", f"{key}={value}"]
+                args.append(spec.image_ref)
+                if command:
+                    args += list(command)
+                container_id = self._run(args).stdout.strip()
+                resources.append(RuntimeResourceRef("container", container_id))
+                observations.append(self.observe(request.instance_id, container_id))
+                ip = self._container_ip(container_id, network_name)
+                for port in spec.exposed_ports:
+                    if ip:
+                        endpoints.append(
+                            RuntimeEndpoint(container_port=port, host=ip, host_port=port)
+                        )
+        except Exception:
+            # Any partial stack must not leak: sweep every container of this
+            # instance (by label) + the network, then re-raise.
+            _LOG.error("stack launch failed for %s; removing partial stack",
+                       _slug(request.instance_id))
+            self.remove(request.instance_id, None)
+            raise
+
+        all_running = all(o.phase == "running" for o in observations)
+        # The instance's tracked container is the FIRST (a dependency); the
+        # aggregate phase is running iff EVERY service container is running.
+        primary_obs = observations[0]
+        aggregate = RuntimeObservation(
+            request.instance_id,
+            primary_obs.container_id,
+            "running" if all_running else "starting",
+        )
+        _LOG.info(
+            "launched stack instance=%s services=%d network=%s gaps=%s",
+            _slug(request.instance_id), len(request.containers), network_name,
+            sorted(acked),
+        )
+        return LaunchResult(
+            observation=aggregate,
+            runtime_resources=tuple(resources),
+            endpoints=tuple(endpoints),
             acknowledged_gaps=acked,
         )
 
