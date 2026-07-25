@@ -84,6 +84,11 @@ class _FakeLifecycle:
     def image_digest_for(self, definition_slug, version_no, image_ref):
         return self.image_digest
 
+    stack: tuple = ()
+
+    def stack_for_instance_image(self, definition_slug, version_no, image_ref):
+        return self.stack
+
     def record_observation(self, obs):
         self.observations.append(obs)
 
@@ -161,6 +166,29 @@ class OwnershipTests(unittest.TestCase):
         svc = WorkerInstanceService(life, _FakeEnrollment(worker_name="w1"))
         with self.assertRaises(InstanceOwnershipError):
             svc.expected_image_digest("tok", "inst-1", _NOW)
+
+    def test_owner_reads_launch_stack_services(self) -> None:
+        from ctf_generator.domain.execution.runtime import StackServiceImage
+
+        stack = (
+            StackServiceImage("edge", "ir", "sha256:e", is_primary=True),
+        )
+        life = _FakeLifecycle(
+            instance=_instance("w1", image_ref="ir"), stack=stack
+        )
+        svc = WorkerInstanceService(life, _FakeEnrollment(worker_name="w1"))
+        self.assertEqual(svc.launch_stack_services("tok", "inst-1", _NOW), stack)
+
+    def test_non_owner_cannot_read_launch_stack(self) -> None:
+        life = _FakeLifecycle(instance=_instance("w2", image_ref="ir"))
+        svc = WorkerInstanceService(life, _FakeEnrollment(worker_name="w1"))
+        with self.assertRaises(InstanceOwnershipError):
+            svc.launch_stack_services("tok", "inst-1", _NOW)
+
+    def test_launch_stack_is_empty_without_an_image_ref(self) -> None:
+        life = _FakeLifecycle(instance=_instance("w1", image_ref=None))
+        svc = WorkerInstanceService(life, _FakeEnrollment(worker_name="w1"))
+        self.assertEqual(svc.launch_stack_services("tok", "inst-1", _NOW), ())
 
     def test_non_owner_cannot_report_endpoint(self) -> None:
         # Endpoints are reported through the same ownership gate: a worker not

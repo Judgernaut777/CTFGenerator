@@ -47,6 +47,10 @@ from ctf_generator.domain.scheduling.models import (
 from ctf_generator.infrastructure.database.challenge_build_image_repository import (
     SqlAlchemyChallengeBuildImageRepository,
 )
+from ctf_generator.infrastructure.database.challenge_build_stack_image_repository import (
+    SqlAlchemyChallengeBuildStackImageRepository,
+    StackServiceImage,
+)
 from ctf_generator.infrastructure.database.instance_repository import (
     SqlAlchemyInstanceRepository,
 )
@@ -77,12 +81,16 @@ class InstanceLifecycleService:
         build_image_repository_factory: Callable[
             [Session], SqlAlchemyChallengeBuildImageRepository
         ] = SqlAlchemyChallengeBuildImageRepository,
+        build_stack_repository_factory: Callable[
+            [Session], SqlAlchemyChallengeBuildStackImageRepository
+        ] = SqlAlchemyChallengeBuildStackImageRepository,
     ) -> None:
         self._database = database
         self._scheduling = scheduling
         self._jobs = jobs
         self._repo = repository_factory
         self._build_images = build_image_repository_factory
+        self._build_stacks = build_stack_repository_factory
 
     # -- creation + placement ------------------------------------------------
 
@@ -245,6 +253,18 @@ class InstanceLifecycleService:
         with self._database.session_scope() as session:
             return self._build_images(session).digest_for_version_image(
                 definition_slug, version_no, image_ref
+            )
+
+    def stack_for_instance_image(
+        self, definition_slug: str, version_no: int, primary_image_ref: str
+    ) -> tuple[StackServiceImage, ...]:
+        """The full multi-service stack whose PRIMARY service is
+        ``primary_image_ref`` (the ref the instance carries), or ``()`` for a
+        single-image instance. A pure DB read (ADR-001) -- the launch-time source
+        for a compose-family launch."""
+        with self._database.session_scope() as session:
+            return self._build_stacks(session).stack_for_primary_image(
+                definition_slug, version_no, primary_image_ref
             )
 
     # -- transitions ---------------------------------------------------------

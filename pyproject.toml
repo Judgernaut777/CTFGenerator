@@ -165,6 +165,9 @@ ignore = ["E501"] # line length is enforced by the formatter, not the linter
 # The compose build-stack integration test builds real multi-service images and
 # inspects them via the docker CLI.
 "tests/test_build_stack_integration.py" = ["S603", "S607"]
+# The launch-stack integration test drives the docker CLI to prove N containers
+# run on one network with inter-service DNS and clean teardown.
+"tests/test_launch_stack_integration.py" = ["S603", "S607"]
 "tests/test_build_isolation_integration.py" = ["S603", "S607"]
 "tests/test_worker_loop_integration.py" = ["S603", "S607", "S110"]
 "tests/test_container_policy_flags.py" = ["S108"] # a docker --tmpfs spec literal, not a temp file

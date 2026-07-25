@@ -164,6 +164,23 @@ class WorkerExpectedDigestView(BaseModel):
     image_digest: str | None = None
 
 
+class WorkerStackServiceView(BaseModel):
+    """One service of a multi-service launch stack (references/hashes only)."""
+
+    service_name: str
+    image_ref: str
+    image_digest: str
+    depends_on: list[str] = []
+    expose: list[str] = []
+    is_primary: bool = False
+
+
+class WorkerStackView(BaseModel):
+    """The stack a worker should launch for an instance (empty for single-image)."""
+
+    services: list[WorkerStackServiceView] = []
+
+
 def instance_to_worker_view(instance: Instance) -> dict[str, Any]:
     return {
         "instance_id": instance.instance_id,

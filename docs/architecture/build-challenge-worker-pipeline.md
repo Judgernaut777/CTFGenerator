@@ -254,8 +254,8 @@ of work as the job's terminalization.
   a **hard create-time reject** on "no built image yet" is a deliberate,
   documented non-goal here (it changes the API contract).
 
-**Still deferred** (honest scope): a compose-aware multi-image build/launch model
-— named in slice 1 above.
+All three named tail deferrals are now closed (tail slices A/B/C below). Two
+**residual sub-gaps of the compose MVP** remain, documented in slice C.
 
 ## Tail slice A — build-time package mirror (landed)
 
@@ -326,6 +326,61 @@ expected digest just as it could serve any poisoned instruction (the same caveat
 as the bundle content-hash verify). Proven against real Docker
 (`RuntimeBackend.image_id` matches the build digest) and real PostgreSQL (the
 resolver + the ownership gate), plus host coverage of the launch refusal paths.
+
+## Tail slice C — compose-aware multi-image build + launch (landed)
+
+A multi-service family renders several `services/<name>/Dockerfile` trees plus a
+`docker-compose.yml`; the worker now builds **and launches** each service, instead
+of the single-image simplification.
+
+The compose file is read as a **MANIFEST, never executed**. Running `docker compose
+up` would publish host ports and apply the compose's own limits/caps — bypassing
+`ContainerPolicy`, the `--internal` per-instance network, and the host-block
+firewall. So `application/execution/compose_manifest.parse_compose_manifest`
+(`yaml.safe_load` + a **strict allowlist**) reads only each service's
+`build`/`expose`/`depends_on`; every runtime directive is ignored (our policy is
+authoritative). It validates build paths stay in-bundle, bounds the service count
+(≤8), detects `depends_on` cycles, and marks the ingress (host-`ports:`) service
+primary.
+
+* **Build N** (slice 3a): `worker._build_from_bundle` builds each service context
+  (reusing the mirror-aware `_build_image`) and reports a `services:[...]` result
+  with a top-level `image_ref`/`digest` = the PRIMARY service (single-image
+  back-compat). A new append-only `challenge_build_stack_images` table (migration
+  `0016`) records one row per service (`service_name`/`image_ref`/`image_digest`/
+  `bundle_sha256`/`depends_on`/`expose`/`is_primary`), grouped by `bundle_sha256`.
+  `WorkerJobService.complete` writes the primary to `challenge_build_images`
+  (back-compat) AND one stack row per service, all keyed to the JOB's own version.
+* **Launch N** (slice 3b): `DockerRuntimeBackend.launch_stack` starts N
+  policy-constrained containers on ONE shared `--internal` per-instance network,
+  each reachable by its service name (a `--network-alias`), in `depends_on` order.
+  Every container gets the SAME `ContainerPolicy` hardening. A mid-launch failure
+  removes the whole partial stack (no leaks); teardown is the existing
+  label-scoped `remove`/`reap` (already N-container-safe). The worker resolves the
+  stack via a new ownership-gated `GET /worker/instances/{id}/launch-stack`
+  verb, **digest-pins each service** against its recorded digest (reusing the
+  slice-B helper), then calls `launch_stack`. Proven end-to-end against real
+  Docker (two alpine services on one net; inter-service DNS resolves by service
+  name; clean teardown; partial-failure leaves nothing) and real PostgreSQL (the
+  stack write/resolve + the ownership-gated route), plus host coverage of the
+  dependency-ordered, digest-pinned dispatch.
+
+**Residual sub-gaps (documented, honest scope)** — the compose MVP collapses the
+generated network topology into ONE shared internal network and does not inject
+compose-`environment` secrets:
+
+* **Network segmentation** — a compose that isolates `backend` from `frontend`
+  (service-A cannot reach service-B) is NOT faithfully reproduced; all services
+  share the one host-blocked instance network. The fail-direction is toward MORE
+  reachability *inside* the already-host-blocked instance net, **never** toward
+  host or cross-instance reachability, so the isolation floor is intact.
+* **Flag-via-compose-env** — a family that reads its flag ONLY from a compose
+  `${CTFGEN_FLAG:-…}` interpolation (no in-image fallback) would launch without a
+  flag; scoped-secret injection at launch is a separate mechanism (out of band of
+  this record).
+
+Both are genuine follow-ups, not silent omissions; a challenge whose design
+depends on either must be validated before use on a real event.
 
 ## Security posture summary (checklist against the hard rules)
 

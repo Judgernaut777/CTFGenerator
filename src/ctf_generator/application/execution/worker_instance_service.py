@@ -208,6 +208,21 @@ class WorkerInstanceService:
             instance.definition_slug, instance.version_no, instance.image_ref
         )
 
+    def launch_stack_services(
+        self, token: str, instance_id: str, now: datetime
+    ):
+        """The multi-service stack the authenticated worker should launch for
+        ``instance_id`` (its per-service images + digests + depends_on/expose), or
+        an empty tuple for a single-image instance. Ownership-gated like
+        :meth:`get_owned_instance`; a pure DB read of the stack registry, keyed on
+        the instance's own primary ``image_ref``."""
+        instance = self.get_owned_instance(token, instance_id, now)
+        if instance.image_ref is None:
+            return ()
+        return self._lifecycle.stack_for_instance_image(
+            instance.definition_slug, instance.version_no, instance.image_ref
+        )
+
     def replace_instance(
         self, token: str, instance_id: str, now: datetime
     ) -> Instance:
