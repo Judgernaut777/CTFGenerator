@@ -34,9 +34,10 @@ available. Vocabulary carried up from
 ## 1. Executive verdict
 
 **On executed single-host evidence, the product is qualified to the
-internal-alpha stage (MET-by-simulation, with one composite seam UNVERIFIED) and
-to a PARTIAL closed-beta readiness. It is NOT qualified to closed-beta exit and
-it is NOT qualified to v1.0.**
+internal-alpha stage (MET-by-simulation; the previously-open joined worker-launch
+seam is now closed as one executed flow, in-process + networked) and to a PARTIAL
+closed-beta readiness. It is NOT qualified to closed-beta exit and it is NOT
+qualified to v1.0.**
 
 **v1.0 is NOT fully release-qualified.** This is the plain, load-bearing
 statement of this document. What IS proven is credited precisely below; nothing
@@ -49,8 +50,15 @@ close — are:
    teams, 20 active challenges, ≥99% launch success, scoreboard <3 s / submission
    <500 ms **sustained**) is not met on this host. At the 25×20 concurrency the
    in-process, single-PostgreSQL submission p95 was measured **OVER target
-   (≈2050 ms vs the 500 ms SLO)** — reported honestly, not softened
-   ([`validation/capacity.md`](validation/capacity.md)).
+   (≈2050 ms vs the 500 ms SLO)** — reported honestly, not softened. Since that
+   run, the two *product* serialization ceilings behind it were fixed (the
+   submission advisory lock narrowed from competition-wide to
+   `(competition, team, challenge-version)`, and the connection pool sized above
+   the request-thread count), and the residual in-process p95 was shown to be a
+   **GIL-bound harness artifact** (app + DB + load-gen on one interpreter), not a
+   product limit ([`validation/capacity.md`](validation/capacity.md)). The
+   **sustained production-scale sign-off** — a real multi-process/multi-host run —
+   remains UNVERIFIED.
 2. **A real TLS / multi-host deployment run is UNVERIFIED.** No reverse proxy +
    TLS ingress and no S3-compatible artifact backend were stood up; all API
    evidence drives the ASGI app in-process (Starlette `TestClient`, no real
@@ -58,10 +66,19 @@ close — are:
 3. **A real EXTERNAL closed beta is UNVERIFIED.** No real external organizers or
    contestants ran a competition; this is a social/operational process, not
    simulable on one host.
-4. **The distributed-worker bundle-launch flow is UNVERIFIED.** The
-   `build_challenge` pipeline (full-bundle delivery + worker-side image build) is
-   **UNBUILT** ([`evaluation/eval-worker-limitations.md`](evaluation/eval-worker-limitations.md),
-   [`validation/e2e.md`](validation/e2e.md)); ≥99% launch-success has no evidence.
+4. **Multi-host, at-scale worker launch is UNVERIFIED — the distributed-worker
+   bundle-launch FLOW is now built and proven on one host.** The `build_challenge`
+   pipeline (full-bundle delivery + worker-side image build) is now **BUILT**, and
+   the joined publish→build→launch→submit→score spine runs end to end over real
+   PostgreSQL + Docker — both in-process
+   ([`tests/test_joined_e2e_integration.py`](../tests/test_joined_e2e_integration.py))
+   and over the **NETWORKED HTTP worker gateway** (the distributed transport: the
+   worker fetches the full bundle, builds, launches, and reports every fact only
+   over HTTP —
+   [`tests/test_joined_e2e_http_integration.py`](../tests/test_joined_e2e_http_integration.py)).
+   What remains UNVERIFIED is the same production-scale dimension as blockers #1/#2:
+   a real **multi-host worker fleet** sustaining **≥99% launch success** at the
+   25×20 target — one host with an in-process control plane cannot exhibit it.
 5. **Continuous RPO / PITR is UNVERIFIED.** RTO was measured by a real drill
    (≈1.7 s vs the ≤30 min SLO); continuous RPO ≤5 min needs WAL archiving / PITR,
    not configured on this host — only a `pg_dump` baseline RPO exists
@@ -125,7 +142,7 @@ executed assertion are marked **IMPLEMENTED (not independently qualified)**.
 | **v0.1-alpha** (reliable generator) | Deterministic rebuild-equality + no-wall-clock provenance: `tests/test_conformance_suite.py` (52 OK, host). Filesystem hardening: S6 tests (host). Flag/secret non-leak: S4/S5 (host). | Formal "CI runs unit + `compileall` + Docker validation on every change" is IMPLEMENTED (`.github/workflows/pr.yml`) but Docker-validation-in-CI is not asserted by a test here. Family-SDK / quality-gate / release-artifact capability lines are IMPLEMENTED, not independently re-qualified in this pass. |
 | **v0.2-alpha** (isolated execution) | PG job system (leases/heartbeats/retries/idempotency/dead-letter): `tests/test_worker_job_service_integration.py`, `test_worker_repository_integration.py`, `test_worker_loop_integration.py` (PG-gated). Instance lifecycle + reconciliation of orphans: `test_instance_lifecycle_integration.py` (10 drift cases incl. orphaned). Resource/network isolation: S2 Docker tests. Bundle code runs only on isolated workers: S9 (host static + Docker runtime). | **Rootless Docker/Podman + rootless BuildKit** is capability-gated on this rootful arm64 host → NOT-QUALIFIED here ([`security/runtime-isolation.md`](security/runtime-isolation.md)). |
 | **v0.3-alpha** (persistent control plane) | PG domain model + Alembic (head `0014`): migration-drift + full-downgrade tests. Immutable content-addressed publish + at-most-one-solve + score-event reconstruction: `alpha_sim.py` / `beta_sim.py` + `test_e2e_flow_integration.py` + S8 restore parity. AuthN/AuthZ across roles: S1/S7. Audit trail: S8 ledger append-only. | All PG-gated (integration env, not host). Production-deployment authz sweep NOT-QUALIFIED. |
-| **v0.4-beta** (complete workflow) | Organizer web (M11), contestant portal (M12), live-ops orchestration (M8), reports via API (M9/M16) — exercised by `test_web_*`, `test_api_*`, `test_instance_lifecycle_integration.py`. One organizer→contestant workflow: `alpha_sim.py` Half A over real PG. | **Supported deployment (reverse proxy + TLS, S3 artifact storage)** NOT-QUALIFIED — not stood up. **Operating targets (25×20, ≥99% launch, <3 s/<500 ms)** NOT-QUALIFIED — see §5. The single joined organizer→contestant→worker-launch flow is a **composite**, not one flow (§4). |
+| **v0.4-beta** (complete workflow) | Organizer web (M11), contestant portal (M12), live-ops orchestration (M8), reports via API (M9/M16) — exercised by `test_web_*`, `test_api_*`, `test_instance_lifecycle_integration.py`. One organizer→contestant workflow: `alpha_sim.py` Half A over real PG. | **Supported deployment (reverse proxy + TLS, S3 artifact storage)** NOT-QUALIFIED — not stood up. **Operating targets (25×20, ≥99% launch, <3 s/<500 ms)** NOT-QUALIFIED — see §5. The single joined organizer→contestant→worker-launch flow is now **one executed flow** over real PG + Docker, in-process (`test_joined_e2e_integration.py`) and networked (`test_joined_e2e_http_integration.py`); only its **multi-host at-scale** form remains NOT-QUALIFIED (§4). |
 | **v0.5-beta** (quality + evaluation) | Scenario engine live + provably blocks the real attack surface (offline) for 4 families: `tests/test_family_scenarios.py` (host). Single-host scripted eval delta machinery exists and is exercisable (`agent_eval`, `SingleHostEvalJobRunner`). | **Distributed / at-scale / real-LLM adversarial eval NOT-QUALIFIED** — `build_challenge` unbuilt; LLM profile credential-blocked; no continuous automated resistance-number artifact ([`validation/ai-resistance.md`](validation/ai-resistance.md), §6). |
 
 ---
@@ -142,27 +159,38 @@ simulation scale: S2/S9 (`test_docker_backend_integration.py`, 9 PASS), S1
 Half A of the spine (`scripts/alpha_sim.py` — generate→publish→submit→solve→score
 →scoreboard over live PG, all steps PASS; `test_alpha_sim_integration.py`, 6 tests).
 
-**The single composite seam — stated plainly, not overstated.** The exit
+**The composite seam is now CLOSED — one unbroken automated flow.** The exit
 criterion asks for one challenge *generated → published → launched on a worker →
-solved → scored → on a scoreboard, end to end.* This is **NOT one unbroken
-automated flow.** It is a **composite of two separately-proven halves**:
+solved → scored → on a scoreboard, end to end.* This was previously a **composite
+of two separately-proven halves** (Half A scored the flag but launched nothing;
+Half B launched a benign `alpine` image, not the generated bundle) because the
+glue — `build_challenge` (full-bundle delivery + worker-side image build) — was
+UNBUILT. That glue is now **built**, and the seam is joined into **one unbroken
+automated flow** proven end to end over real PostgreSQL + Docker:
 
-- **Half A** scores the intended solver's flag against the published,
-  content-addressed version over real PG — and **launches nothing**.
-- **Half B** launches a **real** isolated container and proves containment
-  (`test_docker_backend_integration.py`) — using a **benign `alpine` image, not
-  the generated bundle**.
+- **In-process transport** —
+  [`tests/test_joined_e2e_integration.py`](../tests/test_joined_e2e_integration.py):
+  publish a real version → a worker builds its image from the rendered full bundle
+  → the freshly-built image is launched as a real container → the contestant's
+  seed-derived flag scores → scoreboard.
+- **Networked transport** —
+  [`tests/test_joined_e2e_http_integration.py`](../tests/test_joined_e2e_http_integration.py):
+  the same spine with the worker driving the whole build+launch+report over the
+  **HTTP worker gateway** (`HttpControlPlaneClient`), holding only its scoped token.
 
-The glue that would join them — `build_challenge` (full-bundle delivery +
-worker-side image build) — is **UNBUILT**. The joined
-worker-launch-of-the-published-bundle flow is therefore **UNVERIFIED**. It must
-not be represented as a single working flow.
+Two honest caveats remain, and neither reopens the single-flow seam: this is a
+**single host** with an in-process control plane (multi-host fleet + at-scale
+≥99% launch success is blocker #1/#4), and the launch runs the built image with a
+benign `sleep` override so the flow is deterministic (the challenge binary's own
+runtime is a separate concern, not the pipeline wiring).
 
 One entry item — **named internal operators + rollback plan** — is UNVERIFIED as
 an executed artifact: it is an organizational/process sign-off, not code.
 
-**Internal-alpha verdict: QUALIFIED-by-simulation (single host), with the
-composite worker-launch seam and the operator/rollback process item UNVERIFIED.**
+**Internal-alpha verdict: QUALIFIED-by-simulation (single host); the joined
+worker-launch flow is now one executed test (in-process + networked); the
+operator/rollback process item remains UNVERIFIED, and multi-host at-scale launch
+is deferred to the v1.0 capacity blocker.**
 
 ### Closed-beta — PARTIAL
 
