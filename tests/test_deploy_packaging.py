@@ -43,13 +43,21 @@ class DeployExtrasTest(unittest.TestCase):
             self.assertIn(extra, joined, f"[deploy] must include the [{extra}] extra")
         self.assertIn("ctf-generator[", joined)
 
-    def test_worker_extra_is_httpx_only_no_db_no_engine(self) -> None:
+    def test_worker_extra_is_minimal_no_db_no_engine(self) -> None:
         self.assertIn("worker", self.extras)
         deps = self.extras["worker"]
-        self.assertEqual(len(deps), 1, "the networked worker's ONLY py dep is httpx")
-        self.assertTrue(deps[0].startswith("httpx"))
         joined = " ".join(deps)
-        # No db / sqlalchemy / docker on the networked worker's python deps.
+        # httpx is the control-plane transport; pyyaml parses the compose MANIFEST
+        # for multi-service builds (small, pure, no transitive db/docker deps).
+        # Those are the ONLY two -- the networked worker stays minimal.
+        self.assertIn("httpx", joined)
+        allowed = ("httpx", "pyyaml")
+        for dep in deps:
+            self.assertTrue(
+                dep.lower().startswith(allowed),
+                f"unexpected networked-worker dependency {dep!r}",
+            )
+        # Still NO db / sqlalchemy / docker on the networked worker's python deps.
         for forbidden in ("sqlalchemy", "alembic", "psycopg", "docker"):
             self.assertNotIn(forbidden, joined)
 
