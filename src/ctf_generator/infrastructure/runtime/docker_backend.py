@@ -42,6 +42,7 @@ from __future__ import annotations
 import hashlib
 import json
 import logging
+import os
 import re
 import shlex
 import shutil
@@ -80,6 +81,10 @@ WORKER_LABEL = "ctfgen.worker"
 # host reachable). The image ships both iptables backends so the correct one for
 # the host's docker rules (legacy vs nft) is auto-selected at detection time.
 FIREWALL_IMAGE = "ctfgen-netfw:v1"
+
+# A conservative docker object-name allowlist (network names, etc.): first char
+# alphanumeric, then alphanumerics/underscore/dot/hyphen, bounded length.
+_DOCKER_NAME_RE = re.compile(r"^[a-zA-Z0-9][a-zA-Z0-9_.-]{0,127}$")
 _FIREWALL_DOCKERFILE = (
     "FROM debian:stable-slim\n"
     "RUN apt-get update "
@@ -304,12 +309,20 @@ class DockerRuntimeBackend:
         max_image_mb: int = 2048,
         worker_name: str = "ctfgen",
         firewall_image: str = FIREWALL_IMAGE,
+        build_mirror_network: str | None = None,
     ) -> None:
         bad = acknowledged_gaps - ACKNOWLEDGEABLE_GAPS
         if bad:
             raise ValueError(
                 f"unknown acknowledged_gaps {sorted(bad)}; allowed "
                 f"{sorted(ACKNOWLEDGEABLE_GAPS)}"
+            )
+        if build_mirror_network is not None and not _DOCKER_NAME_RE.match(
+            build_mirror_network
+        ):
+            raise ValueError(
+                "build_mirror_network must be a docker-name-safe string "
+                f"({_DOCKER_NAME_RE.pattern}); got {build_mirror_network!r}"
             )
         self._docker = docker_path or shutil.which("docker") or "docker"
         self._non_root_uid = non_root_uid
@@ -320,6 +333,11 @@ class DockerRuntimeBackend:
         self._max_image_mb = max_image_mb
         self._worker_name = worker_name
         self._firewall_image = firewall_image
+        # Optional pre-warmed, INTERNAL-only package mirror network a build may
+        # attach to (opt-in per call) instead of ``--network none``. None => the
+        # default strict no-network build stands. Verified ``Internal: true`` at
+        # use time so an operator misconfiguration can never become open egress.
+        self._build_mirror_network = build_mirror_network
         # Lazily-detected iptables binary that manipulates docker's ruleset on
         # this host (None once probed and found unavailable). The host-block is a
         # HARD FLOOR -- never acknowledged away.
@@ -330,11 +348,19 @@ class DockerRuntimeBackend:
     # -- subprocess plumbing ---------------------------------------------------
 
     def _run(
-        self, args: Sequence[str], *, timeout: int | None = None, check: bool = True
+        self,
+        args: Sequence[str],
+        *,
+        timeout: int | None = None,
+        check: bool = True,
+        env: dict[str, str] | None = None,
     ) -> subprocess.CompletedProcess[str]:
         """Run ``docker <args>`` with an argv list (never a shell). Raises
         :class:`DockerCommandError` on non-zero when ``check``. Never logs env or
-        payloads; argv is safe (no secrets pass through the runtime driver)."""
+        payloads; argv is safe (no secrets pass through the runtime driver).
+        ``env`` (when given) fully replaces the child environment -- used only to
+        select the classic builder (``DOCKER_BUILDKIT=0``) for a named-network
+        build; it carries no secrets."""
         argv = [self._docker, *args]
         try:
             proc = subprocess.run(  # noqa: S603 - argv list, no shell, trusted binary
@@ -343,6 +369,7 @@ class DockerRuntimeBackend:
                 text=True,
                 timeout=timeout if timeout is not None else self._run_timeout,
                 check=False,
+                env=env,
             )
         except FileNotFoundError as exc:  # pragma: no cover - env dependent
             raise DockerRuntimeError(f"docker binary not found: {self._docker}") from exc
@@ -673,6 +700,7 @@ class DockerRuntimeBackend:
         tag: str,
         dockerfile: str | None = None,
         network: bool = False,
+        allow_mirror: bool = False,
     ) -> str:
         """Build an image from ``context_dir`` and return its content-addressed
         digest (``sha256:...``). Build isolation (WORKER-only; the control plane
@@ -682,6 +710,14 @@ class DockerRuntimeBackend:
           (the base image must already be present locally). Pass ``network=True``
           only for a build that legitimately fetches, on an egress-restricted
           builder.
+        * ``allow_mirror=True`` opts THIS build into the operator-configured,
+          INTERNAL-only package-mirror network (``build_mirror_network``), so a
+          generated ``RUN pip install`` can reach the pre-warmed mirror WITHOUT
+          general egress. It is a strict superset of the default: with no mirror
+          configured it falls back to ``--network none`` unchanged, and the mirror
+          network is verified ``Internal: true`` before attach (a non-internal or
+          missing network is REFUSED, never silently downgraded to open egress).
+          ``network=True`` (the general-egress hatch) still wins if set.
         * ``--force-rm`` discards intermediate containers; ``--pull=false`` keeps
           the build from silently re-fetching a mutable base.
         * NO ``--build-arg`` / secrets are accepted here -- provider keys, flags,
@@ -695,12 +731,20 @@ class DockerRuntimeBackend:
         a rootful host -- see docs/security/runtime-isolation.md).
         """
         args = ["build", "--force-rm", "--pull=false", "--tag", tag]
-        if not network:
-            args += ["--network", "none"]
+        build_net = self._resolve_build_network(network, allow_mirror)
+        build_env: dict[str, str] | None = None
+        if build_net is not None:
+            args += ["--network", build_net]
+            if build_net not in ("none", "host", "default"):
+                # BuildKit rejects a NAMED --network for `docker build`; the
+                # classic builder supports it. Force classic ONLY for the mirror
+                # attach (a documented fallback -- runtime-isolation.md). The
+                # child env carries no secrets (build-args are never used here).
+                build_env = {**os.environ, "DOCKER_BUILDKIT": "0"}
         if dockerfile:
             args += ["--file", dockerfile]
         args.append(context_dir)
-        self._run(args, timeout=self._build_timeout)
+        self._run(args, timeout=self._build_timeout, env=build_env)
 
         size_bytes = int(
             self._run(
@@ -718,6 +762,43 @@ class DockerRuntimeBackend:
             ["image", "inspect", "--format", "{{.Id}}", tag], check=False
         ).stdout.strip()
         return digest
+
+    def _resolve_build_network(self, network: bool, allow_mirror: bool) -> str | None:
+        """Pick the ``docker build`` network. ``None`` => omit the flag (the
+        general-egress hatch, ``network=True``, unchanged and caller-less in-tree).
+        Otherwise: the operator's INTERNAL-only mirror network when THIS build
+        opted in and one is configured (verified internal, else refused), or the
+        strict ``"none"`` default. The security floor: the ONLY way a build ever
+        reaches off-``none`` without the explicit ``network`` hatch is a network
+        proven ``Internal: true`` (no route to the internet or the host)."""
+        if network:
+            return None
+        if allow_mirror and self._build_mirror_network is not None:
+            self._require_internal_build_network(self._build_mirror_network)
+            return self._build_mirror_network
+        return "none"
+
+    def _require_internal_build_network(self, network_name: str) -> None:
+        """Refuse unless ``network_name`` exists and is ``Internal: true``. This is
+        the mirror keystone: an ``--internal`` network has no route to the internet
+        or the host, so even a hostile ``RUN`` attached to it can reach only the
+        in-subnet mirror -- never general egress. Refusing a missing/non-internal
+        network turns an operator misconfiguration into a loud build failure rather
+        than silent open egress."""
+        out = self._run(
+            ["network", "inspect", "--format", "{{.Internal}}", network_name],
+            check=False,
+        )
+        if out.returncode != 0:
+            raise UnsupportedRuntimeError(
+                f"build mirror network {network_name!r} not found; refusing to "
+                "build (will not silently fall back to open egress)"
+            )
+        if out.stdout.strip().lower() != "true":
+            raise UnsupportedRuntimeError(
+                f"build mirror network {network_name!r} is not Internal; refusing "
+                "to attach a build to a network with a route off-subnet"
+            )
 
     # -- network ---------------------------------------------------------------
 

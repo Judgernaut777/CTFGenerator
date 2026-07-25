@@ -159,6 +159,9 @@ ignore = ["E501"] # line length is enforced by the formatter, not the linter
 # and S110 (best-effort tearDown cleanup) are inherent to these harnesses.
 "tests/test_docker_backend_integration.py" = ["S603", "S607", "S108", "S110"]
 "tests/test_team_isolation_integration.py" = ["S603", "S607", "S110"]
+# The build-mirror integration test likewise drives the docker CLI directly to
+# stand up a real INTERNAL mirror network + server and prove reachability.
+"tests/test_build_mirror_integration.py" = ["S603", "S607"]
 "tests/test_build_isolation_integration.py" = ["S603", "S607"]
 "tests/test_worker_loop_integration.py" = ["S603", "S607", "S110"]
 "tests/test_container_policy_flags.py" = ["S108"] # a docker --tmpfs spec literal, not a temp file

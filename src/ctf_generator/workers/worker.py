@@ -908,12 +908,16 @@ class Worker:
             _safe_extract_bundle(bundle.data, bundle_root)
             context_dir = _select_build_context(bundle_root)
             tag = _build_tag(definition_slug, version_no, bundle.bundle_sha256)
-            # network=False: the generated Dockerfile is hostile input; no
-            # egress during the build unless a future capability-acknowledged
-            # posture explicitly allows it (not implemented -- see the design
-            # note's documented limitation on families needing package fetch).
+            # network=False: the generated Dockerfile is hostile input; no general
+            # egress during the build. allow_mirror=True opts into the operator's
+            # INTERNAL-only package mirror when one is configured (else this stays
+            # a strict --network=none build) so families that RUN pip install can
+            # fetch from the pre-warmed mirror without reaching the internet.
             digest = self._build_backend.build_image(
-                context_dir=str(context_dir), tag=tag, network=False
+                context_dir=str(context_dir),
+                tag=tag,
+                network=False,
+                allow_mirror=True,
             )
 
         return _DispatchOutcome(
@@ -986,7 +990,10 @@ def main(argv: Sequence[str] | None = None) -> int:  # pragma: no cover - entryp
     lease_seconds = int(os.environ.get("CTFGEN_WORKER_LEASE_SECONDS", "60"))
     config = WorkerConfig(worker_name=name, lease_seconds=lease_seconds)
     client = HttpControlPlaneClient(base_url=base_url, token=token)
-    backend = DockerRuntimeBackend()
+    # Optional pre-warmed, INTERNAL-only package mirror network for builds that
+    # RUN pip install; unset => strict --network=none builds (the secure default).
+    build_mirror_network = os.environ.get("CTFGEN_WORKER_BUILD_MIRROR_NETWORK") or None
+    backend = DockerRuntimeBackend(build_mirror_network=build_mirror_network)
     # DockerRuntimeBackend already satisfies the BuildBackend Protocol
     # structurally (build_image/is_available) -- one instance serves both
     # roles; see docs/architecture/build-challenge-worker-pipeline.md.
