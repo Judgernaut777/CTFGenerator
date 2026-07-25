@@ -276,11 +276,15 @@ class StackRequest:
 @dataclass(frozen=True)
 class RuntimeEndpoint:
     """A reachable address a launched container publishes (host:port for one
-    exposed container port)."""
+    exposed container port). ``service`` names the stack service the port belongs
+    to for a multi-container launch (``None`` for a single-container instance); a
+    consumer service-qualifies the endpoint's name so two services exposing the
+    SAME port number do not collide onto one record."""
 
     container_port: int
     host: str
     host_port: int
+    service: str | None = None
 
     def __post_init__(self) -> None:
         for port_name, port in (
@@ -290,6 +294,8 @@ class RuntimeEndpoint:
             if not isinstance(port, int) or not (1 <= port <= 65535):
                 raise ValueError(f"{port_name} must be 1..65535, got {port!r}")
         _require_nonempty(self.host, "host")
+        if self.service is not None:
+            _require_nonempty(self.service, "service")
 
 
 @dataclass(frozen=True)
@@ -426,6 +432,17 @@ class RuntimeBackend(Protocol):
         """Return THIS worker's container id for ``instance_id`` (scoped to the
         worker so a multi-worker host never returns a peer's container), or None.
         Keeps runtime-query verbs inside the adapter."""
+        ...
+
+    def find_stack_containers(
+        self, instance_id: str
+    ) -> tuple[tuple[str, str], ...]:
+        """Every one of THIS worker's containers for ``instance_id`` as
+        ``(container_id, service_name)`` pairs (scoped to the worker). ``service_name``
+        is the stack-service label, or ``""`` for a single-image instance's
+        container. Empty tuple if none. Lets the lifecycle verbs (health / restart /
+        logs) observe EVERY service of a multi-container stack rather than only one,
+        so a crashed sibling is never invisible."""
         ...
 
     def reap_managed(self, worker: str | None = ...) -> int:

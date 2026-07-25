@@ -17,6 +17,9 @@ Here we lock the contract so it cannot silently regress:
 
 from __future__ import annotations
 
+import os
+import subprocess
+import sys
 import tomllib
 import unittest
 from pathlib import Path
@@ -209,6 +212,36 @@ class ComposeTest(unittest.TestCase):
         # use the prefixed path (a bare /system/ready 404s).
         self.assertIn("/api/v1/system/ready", self.text)
         self.assertIn("service_healthy", self.text)
+
+
+class WorkerImportGraphTest(unittest.TestCase):
+    """The [worker] extra is minimal (httpx + pyyaml only) -- that structural
+    guard is only honest if IMPORTING the worker module actually stays off the
+    control-plane's heavy deps. Importing ``ctf_generator.workers.worker`` must
+    NOT pull sqlalchemy / psycopg / alembic onto the import graph (they are lazy
+    in ``main()`` / the DB-backed local path), so a minimal networked-worker
+    install can import and run the loop. Runs in a CLEAN subprocess so another
+    test's earlier imports never mask a regression."""
+
+    def test_importing_worker_pulls_no_db_stack(self) -> None:
+        code = (
+            "import sys, ctf_generator.workers.worker as w; "
+            "bad=[m for m in ('sqlalchemy', 'psycopg', 'alembic') "
+            "if m in sys.modules]; "
+            "print(','.join(bad))"
+        )
+        proc = subprocess.run(  # noqa: S603 - sys.executable + literal argv, no shell
+            [sys.executable, "-c", code],
+            capture_output=True,
+            text=True,
+            env=dict(os.environ),
+        )
+        self.assertEqual(proc.returncode, 0, proc.stderr)
+        self.assertEqual(
+            proc.stdout.strip(),
+            "",
+            f"importing the worker pulled control-plane deps: {proc.stdout!r}",
+        )
 
 
 if __name__ == "__main__":

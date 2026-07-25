@@ -91,6 +91,10 @@ def upgrade() -> None:
             r"image_digest !~ '^\s*$'",
             name="ck_challenge_build_stack_images_image_digest_non_empty",
         ),
+        sa.CheckConstraint(
+            r"bundle_sha256 !~ '^\s*$'",
+            name="ck_challenge_build_stack_images_bundle_sha256_non_empty",
+        ),
     )
     op.create_index(
         "ix_challenge_build_stack_images_version",

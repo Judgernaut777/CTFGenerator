@@ -250,6 +250,19 @@ class BuildStackCompletionTests(unittest.TestCase):
         self.assertTrue(beta.is_primary)
         self.assertEqual(beta.depends_on, ("alpha",))
 
+    def test_blank_bundle_sha256_is_rejected_by_the_check(self) -> None:
+        # bundle_sha256 groups every service of one build; a blank value would
+        # silently orphan the stack from its build. The DB CHECK refuses it.
+        with _migrated_database() as db:
+            _seed_version(db)
+            with self.assertRaises(sa.exc.IntegrityError):
+                with db.session_scope() as s:
+                    SqlAlchemyChallengeBuildStackImageRepository(s).add_service(
+                        _SLUG, 1, service_name="alpha", image_ref=_PRIMARY_IMG,
+                        image_digest="sha256:" + "aa" * 32, bundle_sha256="   ",
+                        depends_on=(), expose=(), is_primary=True, now=_NOW,
+                    )
+
     def test_stack_write_is_idempotent(self) -> None:
         with _migrated_database() as db:
             _seed_version(db)

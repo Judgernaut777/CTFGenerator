@@ -658,10 +658,15 @@ class Worker:
                 now,
             )
         for ep in launched.endpoints:
+            # Service-qualify the name for a multi-container stack so two services
+            # exposing the SAME port number do not collide onto one endpoint record
+            # (a single-container launch carries no service and keeps ``port-<n>``).
+            svc = getattr(ep, "service", None)
+            ep_name = f"{svc}-port-{ep.container_port}" if svc else f"port-{ep.container_port}"
             self._client.report_endpoint(
                 InstanceEndpoint(
                     instance_id=instance.instance_id,
-                    name=f"port-{ep.container_port}",
+                    name=ep_name,
                     host=ep.host,
                     port=ep.host_port,
                     protocol="tcp",
@@ -805,22 +810,31 @@ class Worker:
 
     def _do_restart(self, instance_id: str, now: datetime) -> _DispatchOutcome:
         instance = self._require_instance(instance_id)
-        cid = self._current_container(instance_id)
-        if cid:
+        # Restart EVERY container of the instance in dependency (start) order, so a
+        # multi-service stack comes back up with each service after the services it
+        # depends on (a single-image instance is just one container).
+        ordered = self._ordered_containers(instance_id, now)
+        for cid in ordered:
             self._backend.restart(instance_id, cid)
-        obs = self._backend.observe(instance_id, cid)
+        observations = [self._backend.observe(instance_id, cid) for cid in ordered]
+        state, healthy = self._aggregate_state(observations)
         self._client.report_health(
             HealthObservation(
                 instance_id=instance_id,
-                observed_state="healthy" if obs.phase == "running" else "degraded",
-                healthy=obs.phase == "running",
+                observed_state=state,
+                healthy=healthy,
                 worker=self._config.worker_name,
                 generation=instance.generation,
                 observed_at=now,
             ),
             now,
         )
-        return _DispatchOutcome(result={"phase": obs.phase})
+        return _DispatchOutcome(
+            result={
+                "phase": "running" if healthy else state,
+                "services": len(ordered),
+            }
+        )
 
     def _do_stop(self, instance_id: str, now: datetime) -> _DispatchOutcome:
         instance = self._require_instance(instance_id)
@@ -854,13 +868,18 @@ class Worker:
 
     def _do_health(self, instance_id: str, now: datetime) -> _DispatchOutcome:
         instance = self._require_instance(instance_id)
-        cid = self._current_container(instance_id)
-        obs = self._backend.health_check(instance_id, cid) if cid else None
-        healthy = bool(obs and obs.phase == "running")
+        # Health-check EVERY container of the instance: a stack is healthy iff ALL
+        # its service containers are running, so a crashed sibling is never
+        # invisible (a single-image instance is just one container).
+        containers = self._backend.find_stack_containers(instance_id)
+        observations = [
+            self._backend.health_check(instance_id, cid) for cid, _svc in containers
+        ]
+        state, healthy = self._aggregate_state(observations)
         self._client.report_health(
             HealthObservation(
                 instance_id=instance_id,
-                observed_state="healthy" if healthy else "absent",
+                observed_state=state,
                 healthy=healthy,
                 worker=self._config.worker_name,
                 generation=instance.generation,
@@ -868,15 +887,52 @@ class Worker:
             ),
             now,
         )
-        return _DispatchOutcome(result={"healthy": healthy})
+        return _DispatchOutcome(
+            result={"healthy": healthy, "services": len(containers)}
+        )
 
     def _do_logs(self, instance_id: str, now: datetime) -> _DispatchOutcome:
-        cid = self._current_container(instance_id)
-        if not cid:
+        # Collect from EVERY service container, not just one, so a stack's logs are
+        # complete. Raw logs may carry challenge output; return only a total line
+        # count, never content.
+        containers = self._backend.find_stack_containers(instance_id)
+        if not containers:
             return _DispatchOutcome(result={"log_lines": 0})
-        logs = self._backend.collect_logs(instance_id, cid)
-        # Raw logs may carry challenge output; return only a length, never content.
-        return _DispatchOutcome(result={"log_lines": len(logs.splitlines())})
+        total = sum(
+            len(self._backend.collect_logs(instance_id, cid).splitlines())
+            for cid, _svc in containers
+        )
+        return _DispatchOutcome(
+            result={"log_lines": total, "services": len(containers)}
+        )
+
+    @staticmethod
+    def _aggregate_state(observations: list) -> tuple[str, bool]:
+        """Fold per-container observations into one ``(observed_state, healthy)``:
+        healthy iff there is at least one container AND every one is running; else
+        ``absent`` (no containers) or ``degraded`` (some container not running)."""
+        if not observations:
+            return "absent", False
+        if all(o.phase == "running" for o in observations):
+            return "healthy", True
+        return "degraded", False
+
+    def _ordered_containers(self, instance_id: str, now: datetime) -> list[str]:
+        """This instance's container ids in dependency (start) order for a stack,
+        or the single container for a single-image instance. Restart walks them in
+        this order so a service comes back up after the services it depends on."""
+        pairs = self._backend.find_stack_containers(instance_id)
+        if len(pairs) <= 1:
+            return [cid for cid, _svc in pairs]
+        stack = self._client.launch_stack_services(instance_id, now)
+        if not stack:
+            return [cid for cid, _svc in pairs]
+        order = {svc.service_name: i for i, svc in enumerate(_order_stack(stack))}
+        fallback = len(order)
+        return [
+            cid
+            for cid, svc in sorted(pairs, key=lambda p: order.get(p[1], fallback))
+        ]
 
     # -- agent evaluation (M15b, NOT instance-scoped) --------------------------
 
