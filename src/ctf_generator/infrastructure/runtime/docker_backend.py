@@ -42,10 +42,12 @@ from __future__ import annotations
 import hashlib
 import json
 import logging
+import os
 import re
 import shlex
 import shutil
 import subprocess
+import time
 from collections.abc import Sequence
 from dataclasses import dataclass, field
 
@@ -56,6 +58,7 @@ from ctf_generator.domain.execution.runtime import (
     RuntimeEndpoint,
     RuntimeObservation,
     RuntimeResourceRef,
+    StackRequest,
 )
 
 _LOG = logging.getLogger("ctf_generator.worker.runtime")
@@ -71,6 +74,9 @@ INSTANCE_LABEL = "ctfgen.instance"
 # The owning worker name -- a reaper/recovery sweep is scoped to THIS worker's
 # label so a multi-worker host never reaps another worker's live containers.
 WORKER_LABEL = "ctfgen.worker"
+# The compose service a stack container implements (informational; cleanup is by
+# INSTANCE_LABEL, which every service container of one instance shares).
+STACK_SERVICE_LABEL = "ctfgen.service"
 
 # The firewall helper image: a minimal image carrying an ``iptables`` binary,
 # run with ``--net=host --cap-add=NET_ADMIN`` to install the host-block rules in
@@ -80,6 +86,10 @@ WORKER_LABEL = "ctfgen.worker"
 # host reachable). The image ships both iptables backends so the correct one for
 # the host's docker rules (legacy vs nft) is auto-selected at detection time.
 FIREWALL_IMAGE = "ctfgen-netfw:v1"
+
+# A conservative docker object-name allowlist (network names, etc.): first char
+# alphanumeric, then alphanumerics/underscore/dot/hyphen, bounded length.
+_DOCKER_NAME_RE = re.compile(r"^[a-zA-Z0-9][a-zA-Z0-9_.-]{0,127}$")
 _FIREWALL_DOCKERFILE = (
     "FROM debian:stable-slim\n"
     "RUN apt-get update "
@@ -108,6 +118,15 @@ _HOSTBLOCK_COMMENT = "ctfgen-hostblock"
 # EXPLICITLY acknowledged (never silently); seccomp is deliberately absent -- it
 # is a hard floor that can never be acknowledged away.
 ACKNOWLEDGEABLE_GAPS = frozenset({"rootless", "user_namespace", "apparmor"})
+
+# How long a freshly-started stack is allowed to settle before the launch's final
+# liveness pass. A service that crashes almost immediately (a bad entrypoint) still
+# looks "running" in the ~1ms window right after ``docker run -d``; letting the
+# stack settle and RE-OBSERVING every container catches that crash as a launch
+# FAILURE here (whole-stack teardown) rather than reporting a silently-degraded
+# stack healthy. Kept small -- the ongoing ``run_health_check`` job is the durable
+# net once the instance is live.
+_STACK_SETTLE_SECONDS = 1.0
 
 _SLUG_RE = re.compile(r"[^a-z0-9-]+")
 
@@ -304,12 +323,20 @@ class DockerRuntimeBackend:
         max_image_mb: int = 2048,
         worker_name: str = "ctfgen",
         firewall_image: str = FIREWALL_IMAGE,
+        build_mirror_network: str | None = None,
     ) -> None:
         bad = acknowledged_gaps - ACKNOWLEDGEABLE_GAPS
         if bad:
             raise ValueError(
                 f"unknown acknowledged_gaps {sorted(bad)}; allowed "
                 f"{sorted(ACKNOWLEDGEABLE_GAPS)}"
+            )
+        if build_mirror_network is not None and not _DOCKER_NAME_RE.match(
+            build_mirror_network
+        ):
+            raise ValueError(
+                "build_mirror_network must be a docker-name-safe string "
+                f"({_DOCKER_NAME_RE.pattern}); got {build_mirror_network!r}"
             )
         self._docker = docker_path or shutil.which("docker") or "docker"
         self._non_root_uid = non_root_uid
@@ -320,6 +347,11 @@ class DockerRuntimeBackend:
         self._max_image_mb = max_image_mb
         self._worker_name = worker_name
         self._firewall_image = firewall_image
+        # Optional pre-warmed, INTERNAL-only package mirror network a build may
+        # attach to (opt-in per call) instead of ``--network none``. None => the
+        # default strict no-network build stands. Verified ``Internal: true`` at
+        # use time so an operator misconfiguration can never become open egress.
+        self._build_mirror_network = build_mirror_network
         # Lazily-detected iptables binary that manipulates docker's ruleset on
         # this host (None once probed and found unavailable). The host-block is a
         # HARD FLOOR -- never acknowledged away.
@@ -330,11 +362,19 @@ class DockerRuntimeBackend:
     # -- subprocess plumbing ---------------------------------------------------
 
     def _run(
-        self, args: Sequence[str], *, timeout: int | None = None, check: bool = True
+        self,
+        args: Sequence[str],
+        *,
+        timeout: int | None = None,
+        check: bool = True,
+        env: dict[str, str] | None = None,
     ) -> subprocess.CompletedProcess[str]:
         """Run ``docker <args>`` with an argv list (never a shell). Raises
         :class:`DockerCommandError` on non-zero when ``check``. Never logs env or
-        payloads; argv is safe (no secrets pass through the runtime driver)."""
+        payloads; argv is safe (no secrets pass through the runtime driver).
+        ``env`` (when given) fully replaces the child environment -- used only to
+        select the classic builder (``DOCKER_BUILDKIT=0``) for a named-network
+        build; it carries no secrets."""
         argv = [self._docker, *args]
         try:
             proc = subprocess.run(  # noqa: S603 - argv list, no shell, trusted binary
@@ -343,6 +383,7 @@ class DockerRuntimeBackend:
                 text=True,
                 timeout=timeout if timeout is not None else self._run_timeout,
                 check=False,
+                env=env,
             )
         except FileNotFoundError as exc:  # pragma: no cover - env dependent
             raise DockerRuntimeError(f"docker binary not found: {self._docker}") from exc
@@ -673,6 +714,7 @@ class DockerRuntimeBackend:
         tag: str,
         dockerfile: str | None = None,
         network: bool = False,
+        allow_mirror: bool = False,
     ) -> str:
         """Build an image from ``context_dir`` and return its content-addressed
         digest (``sha256:...``). Build isolation (WORKER-only; the control plane
@@ -682,6 +724,14 @@ class DockerRuntimeBackend:
           (the base image must already be present locally). Pass ``network=True``
           only for a build that legitimately fetches, on an egress-restricted
           builder.
+        * ``allow_mirror=True`` opts THIS build into the operator-configured,
+          INTERNAL-only package-mirror network (``build_mirror_network``), so a
+          generated ``RUN pip install`` can reach the pre-warmed mirror WITHOUT
+          general egress. It is a strict superset of the default: with no mirror
+          configured it falls back to ``--network none`` unchanged, and the mirror
+          network is verified ``Internal: true`` before attach (a non-internal or
+          missing network is REFUSED, never silently downgraded to open egress).
+          ``network=True`` (the general-egress hatch) still wins if set.
         * ``--force-rm`` discards intermediate containers; ``--pull=false`` keeps
           the build from silently re-fetching a mutable base.
         * NO ``--build-arg`` / secrets are accepted here -- provider keys, flags,
@@ -695,12 +745,20 @@ class DockerRuntimeBackend:
         a rootful host -- see docs/security/runtime-isolation.md).
         """
         args = ["build", "--force-rm", "--pull=false", "--tag", tag]
-        if not network:
-            args += ["--network", "none"]
+        build_net = self._resolve_build_network(network, allow_mirror)
+        build_env: dict[str, str] | None = None
+        if build_net is not None:
+            args += ["--network", build_net]
+            if build_net not in ("none", "host", "default"):
+                # BuildKit rejects a NAMED --network for `docker build`; the
+                # classic builder supports it. Force classic ONLY for the mirror
+                # attach (a documented fallback -- runtime-isolation.md). The
+                # child env carries no secrets (build-args are never used here).
+                build_env = {**os.environ, "DOCKER_BUILDKIT": "0"}
         if dockerfile:
             args += ["--file", dockerfile]
         args.append(context_dir)
-        self._run(args, timeout=self._build_timeout)
+        self._run(args, timeout=self._build_timeout, env=build_env)
 
         size_bytes = int(
             self._run(
@@ -718,6 +776,55 @@ class DockerRuntimeBackend:
             ["image", "inspect", "--format", "{{.Id}}", tag], check=False
         ).stdout.strip()
         return digest
+
+    def image_id(self, image_ref: str) -> str | None:
+        """The local ``{{.Id}}`` (``sha256:...``) of ``image_ref``, or ``None`` if
+        the image is absent locally. Same inspect idiom ``build_image`` uses to
+        report the digest, so a launch-time compare against the recorded digest is
+        string-exact for byte-identical image content."""
+        out = self._run(
+            ["image", "inspect", "--format", "{{.Id}}", image_ref], check=False
+        )
+        if out.returncode != 0:
+            return None
+        return out.stdout.strip() or None
+
+    def _resolve_build_network(self, network: bool, allow_mirror: bool) -> str | None:
+        """Pick the ``docker build`` network. ``None`` => omit the flag (the
+        general-egress hatch, ``network=True``, unchanged and caller-less in-tree).
+        Otherwise: the operator's INTERNAL-only mirror network when THIS build
+        opted in and one is configured (verified internal, else refused), or the
+        strict ``"none"`` default. The security floor: the ONLY way a build ever
+        reaches off-``none`` without the explicit ``network`` hatch is a network
+        proven ``Internal: true`` (no route to the internet or the host)."""
+        if network:
+            return None
+        if allow_mirror and self._build_mirror_network is not None:
+            self._require_internal_build_network(self._build_mirror_network)
+            return self._build_mirror_network
+        return "none"
+
+    def _require_internal_build_network(self, network_name: str) -> None:
+        """Refuse unless ``network_name`` exists and is ``Internal: true``. This is
+        the mirror keystone: an ``--internal`` network has no route to the internet
+        or the host, so even a hostile ``RUN`` attached to it can reach only the
+        in-subnet mirror -- never general egress. Refusing a missing/non-internal
+        network turns an operator misconfiguration into a loud build failure rather
+        than silent open egress."""
+        out = self._run(
+            ["network", "inspect", "--format", "{{.Internal}}", network_name],
+            check=False,
+        )
+        if out.returncode != 0:
+            raise UnsupportedRuntimeError(
+                f"build mirror network {network_name!r} not found; refusing to "
+                "build (will not silently fall back to open egress)"
+            )
+        if out.stdout.strip().lower() != "true":
+            raise UnsupportedRuntimeError(
+                f"build mirror network {network_name!r} is not Internal; refusing "
+                "to attach a build to a network with a route off-subnet"
+            )
 
     # -- network ---------------------------------------------------------------
 
@@ -916,6 +1023,129 @@ class DockerRuntimeBackend:
             acknowledged_gaps=acked,
         )
 
+    def launch_stack(
+        self, request: StackRequest, *, command: Sequence[str] | None = None
+    ) -> LaunchResult:
+        """Launch N policy-constrained containers on ONE shared per-instance
+        isolated network (each reachable by its ``service_name`` via a network
+        alias), in the order given. Every container gets the SAME hardening from
+        ``ContainerPolicy`` (the generated compose's own runtime directives are
+        never honored). Refuses BEFORE creating anything if the host cannot enforce
+        the isolated-network host-block floor, and removes the whole (partial)
+        stack on any mid-launch failure so nothing leaks."""
+        probe = self.probe()
+        acked = self._gate(request.policy, probe)
+        hardening = policy_to_run_flags(
+            request.policy, probe, non_root_uid=self._non_root_uid
+        )
+        # A stack needs inter-service networking, so it always uses the isolated
+        # per-instance network -- which REQUIRES the host-block firewall floor.
+        if not self.firewall_available():
+            raise UnsupportedRuntimeError(
+                "a multi-service stack requires an enforceable host-block firewall "
+                "but this host has none; refusing to launch"
+            )
+        # A ContainerRequest for the network primitives (naming/subnet/host-block).
+        net_request = ContainerRequest(
+            instance_id=request.instance_id,
+            team_key=request.team_key,
+            image_ref=request.containers[0].image_ref,
+            policy=request.policy,
+        )
+        network_name, network_id = self._ensure_network(net_request)
+        base_name = self._container_name(request.instance_id)
+
+        resources: list[RuntimeResourceRef] = [
+            RuntimeResourceRef("network", network_id)
+        ]
+        endpoints: list[RuntimeEndpoint] = []
+        container_ids: list[str] = []
+        try:
+            for spec in request.containers:
+                safe_svc = _slug(spec.service_name, maxlen=24)
+                args: list[str] = [
+                    "run", "-d",
+                    "--name", f"{base_name}-{safe_svc}",
+                    "--network", network_name,
+                    # Sibling services resolve each other by service name.
+                    "--network-alias", spec.service_name,
+                    "--label", f"{MANAGED_LABEL}=true",
+                    "--label", f"{INSTANCE_LABEL}={request.instance_id}",
+                    "--label", f"{WORKER_LABEL}={self._worker_name}",
+                    "--label", f"{STACK_SERVICE_LABEL}={spec.service_name}",
+                    "--restart", "no",
+                ]
+                args += hardening
+                for port in spec.exposed_ports:
+                    args += ["--expose", str(port)]
+                for key, value in request.labels:
+                    args += ["--label", f"{key}={value}"]
+                args.append(spec.image_ref)
+                if command:
+                    args += list(command)
+                container_id = self._run(args).stdout.strip()
+                resources.append(RuntimeResourceRef("container", container_id))
+                container_ids.append(container_id)
+                ip = self._container_ip(container_id, network_name)
+                for port in spec.exposed_ports:
+                    if ip:
+                        # service-qualified so two services on the same port number
+                        # never collide onto one instance-endpoint record.
+                        endpoints.append(
+                            RuntimeEndpoint(
+                                container_port=port, host=ip, host_port=port,
+                                service=spec.service_name,
+                            )
+                        )
+        except Exception:
+            # Any partial stack must not leak: sweep every container of this
+            # instance (by label) + the network, then re-raise.
+            _LOG.error("stack launch failed for %s; removing partial stack",
+                       _slug(request.instance_id))
+            self.remove(request.instance_id, None)
+            raise
+
+        # A container that crashes almost immediately still looks "running" in the
+        # ~1ms window right after ``docker run -d``. Let the stack settle, then
+        # RE-OBSERVE every container: a service that is no longer coming up
+        # (exited / gone) is a launch FAILURE -- tear the WHOLE stack down (same
+        # compensation as the mid-launch path) and raise, so a broken partial stack
+        # is never reported healthy.
+        time.sleep(_STACK_SETTLE_SECONDS)
+        final = [self.observe(request.instance_id, cid) for cid in container_ids]
+        dead = [o for o in final if o.phase not in ("running", "starting")]
+        if dead:
+            _LOG.error(
+                "stack launch for %s has %d non-live container(s) after settle; "
+                "removing the whole stack",
+                _slug(request.instance_id), len(dead),
+            )
+            self.remove(request.instance_id, None)
+            raise DockerRuntimeError(
+                f"stack launch failed: {len(dead)} of {len(final)} service "
+                "container(s) are not live after start; removed the whole stack"
+            )
+        all_running = all(o.phase == "running" for o in final)
+        # The instance's tracked container is the FIRST (a dependency); the
+        # aggregate phase is running iff EVERY service container is running.
+        primary_obs = final[0]
+        aggregate = RuntimeObservation(
+            request.instance_id,
+            primary_obs.container_id,
+            "running" if all_running else "starting",
+        )
+        _LOG.info(
+            "launched stack instance=%s services=%d network=%s gaps=%s",
+            _slug(request.instance_id), len(request.containers), network_name,
+            sorted(acked),
+        )
+        return LaunchResult(
+            observation=aggregate,
+            runtime_resources=tuple(resources),
+            endpoints=tuple(endpoints),
+            acknowledged_gaps=acked,
+        )
+
     def _endpoints(
         self,
         request: ContainerRequest,
@@ -1032,6 +1262,39 @@ class DockerRuntimeBackend:
             check=False,
         ).stdout.split()
         return out[0] if out else None
+
+    def find_stack_containers(
+        self, instance_id: str
+    ) -> tuple[tuple[str, str], ...]:
+        """Every one of THIS worker's containers for ``instance_id`` as
+        ``(container_id, service_name)`` pairs, scoped by the worker label so a
+        multi-worker host never returns a peer's container. ``service_name`` is the
+        :data:`STACK_SERVICE_LABEL` value for a stack service, or ``""`` for a
+        single-image instance's (unlabeled) container. Empty tuple if none. Lets
+        the lifecycle verbs observe/restart/log EVERY service of a stack; callers
+        needing dependency order re-order by the stack manifest."""
+        out = self._run(
+            [
+                "ps",
+                "-a",
+                "--filter",
+                f"label={INSTANCE_LABEL}={instance_id}",
+                "--filter",
+                f"label={WORKER_LABEL}={self._worker_name}",
+                "--format",
+                '{{.ID}}\t{{.Label "' + STACK_SERVICE_LABEL + '"}}',
+            ],
+            check=False,
+        ).stdout
+        pairs: list[tuple[str, str]] = []
+        for line in out.splitlines():
+            row = line.strip()
+            if not row:
+                continue
+            cid, _, svc = row.partition("\t")
+            if cid:
+                pairs.append((cid, svc))
+        return tuple(pairs)
 
     def reap_managed(self, worker: str | None = None) -> int:
         """Force-remove every ctfgen-managed container owned by ``worker``

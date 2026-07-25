@@ -51,6 +51,7 @@ Which process needs which:
 | `CTFGEN_WORKER_TOKEN` **(required)** | The scoped bearer credential (`ctfw1.<id>.<secret>`) — the worker's **only** secret. Env only. | — |
 | `CTFGEN_WORKER_NAME` **(required)** | The registered worker name. | — |
 | `CTFGEN_WORKER_LEASE_SECONDS` | Job lease duration. | 60 |
+| `CTFGEN_WORKER_BUILD_MIRROR_NETWORK` | Name of a pre-warmed, **`--internal`** docker network hosting a package mirror, so `build_challenge` builds that `RUN pip install` can fetch from it without general egress. Left unset, builds stay strict `--network=none`. The network **must** be `Internal: true` (verified at build time) — a non-internal/missing network is refused, never downgraded to open egress. | — |
 
 ## Admin bootstrap / CLI / misc
 

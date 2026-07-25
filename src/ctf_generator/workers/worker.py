@@ -44,14 +44,20 @@ if TYPE_CHECKING:  # typing-only: importing these at runtime would pull the
     # effectful eval engine onto the worker's import graph (see EvalJobRunner).
     from ctf_generator.agent_eval import AdversarialDeltaReport, AgentEvalReport
 
+from ctf_generator.application.execution.compose_manifest import (
+    parse_compose_manifest,
+)
 from ctf_generator.domain.execution.runtime import (
+    MAX_BUILD_BUNDLE_BYTES,
     BuildBackend,
     BuildBundle,
     ContainerPolicy,
     ContainerRequest,
-    MAX_BUILD_BUNDLE_BYTES,
     RuntimeBackend,
     RuntimeLaunch,
+    StackContainerSpec,
+    StackRequest,
+    StackServiceImage,
 )
 from ctf_generator.domain.instances.models import (
     HealthObservation,
@@ -170,6 +176,53 @@ def _build_tag(definition_slug: str, version_no: int, bundle_sha256: str) -> str
     return f"ctfgen-build/{safe_slug}:v{version_no}-{bundle_sha256[:16]}"
 
 
+def _stack_service_tag(
+    definition_slug: str, version_no: int, bundle_sha256: str, service: str
+) -> str:
+    """A deterministic image tag for ONE service of a multi-service build. The
+    service name is folded into the repository so a stack's services never collide
+    with each other or with the single-image tag."""
+    safe_slug = _TAG_UNSAFE.sub("-", definition_slug.lower()).strip("-") or "challenge"
+    safe_svc = _TAG_UNSAFE.sub("-", service.lower()).strip("-") or "service"
+    return f"ctfgen-build/{safe_slug}-{safe_svc}:v{version_no}-{bundle_sha256[:16]}"
+
+
+def _expose_ports(expose: tuple[str, ...]) -> tuple[int, ...]:
+    """The numeric, in-range ports from a service's compose ``expose`` list;
+    non-numeric / out-of-range entries are dropped."""
+    ports: list[int] = []
+    for raw in expose:
+        text = str(raw).split("/")[0].strip()  # tolerate "9443/tcp"
+        if text.isdigit() and 1 <= int(text) <= 65535:
+            ports.append(int(text))
+    return tuple(ports)
+
+
+def _order_stack(
+    stack: tuple[StackServiceImage, ...],
+) -> tuple[StackServiceImage, ...]:
+    """Order services so each starts AFTER its ``depends_on`` (Kahn, name-sorted
+    for determinism). An unknown dependency or a cycle is not fatal here (the
+    manifest parser already refused those at build time) -- any unplaced services
+    are appended in name order so launch still proceeds."""
+    by_name = {s.service_name: s for s in stack}
+    remaining = {
+        s.service_name: {d for d in s.depends_on if d in by_name} for s in stack
+    }
+    ordered: list[StackServiceImage] = []
+    while remaining:
+        ready = sorted(n for n, deps in remaining.items() if not deps)
+        if not ready:  # a cycle slipped through -> append the rest deterministically
+            ordered.extend(by_name[n] for n in sorted(remaining))
+            break
+        for name in ready:
+            ordered.append(by_name[name])
+            del remaining[name]
+            for deps in remaining.values():
+                deps.discard(name)
+    return tuple(ordered)
+
+
 def _safe_extract_bundle(data: bytes, dest: Path) -> None:
     """Extract a build bundle tar into ``dest`` after validating every member.
 
@@ -283,6 +336,20 @@ class WorkerControlPlaneClient(Protocol):
     def replace_instance(self, instance_id: str, now: datetime) -> Instance:
         """Re-place + re-reserve an instance whose ``assigned_worker`` is ``None``
         (the slice-2 launch contract) and return the re-placed instance."""
+        ...
+
+    def expected_image_digest(self, instance_id: str, now: datetime) -> str | None:
+        """The recorded build digest to pin ``instance_id``'s launch to, or
+        ``None`` when none is recorded (pinning is then skipped). Authenticated +
+        ownership-checked control-plane read of the build-image registry."""
+        ...
+
+    def launch_stack_services(
+        self, instance_id: str, now: datetime
+    ) -> tuple[StackServiceImage, ...]:
+        """The multi-service stack to launch for ``instance_id`` (per-service
+        images + digests + depends_on/expose), or ``()`` for a single-image
+        instance. Authenticated + ownership-checked read of the stack registry."""
         ...
 
     def report_health(self, observation: HealthObservation, now: datetime) -> None:
@@ -591,10 +658,15 @@ class Worker:
                 now,
             )
         for ep in launched.endpoints:
+            # Service-qualify the name for a multi-container stack so two services
+            # exposing the SAME port number do not collide onto one endpoint record
+            # (a single-container launch carries no service and keeps ``port-<n>``).
+            svc = getattr(ep, "service", None)
+            ep_name = f"{svc}-port-{ep.container_port}" if svc else f"port-{ep.container_port}"
             self._client.report_endpoint(
                 InstanceEndpoint(
                     instance_id=instance.instance_id,
-                    name=f"port-{ep.container_port}",
+                    name=ep_name,
                     host=ep.host,
                     port=ep.host_port,
                     protocol="tcp",
@@ -633,8 +705,17 @@ class Worker:
                 f"{instance.assigned_worker!r}, not this worker "
                 f"{self._config.worker_name!r}; refusing to launch"
             )
-        request = self._build_request(instance)
-        launched = self._backend.launch(request, command=self._command)
+        # A multi-service (compose) instance launches the WHOLE stack; a
+        # single-image instance keeps the original one-container path.
+        stack = self._client.launch_stack_services(instance_id, now)
+        if stack:
+            launched = self._launch_stack(instance, stack)
+        else:
+            request = self._build_request(instance)
+            # Digest-pin BEFORE starting: if the control plane recorded a build
+            # digest for this image, the local image MUST match it or we refuse.
+            self._verify_image_digest(instance_id, instance.image_ref, now)
+            launched = self._backend.launch(request, command=self._command)
         container_id = launched.observation.container_id
         try:
             # Persist the runtime resources + endpoints + health IMMEDIATELY, then
@@ -659,6 +740,69 @@ class Worker:
             },
         )
 
+    def _verify_image_digest(
+        self, instance_id: str, image_ref: str, now: datetime
+    ) -> None:
+        """Refuse to launch a mutated or substituted image. If the control plane
+        recorded a build digest for ``image_ref`` (the registry row this instance's
+        image_ref resolves to), the locally-present image's id MUST equal it; a
+        missing local image OR a mismatch is refused with
+        :class:`UnsupportedRuntimeError` (``_process`` classifies it
+        infrastructure/non-retryable -- a tampered image must never launch and a
+        retry cannot fix it). No recorded digest (a digest-less build or no
+        registry row) => pinning is skipped, exactly as an image_ref miss already
+        degrades launch. image ids/digests are references, never secrets.
+
+        Reusable per image, so the compose-aware multi-image launch pins each
+        service's container against its own recorded digest."""
+        self._refuse_on_digest_mismatch(
+            image_ref, self._client.expected_image_digest(instance_id, now)
+        )
+
+    def _refuse_on_digest_mismatch(
+        self, image_ref: str, expected: str | None
+    ) -> None:
+        """Refuse (``UnsupportedRuntimeError``) if a recorded ``expected`` digest
+        does not match the local image's id, or the image is absent locally. No
+        recorded digest => skip. Shared by the single-image pin and the per-service
+        stack pin (image ids/digests are references, never secrets)."""
+        if expected is None:
+            return
+        actual = self._backend.image_id(image_ref)
+        if actual != expected:
+            raise UnsupportedRuntimeError(
+                f"image {image_ref!r} local id {actual!r} does not match the "
+                f"recorded build digest {expected!r}; refusing to launch a "
+                "mutated or substituted image"
+            )
+
+    def _launch_stack(
+        self, instance: Instance, stack: tuple[StackServiceImage, ...]
+    ) -> RuntimeLaunch:
+        """Digest-pin every service image, then launch the whole stack in
+        dependency (start) order on one isolated per-instance network."""
+        for svc in stack:
+            # Stack rows always carry a digest -> every service is pinned.
+            self._refuse_on_digest_mismatch(svc.image_ref, svc.image_digest)
+        ordered = _order_stack(stack)
+        containers = tuple(
+            StackContainerSpec(
+                service_name=svc.service_name,
+                image_ref=svc.image_ref,
+                expected_digest=svc.image_digest,
+                exposed_ports=_expose_ports(svc.expose),
+            )
+            for svc in ordered
+        )
+        team_key = f"{instance.competition_id}:{instance.team_name}"
+        request = StackRequest(
+            instance_id=instance.instance_id,
+            team_key=team_key,
+            policy=self._policy,
+            containers=containers,
+        )
+        return self._backend.launch_stack(request, command=self._command)
+
     def _do_reset(self, instance_id: str, now: datetime) -> _DispatchOutcome:
         # A reset is a clean rebuild: tear down the old runtime objects, relaunch.
         self._backend.remove(instance_id, None)
@@ -666,22 +810,31 @@ class Worker:
 
     def _do_restart(self, instance_id: str, now: datetime) -> _DispatchOutcome:
         instance = self._require_instance(instance_id)
-        cid = self._current_container(instance_id)
-        if cid:
+        # Restart EVERY container of the instance in dependency (start) order, so a
+        # multi-service stack comes back up with each service after the services it
+        # depends on (a single-image instance is just one container).
+        ordered = self._ordered_containers(instance_id, now)
+        for cid in ordered:
             self._backend.restart(instance_id, cid)
-        obs = self._backend.observe(instance_id, cid)
+        observations = [self._backend.observe(instance_id, cid) for cid in ordered]
+        state, healthy = self._aggregate_state(observations)
         self._client.report_health(
             HealthObservation(
                 instance_id=instance_id,
-                observed_state="healthy" if obs.phase == "running" else "degraded",
-                healthy=obs.phase == "running",
+                observed_state=state,
+                healthy=healthy,
                 worker=self._config.worker_name,
                 generation=instance.generation,
                 observed_at=now,
             ),
             now,
         )
-        return _DispatchOutcome(result={"phase": obs.phase})
+        return _DispatchOutcome(
+            result={
+                "phase": "running" if healthy else state,
+                "services": len(ordered),
+            }
+        )
 
     def _do_stop(self, instance_id: str, now: datetime) -> _DispatchOutcome:
         instance = self._require_instance(instance_id)
@@ -715,13 +868,18 @@ class Worker:
 
     def _do_health(self, instance_id: str, now: datetime) -> _DispatchOutcome:
         instance = self._require_instance(instance_id)
-        cid = self._current_container(instance_id)
-        obs = self._backend.health_check(instance_id, cid) if cid else None
-        healthy = bool(obs and obs.phase == "running")
+        # Health-check EVERY container of the instance: a stack is healthy iff ALL
+        # its service containers are running, so a crashed sibling is never
+        # invisible (a single-image instance is just one container).
+        containers = self._backend.find_stack_containers(instance_id)
+        observations = [
+            self._backend.health_check(instance_id, cid) for cid, _svc in containers
+        ]
+        state, healthy = self._aggregate_state(observations)
         self._client.report_health(
             HealthObservation(
                 instance_id=instance_id,
-                observed_state="healthy" if healthy else "absent",
+                observed_state=state,
                 healthy=healthy,
                 worker=self._config.worker_name,
                 generation=instance.generation,
@@ -729,15 +887,52 @@ class Worker:
             ),
             now,
         )
-        return _DispatchOutcome(result={"healthy": healthy})
+        return _DispatchOutcome(
+            result={"healthy": healthy, "services": len(containers)}
+        )
 
     def _do_logs(self, instance_id: str, now: datetime) -> _DispatchOutcome:
-        cid = self._current_container(instance_id)
-        if not cid:
+        # Collect from EVERY service container, not just one, so a stack's logs are
+        # complete. Raw logs may carry challenge output; return only a total line
+        # count, never content.
+        containers = self._backend.find_stack_containers(instance_id)
+        if not containers:
             return _DispatchOutcome(result={"log_lines": 0})
-        logs = self._backend.collect_logs(instance_id, cid)
-        # Raw logs may carry challenge output; return only a length, never content.
-        return _DispatchOutcome(result={"log_lines": len(logs.splitlines())})
+        total = sum(
+            len(self._backend.collect_logs(instance_id, cid).splitlines())
+            for cid, _svc in containers
+        )
+        return _DispatchOutcome(
+            result={"log_lines": total, "services": len(containers)}
+        )
+
+    @staticmethod
+    def _aggregate_state(observations: list) -> tuple[str, bool]:
+        """Fold per-container observations into one ``(observed_state, healthy)``:
+        healthy iff there is at least one container AND every one is running; else
+        ``absent`` (no containers) or ``degraded`` (some container not running)."""
+        if not observations:
+            return "absent", False
+        if all(o.phase == "running" for o in observations):
+            return "healthy", True
+        return "degraded", False
+
+    def _ordered_containers(self, instance_id: str, now: datetime) -> list[str]:
+        """This instance's container ids in dependency (start) order for a stack,
+        or the single container for a single-image instance. Restart walks them in
+        this order so a service comes back up after the services it depends on."""
+        pairs = self._backend.find_stack_containers(instance_id)
+        if len(pairs) <= 1:
+            return [cid for cid, _svc in pairs]
+        stack = self._client.launch_stack_services(instance_id, now)
+        if not stack:
+            return [cid for cid, _svc in pairs]
+        order = {svc.service_name: i for i, svc in enumerate(_order_stack(stack))}
+        fallback = len(order)
+        return [
+            cid
+            for cid, svc in sorted(pairs, key=lambda p: order.get(p[1], fallback))
+        ]
 
     # -- agent evaluation (M15b, NOT instance-scoped) --------------------------
 
@@ -906,25 +1101,109 @@ class Worker:
             bundle_root = Path(tmp_dir) / "bundle"
             bundle_root.mkdir()
             _safe_extract_bundle(bundle.data, bundle_root)
-            context_dir = _select_build_context(bundle_root)
-            tag = _build_tag(definition_slug, version_no, bundle.bundle_sha256)
-            # network=False: the generated Dockerfile is hostile input; no
-            # egress during the build unless a future capability-acknowledged
-            # posture explicitly allows it (not implemented -- see the design
-            # note's documented limitation on families needing package fetch).
-            digest = self._build_backend.build_image(
-                context_dir=str(context_dir), tag=tag, network=False
+            result = self._build_from_bundle(
+                definition_slug, version_no, bundle.bundle_sha256, bundle_root
             )
 
-        return _DispatchOutcome(
-            result={
+        return _DispatchOutcome(result=result)
+
+    def _build_image(self, context_dir: Path, tag: str) -> str:
+        """Build one image with the standard build posture. network=False: the
+        generated Dockerfile is hostile input; no general egress. allow_mirror=True
+        opts into the operator's INTERNAL-only package mirror when one is
+        configured (else a strict --network=none build) so families that RUN pip
+        install can fetch from the pre-warmed mirror without reaching the internet."""
+        return self._build_backend.build_image(
+            context_dir=str(context_dir), tag=tag, network=False, allow_mirror=True
+        )
+
+    def _build_from_bundle(
+        self,
+        definition_slug: str,
+        version_no: int,
+        bundle_sha256: str,
+        bundle_root: Path,
+    ) -> dict:
+        """Build a bundle into an image (single-image families) OR a stack of
+        service images (compose families), returning the completion result.
+
+        A ``docker-compose.yml`` present in the bundle is read as a MANIFEST (never
+        executed -- see ``compose_manifest``): each service's context is built into
+        its own image, and the result carries a ``services`` list PLUS a top-level
+        ``image_ref``/``digest`` pointing at the PRIMARY (ingress) service, so a
+        single-image consumer stays back-compatible. A bundle with no compose keeps
+        the original single-image path byte-for-byte."""
+        manifest = self._read_compose_manifest(bundle_root)
+        if manifest is None:
+            context_dir = _select_build_context(bundle_root)
+            tag = _build_tag(definition_slug, version_no, bundle_sha256)
+            digest = self._build_image(context_dir, tag)
+            return {
                 "definition_slug": definition_slug,
                 "version_no": version_no,
-                "bundle_sha256": bundle.bundle_sha256,
+                "bundle_sha256": bundle_sha256,
                 "image_ref": tag,
                 "digest": digest,
             }
-        )
+
+        services: list[dict] = []
+        primary: dict | None = None
+        for svc in manifest.services:
+            context_dir = self._resolve_service_context(bundle_root, svc.build_context)
+            svc_tag = _stack_service_tag(
+                definition_slug, version_no, bundle_sha256, svc.name
+            )
+            svc_digest = self._build_image(context_dir, svc_tag)
+            entry = {
+                "service": svc.name,
+                "image_ref": svc_tag,
+                "digest": svc_digest,
+                "depends_on": list(svc.depends_on),
+                "expose": list(svc.expose),
+                "is_primary": svc.is_primary,
+            }
+            services.append(entry)
+            if svc.is_primary:
+                primary = entry
+        primary = primary or services[0]
+        return {
+            "definition_slug": definition_slug,
+            "version_no": version_no,
+            "bundle_sha256": bundle_sha256,
+            # Top-level = the PRIMARY service (back-compat with single-image
+            # consumers and the Instance's single image_ref).
+            "image_ref": primary["image_ref"],
+            "digest": primary["digest"],
+            "services": services,
+        }
+
+    @staticmethod
+    def _read_compose_manifest(bundle_root: Path):
+        """Parse the bundle's compose file (if any) into a validated stack manifest,
+        or ``None`` for a single-image bundle. Checks the standard compose names."""
+        for name in ("docker-compose.yml", "docker-compose.yaml", "compose.yaml", "compose.yml"):
+            path = bundle_root / name
+            if path.is_file():
+                return parse_compose_manifest(path.read_text(encoding="utf-8"))
+        return None
+
+    @staticmethod
+    def _resolve_service_context(bundle_root: Path, build_context: str) -> Path:
+        """Resolve a service's build context to a real dir strictly inside the
+        bundle (defence-in-depth over the manifest parser's lexical check), with a
+        Dockerfile. A context escaping the bundle or missing a Dockerfile is a
+        clean content error."""
+        root = bundle_root.resolve()
+        ctx = (bundle_root / build_context).resolve()
+        if ctx != root and root not in ctx.parents:
+            raise ValueError(
+                f"service build context {build_context!r} escapes the bundle"
+            )
+        if not (ctx / "Dockerfile").is_file():
+            raise ValueError(
+                f"service build context {build_context!r} has no Dockerfile"
+            )
+        return ctx
 
     def _current_container(self, instance_id: str) -> str | None:
         # Via the Protocol -- keeps docker-CLI verbs inside the adapter and scopes
@@ -986,7 +1265,10 @@ def main(argv: Sequence[str] | None = None) -> int:  # pragma: no cover - entryp
     lease_seconds = int(os.environ.get("CTFGEN_WORKER_LEASE_SECONDS", "60"))
     config = WorkerConfig(worker_name=name, lease_seconds=lease_seconds)
     client = HttpControlPlaneClient(base_url=base_url, token=token)
-    backend = DockerRuntimeBackend()
+    # Optional pre-warmed, INTERNAL-only package mirror network for builds that
+    # RUN pip install; unset => strict --network=none builds (the secure default).
+    build_mirror_network = os.environ.get("CTFGEN_WORKER_BUILD_MIRROR_NETWORK") or None
+    backend = DockerRuntimeBackend(build_mirror_network=build_mirror_network)
     # DockerRuntimeBackend already satisfies the BuildBackend Protocol
     # structurally (build_image/is_available) -- one instance serves both
     # roles; see docs/architecture/build-challenge-worker-pipeline.md.

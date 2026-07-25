@@ -254,10 +254,133 @@ of work as the job's terminalization.
   a **hard create-time reject** on "no built image yet" is a deliberate,
   documented non-goal here (it changes the API contract).
 
-**Still deferred** (honest scope): digest-pinning at launch (verifying the pulled
-image's digest matches the recorded one), a compose-aware multi-image build/launch
-model, and the build-time package-mirror that would let network-dependent families
-build under `network=none` — all named in slice 1 above and unchanged.
+All three named tail deferrals are now closed (tail slices A/B/C below). Two
+**residual sub-gaps of the compose MVP** remain, documented in slice C.
+
+## Tail slice A — build-time package mirror (landed)
+
+`DockerRuntimeBackend.build_image` gained `allow_mirror: bool = False` (and a new
+`build_mirror_network: str | None` constructor arg, wired from
+`CTFGEN_WORKER_BUILD_MIRROR_NETWORK`). The worker passes `allow_mirror=True` for
+every `build_challenge` build. The mechanism is a strict superset of the
+`--network=none` default:
+
+* With **no** mirror configured, the build stays `--network=none` — byte-identical
+  to before, so the security floor never weakens by default.
+* With a mirror configured **and** opted in, the build attaches to that network —
+  but only after `build_image` verifies it is `Internal: true` (`docker network
+  inspect`). An `--internal` network has **no route to the internet or the host**,
+  so even a hostile generated `RUN pip install` can reach only the pre-warmed,
+  in-subnet mirror. A **missing or non-internal** mirror network is **refused**
+  (`UnsupportedRuntimeError`), never silently downgraded to open egress — an
+  operator misconfiguration fails loud instead of opening the internet to a
+  hostile build.
+* BuildKit rejects a *named* `--network` for `docker build`, so the mirror attach
+  forces the classic builder (`DOCKER_BUILDKIT=0`) for that call only — a
+  documented fallback (`docs/security/runtime-isolation.md`); the `none`/default
+  paths keep using BuildKit. No `--build-arg` is added; the child env carries no
+  secrets. Proven end-to-end against real Docker in
+  `tests/test_build_mirror_integration.py` (internal mirror reachable; `none`
+  cannot reach it; non-internal/missing refused).
+
+**Operator note.** The mirror is an operator-supplied service: stand up a
+pre-warmed PyPI proxy (e.g. `devpi`/`bandersnatch`) on an `--internal` docker
+network on each worker host, set `CTFGEN_WORKER_BUILD_MIRROR_NETWORK` to that
+network's name, and point the generated Dockerfiles' pip index at the mirror
+(renderer/template config — out of band of this backend seam). Left unset, builds
+that need egress continue to refuse (the safe default).
+
+## Tail slice B — digest-pinning at launch (landed)
+
+At build time the worker records the built image's content id (`docker image
+inspect {{.Id}}`) into `challenge_build_images.image_digest`. This slice makes the
+launch worker **verify** it: before starting a container, the worker asks the
+control plane for the digest recorded for the image its instance carries and
+refuses to launch a **mutated or substituted** image.
+
+* **Resolver** (`SqlAlchemyChallengeBuildImageRepository.digest_for_version_image`)
+  — keyed on the registry's unique `(challenge_version_id, image_ref)`, so it pins
+  the digest of the image the instance *actually* carries (fixed at request time),
+  not merely the newest build. Non-raising on a miss.
+* **Ownership-gated verb** (`WorkerInstanceService.expected_image_digest`) — the
+  launch worker holds a launch lease, so the digest read is gated by instance
+  OWNERSHIP (exactly like `get_owned_instance`), never a build-lease fence. A new
+  `GET /worker/instances/{id}/expected-image-digest` worker-gateway route carries
+  it over HTTP; the in-process `LocalControlPlaneClient` delegates to the service.
+  The frozen `Instance` aggregate and the DB schema are **untouched** — the digest
+  is sourced from the authoritative registry, not duplicated onto the instance.
+* **Comparison on the worker** (`RuntimeBackend.image_id` → `docker image inspect
+  {{.Id}}`) — the same idiom `build_image` used to record the digest, so the
+  compare is string-exact for byte-identical content. On a **mismatch** or a
+  **missing local image**, the worker refuses with `UnsupportedRuntimeError`
+  (`_process` classifies it infrastructure/non-retryable — a tampered image must
+  never launch and a retry cannot fix it). The reusable `_verify_image_digest`
+  helper pins one image, so the compose-aware multi-image launch pins each
+  service's container against its own recorded digest.
+
+No recorded digest (a digest-less build or no registry row) skips pinning,
+degrading exactly as an image_ref miss already does. **Honest scope**: this
+catches local image tamper/substitution between build and launch; it is **not**
+MITM-proof against a fully compromised control plane, which could lie about the
+expected digest just as it could serve any poisoned instruction (the same caveat
+as the bundle content-hash verify). Proven against real Docker
+(`RuntimeBackend.image_id` matches the build digest) and real PostgreSQL (the
+resolver + the ownership gate), plus host coverage of the launch refusal paths.
+
+## Tail slice C — compose-aware multi-image build + launch (landed)
+
+A multi-service family renders several `services/<name>/Dockerfile` trees plus a
+`docker-compose.yml`; the worker now builds **and launches** each service, instead
+of the single-image simplification.
+
+The compose file is read as a **MANIFEST, never executed**. Running `docker compose
+up` would publish host ports and apply the compose's own limits/caps — bypassing
+`ContainerPolicy`, the `--internal` per-instance network, and the host-block
+firewall. So `application/execution/compose_manifest.parse_compose_manifest`
+(`yaml.safe_load` + a **strict allowlist**) reads only each service's
+`build`/`expose`/`depends_on`; every runtime directive is ignored (our policy is
+authoritative). It validates build paths stay in-bundle, bounds the service count
+(≤8), detects `depends_on` cycles, and marks the ingress (host-`ports:`) service
+primary.
+
+* **Build N** (slice 3a): `worker._build_from_bundle` builds each service context
+  (reusing the mirror-aware `_build_image`) and reports a `services:[...]` result
+  with a top-level `image_ref`/`digest` = the PRIMARY service (single-image
+  back-compat). A new append-only `challenge_build_stack_images` table (migration
+  `0016`) records one row per service (`service_name`/`image_ref`/`image_digest`/
+  `bundle_sha256`/`depends_on`/`expose`/`is_primary`), grouped by `bundle_sha256`.
+  `WorkerJobService.complete` writes the primary to `challenge_build_images`
+  (back-compat) AND one stack row per service, all keyed to the JOB's own version.
+* **Launch N** (slice 3b): `DockerRuntimeBackend.launch_stack` starts N
+  policy-constrained containers on ONE shared `--internal` per-instance network,
+  each reachable by its service name (a `--network-alias`), in `depends_on` order.
+  Every container gets the SAME `ContainerPolicy` hardening. A mid-launch failure
+  removes the whole partial stack (no leaks); teardown is the existing
+  label-scoped `remove`/`reap` (already N-container-safe). The worker resolves the
+  stack via a new ownership-gated `GET /worker/instances/{id}/launch-stack`
+  verb, **digest-pins each service** against its recorded digest (reusing the
+  slice-B helper), then calls `launch_stack`. Proven end-to-end against real
+  Docker (two alpine services on one net; inter-service DNS resolves by service
+  name; clean teardown; partial-failure leaves nothing) and real PostgreSQL (the
+  stack write/resolve + the ownership-gated route), plus host coverage of the
+  dependency-ordered, digest-pinned dispatch.
+
+**Residual sub-gaps (documented, honest scope)** — the compose MVP collapses the
+generated network topology into ONE shared internal network and does not inject
+compose-`environment` secrets:
+
+* **Network segmentation** — a compose that isolates `backend` from `frontend`
+  (service-A cannot reach service-B) is NOT faithfully reproduced; all services
+  share the one host-blocked instance network. The fail-direction is toward MORE
+  reachability *inside* the already-host-blocked instance net, **never** toward
+  host or cross-instance reachability, so the isolation floor is intact.
+* **Flag-via-compose-env** — a family that reads its flag ONLY from a compose
+  `${CTFGEN_FLAG:-…}` interpolation (no in-image fallback) would launch without a
+  flag; scoped-secret injection at launch is a separate mechanism (out of band of
+  this record).
+
+Both are genuine follow-ups, not silent omissions; a challenge whose design
+depends on either must be validated before use on a real event.
 
 ## Security posture summary (checklist against the hard rules)
 

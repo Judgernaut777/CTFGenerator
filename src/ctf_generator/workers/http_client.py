@@ -43,7 +43,11 @@ from ctf_generator.application.execution.worker_job_service import (
     WorkerStaleError,
 )
 from ctf_generator.application.worker_enrollment import ScopeError
-from ctf_generator.domain.execution.runtime import BuildBundle, MAX_BUILD_BUNDLE_BYTES
+from ctf_generator.domain.execution.runtime import (
+    BuildBundle,
+    MAX_BUILD_BUNDLE_BYTES,
+    StackServiceImage,
+)
 from ctf_generator.domain.instances.models import (
     HealthObservation,
     Instance,
@@ -205,6 +209,34 @@ class HttpControlPlaneClient:
         response = self._post(f"/worker/instances/{instance_id}/replace")
         self._raise_for_status(response)
         return _instance_from_wire(response.json())
+
+    def expected_image_digest(self, instance_id: str, now: datetime) -> str | None:
+        response = self._get(
+            f"/worker/instances/{instance_id}/expected-image-digest"
+        )
+        if response.status_code == 404:
+            # Instance vanished between fetch and pin -> skip pinning (the launch
+            # itself will surface the missing instance), mirroring get_instance.
+            return None
+        self._raise_for_status(response)
+        return response.json().get("image_digest")
+
+    def launch_stack_services(self, instance_id: str, now: datetime):
+        response = self._get(f"/worker/instances/{instance_id}/launch-stack")
+        if response.status_code == 404:
+            return ()
+        self._raise_for_status(response)
+        return tuple(
+            StackServiceImage(
+                service_name=s["service_name"],
+                image_ref=s["image_ref"],
+                image_digest=s["image_digest"],
+                depends_on=tuple(s.get("depends_on") or ()),
+                expose=tuple(s.get("expose") or ()),
+                is_primary=bool(s.get("is_primary")),
+            )
+            for s in response.json().get("services", [])
+        )
 
     def report_health(self, observation: HealthObservation, now: datetime) -> None:
         # The worker field is NOT sent -- the gateway stamps it from the credential.
