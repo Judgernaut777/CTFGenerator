@@ -47,6 +47,7 @@ import re
 import shlex
 import shutil
 import subprocess
+import time
 from collections.abc import Sequence
 from dataclasses import dataclass, field
 
@@ -117,6 +118,15 @@ _HOSTBLOCK_COMMENT = "ctfgen-hostblock"
 # EXPLICITLY acknowledged (never silently); seccomp is deliberately absent -- it
 # is a hard floor that can never be acknowledged away.
 ACKNOWLEDGEABLE_GAPS = frozenset({"rootless", "user_namespace", "apparmor"})
+
+# How long a freshly-started stack is allowed to settle before the launch's final
+# liveness pass. A service that crashes almost immediately (a bad entrypoint) still
+# looks "running" in the ~1ms window right after ``docker run -d``; letting the
+# stack settle and RE-OBSERVING every container catches that crash as a launch
+# FAILURE here (whole-stack teardown) rather than reporting a silently-degraded
+# stack healthy. Kept small -- the ongoing ``run_health_check`` job is the durable
+# net once the instance is live.
+_STACK_SETTLE_SECONDS = 1.0
 
 _SLUG_RE = re.compile(r"[^a-z0-9-]+")
 
@@ -1049,7 +1059,7 @@ class DockerRuntimeBackend:
             RuntimeResourceRef("network", network_id)
         ]
         endpoints: list[RuntimeEndpoint] = []
-        observations: list[RuntimeObservation] = []
+        container_ids: list[str] = []
         try:
             for spec in request.containers:
                 safe_svc = _slug(spec.service_name, maxlen=24)
@@ -1075,12 +1085,17 @@ class DockerRuntimeBackend:
                     args += list(command)
                 container_id = self._run(args).stdout.strip()
                 resources.append(RuntimeResourceRef("container", container_id))
-                observations.append(self.observe(request.instance_id, container_id))
+                container_ids.append(container_id)
                 ip = self._container_ip(container_id, network_name)
                 for port in spec.exposed_ports:
                     if ip:
+                        # service-qualified so two services on the same port number
+                        # never collide onto one instance-endpoint record.
                         endpoints.append(
-                            RuntimeEndpoint(container_port=port, host=ip, host_port=port)
+                            RuntimeEndpoint(
+                                container_port=port, host=ip, host_port=port,
+                                service=spec.service_name,
+                            )
                         )
         except Exception:
             # Any partial stack must not leak: sweep every container of this
@@ -1090,10 +1105,30 @@ class DockerRuntimeBackend:
             self.remove(request.instance_id, None)
             raise
 
-        all_running = all(o.phase == "running" for o in observations)
+        # A container that crashes almost immediately still looks "running" in the
+        # ~1ms window right after ``docker run -d``. Let the stack settle, then
+        # RE-OBSERVE every container: a service that is no longer coming up
+        # (exited / gone) is a launch FAILURE -- tear the WHOLE stack down (same
+        # compensation as the mid-launch path) and raise, so a broken partial stack
+        # is never reported healthy.
+        time.sleep(_STACK_SETTLE_SECONDS)
+        final = [self.observe(request.instance_id, cid) for cid in container_ids]
+        dead = [o for o in final if o.phase not in ("running", "starting")]
+        if dead:
+            _LOG.error(
+                "stack launch for %s has %d non-live container(s) after settle; "
+                "removing the whole stack",
+                _slug(request.instance_id), len(dead),
+            )
+            self.remove(request.instance_id, None)
+            raise DockerRuntimeError(
+                f"stack launch failed: {len(dead)} of {len(final)} service "
+                "container(s) are not live after start; removed the whole stack"
+            )
+        all_running = all(o.phase == "running" for o in final)
         # The instance's tracked container is the FIRST (a dependency); the
         # aggregate phase is running iff EVERY service container is running.
-        primary_obs = observations[0]
+        primary_obs = final[0]
         aggregate = RuntimeObservation(
             request.instance_id,
             primary_obs.container_id,
@@ -1227,6 +1262,39 @@ class DockerRuntimeBackend:
             check=False,
         ).stdout.split()
         return out[0] if out else None
+
+    def find_stack_containers(
+        self, instance_id: str
+    ) -> tuple[tuple[str, str], ...]:
+        """Every one of THIS worker's containers for ``instance_id`` as
+        ``(container_id, service_name)`` pairs, scoped by the worker label so a
+        multi-worker host never returns a peer's container. ``service_name`` is the
+        :data:`STACK_SERVICE_LABEL` value for a stack service, or ``""`` for a
+        single-image instance's (unlabeled) container. Empty tuple if none. Lets
+        the lifecycle verbs observe/restart/log EVERY service of a stack; callers
+        needing dependency order re-order by the stack manifest."""
+        out = self._run(
+            [
+                "ps",
+                "-a",
+                "--filter",
+                f"label={INSTANCE_LABEL}={instance_id}",
+                "--filter",
+                f"label={WORKER_LABEL}={self._worker_name}",
+                "--format",
+                '{{.ID}}\t{{.Label "' + STACK_SERVICE_LABEL + '"}}',
+            ],
+            check=False,
+        ).stdout
+        pairs: list[tuple[str, str]] = []
+        for line in out.splitlines():
+            row = line.strip()
+            if not row:
+                continue
+            cid, _, svc = row.partition("\t")
+            if cid:
+                pairs.append((cid, svc))
+        return tuple(pairs)
 
     def reap_managed(self, worker: str | None = None) -> int:
         """Force-remove every ctfgen-managed container owned by ``worker``

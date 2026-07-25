@@ -559,6 +559,7 @@ class ChallengeBuildStackImage(Base):
         CheckConstraint(r"service_name !~ '^\s*$'", name="service_name_non_empty"),
         CheckConstraint(r"image_ref !~ '^\s*$'", name="image_ref_non_empty"),
         CheckConstraint(r"image_digest !~ '^\s*$'", name="image_digest_non_empty"),
+        CheckConstraint(r"bundle_sha256 !~ '^\s*$'", name="bundle_sha256_non_empty"),
         Index(
             "ix_challenge_build_stack_images_version", "challenge_version_id"
         ),

@@ -43,6 +43,8 @@ class _FakeBackend:
         launch_phase: str = "running",
         raise_unsupported: bool = False,
         image_local_id: str | None = None,
+        containers: tuple[tuple[str, str], ...] | None = None,
+        phase_by_cid: dict[str, str] | None = None,
     ):
         self.calls: list[tuple] = []
         self.launch_phase = launch_phase
@@ -51,6 +53,12 @@ class _FakeBackend:
         # The local image id image_id() reports (for digest-pinning tests);
         # None => "image absent locally".
         self.image_local_id = image_local_id
+        # The (container_id, service_name) pairs find_stack_containers reports;
+        # None => a single unlabeled container (the single-image instance shape).
+        self.containers = containers
+        # Per-container observed phase (defaults to "running"); lets a stack test
+        # simulate one crashed sibling.
+        self.phase_by_cid = phase_by_cid or {}
 
     def launch(self, request: ContainerRequest, *, command=None) -> LaunchResult:
         self.calls.append(("launch", request.instance_id))
@@ -78,21 +86,26 @@ class _FakeBackend:
         )
 
     def observe(self, instance_id, container_id):
-        return RuntimeObservation(instance_id, container_id, "running")
+        return RuntimeObservation(
+            instance_id, container_id, self.phase_by_cid.get(container_id, "running")
+        )
 
     def health_check(self, instance_id, container_id):
-        return RuntimeObservation(instance_id, container_id, "running")
+        return RuntimeObservation(
+            instance_id, container_id, self.phase_by_cid.get(container_id, "running")
+        )
 
     def stop(self, instance_id, container_id, *, timeout=10):
         self.calls.append(("stop", instance_id))
 
     def restart(self, instance_id, container_id, *, timeout=10):
-        self.calls.append(("restart", instance_id))
+        self.calls.append(("restart", instance_id, container_id))
 
     def remove(self, instance_id, container_id):
         self.calls.append(("remove", instance_id))
 
     def collect_logs(self, instance_id, container_id, *, tail=2000):
+        self.calls.append(("collect_logs", instance_id, container_id))
         return "line1\nline2\n"
 
     def image_id(self, image_ref):
@@ -102,6 +115,12 @@ class _FakeBackend:
     def find_container(self, instance_id):
         self.calls.append(("find_container", instance_id))
         return self.container_id
+
+    def find_stack_containers(self, instance_id):
+        self.calls.append(("find_stack_containers", instance_id))
+        if self.containers is not None:
+            return self.containers
+        return ((self.container_id, ""),)
 
     def reap_managed(self, worker=None):
         self.calls.append(("reap_managed", worker))
@@ -412,6 +431,53 @@ class LaunchDispatchTests(unittest.TestCase):
         self.assertNotIn(("image_id", "alpine:latest"), backend.calls)
 
 
+    def test_stack_endpoints_are_service_qualified_and_do_not_collide(self) -> None:
+        from ctf_generator.domain.execution.runtime import RuntimeEndpoint
+        from ctf_generator.infrastructure.runtime.docker_backend import (
+            LaunchResult,
+        )
+
+        client = _FakeClient(instance=_instance())
+        worker = _worker(client, _FakeBackend())
+        # Two services publish the SAME port number; their endpoint records must
+        # NOT collide onto one name (the pre-fix bug reported both as "port-8080").
+        launched = LaunchResult(
+            observation=RuntimeObservation("inst-1", "cid1234567890", "running"),
+            runtime_resources=(RuntimeResourceRef("container", "cid1234567890"),),
+            endpoints=(
+                RuntimeEndpoint(
+                    container_port=8080, host="10.0.0.2", host_port=8080,
+                    service="edge",
+                ),
+                RuntimeEndpoint(
+                    container_port=8080, host="10.0.0.3", host_port=8080,
+                    service="internal",
+                ),
+            ),
+        )
+        worker._report_launched_facts(client.instance, launched, _NOW)
+        names = sorted(e.name for e in client.endpoints)
+        self.assertEqual(names, ["edge-port-8080", "internal-port-8080"])
+
+    def test_single_container_endpoint_keeps_the_bare_port_name(self) -> None:
+        from ctf_generator.domain.execution.runtime import RuntimeEndpoint
+        from ctf_generator.infrastructure.runtime.docker_backend import (
+            LaunchResult,
+        )
+
+        client = _FakeClient(instance=_instance())
+        worker = _worker(client, _FakeBackend())
+        launched = LaunchResult(
+            observation=RuntimeObservation("inst-1", "cid1234567890", "running"),
+            runtime_resources=(RuntimeResourceRef("container", "cid1234567890"),),
+            endpoints=(
+                RuntimeEndpoint(container_port=8080, host="10.0.0.2", host_port=8080),
+            ),
+        )
+        worker._report_launched_facts(client.instance, launched, _NOW)
+        self.assertEqual([e.name for e in client.endpoints], ["port-8080"])
+
+
 class OtherDispatchTests(unittest.TestCase):
     def test_stop_removes_and_transitions_to_stopped(self) -> None:
         client = _FakeClient(instance=_instance(state="active"))
@@ -435,6 +501,78 @@ class OtherDispatchTests(unittest.TestCase):
         _worker(client, backend).run_once()
         self.assertIn(("remove", "inst-1"), backend.calls)
         self.assertEqual(len(client.completed), 1)
+
+    def test_health_of_a_stack_is_unhealthy_when_one_service_crashed(self) -> None:
+        # Two service containers; one has exited. A stack is healthy ONLY when
+        # EVERY service is running, so the crashed sibling must not be invisible.
+        client = _FakeClient(instance=_instance(state="healthy"))
+        client.claim_lease = _lease(
+            "run_health_check", {"instance_id": "inst-1", "generation": 1}
+        )
+        backend = _FakeBackend(
+            containers=(("c-edge", "edge"), ("c-internal", "internal")),
+            phase_by_cid={"c-edge": "running", "c-internal": "exited"},
+        )
+        _worker(client, backend).run_once()
+        self.assertFalse(client.health[-1].healthy)
+        self.assertEqual(client.health[-1].observed_state, "degraded")
+        self.assertEqual(client.completed[-1][1], {"healthy": False, "services": 2})
+
+    def test_health_of_a_stack_is_healthy_when_all_services_run(self) -> None:
+        client = _FakeClient(instance=_instance(state="healthy"))
+        client.claim_lease = _lease(
+            "run_health_check", {"instance_id": "inst-1", "generation": 1}
+        )
+        backend = _FakeBackend(
+            containers=(("c-edge", "edge"), ("c-internal", "internal")),
+        )
+        _worker(client, backend).run_once()
+        self.assertTrue(client.health[-1].healthy)
+        self.assertEqual(client.health[-1].observed_state, "healthy")
+
+    def test_restart_walks_every_service_in_dependency_order(self) -> None:
+        from ctf_generator.domain.execution.runtime import StackServiceImage
+
+        stack = (
+            StackServiceImage(
+                service_name="edge", image_ref="ir-edge",
+                image_digest="sha256:" + "ee" * 32, depends_on=("internal",),
+                is_primary=True,
+            ),
+            StackServiceImage(
+                service_name="internal", image_ref="ir-internal",
+                image_digest="sha256:" + "11" * 32,
+            ),
+        )
+        client = _FakeClient(instance=_instance(state="healthy"), stack=stack)
+        client.claim_lease = _lease(
+            "restart_instance", {"instance_id": "inst-1", "generation": 1}
+        )
+        # docker lists newest-first (edge, then internal); dependency order is
+        # internal BEFORE edge -- restart must follow the manifest, not the listing.
+        backend = _FakeBackend(
+            containers=(("c-edge", "edge"), ("c-internal", "internal")),
+        )
+        _worker(client, backend).run_once()
+        restarts = [c for c in backend.calls if c[0] == "restart"]
+        self.assertEqual(
+            [c[2] for c in restarts], ["c-internal", "c-edge"]
+        )
+        self.assertTrue(client.health[-1].healthy)
+
+    def test_logs_are_collected_from_every_service(self) -> None:
+        client = _FakeClient(instance=_instance(state="healthy"))
+        client.claim_lease = _lease(
+            "collect_logs", {"instance_id": "inst-1", "generation": 1}
+        )
+        backend = _FakeBackend(
+            containers=(("c-edge", "edge"), ("c-internal", "internal")),
+        )
+        _worker(client, backend).run_once()
+        collected = [c for c in backend.calls if c[0] == "collect_logs"]
+        self.assertEqual(sorted(c[2] for c in collected), ["c-edge", "c-internal"])
+        # 2 lines per container * 2 containers.
+        self.assertEqual(client.completed[-1][1], {"log_lines": 4, "services": 2})
 
     def test_unknown_payload_without_instance_id_fails(self) -> None:
         client = _FakeClient(instance=_instance())

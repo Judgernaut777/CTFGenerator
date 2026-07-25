@@ -56,11 +56,18 @@ try:
         WorkerEnrollmentService,
     )
     from ctf_generator.domain.execution.models import Worker
+    from ctf_generator.domain.execution.runtime import StackServiceImage
     from ctf_generator.domain.instances.models import (
         HealthObservation,
         Instance,
         InstanceEndpoint,
         RuntimeResource,
+    )
+    from ctf_generator.infrastructure.database.challenge_build_image_repository import (
+        SqlAlchemyChallengeBuildImageRepository,
+    )
+    from ctf_generator.infrastructure.database.challenge_build_stack_image_repository import (
+        SqlAlchemyChallengeBuildStackImageRepository,
     )
     from ctf_generator.domain.scheduling.models import (
         PLATFORM_SCOPE_KEY,
@@ -247,6 +254,103 @@ def _seed_instance(db, *, assigned, state="starting") -> str:
             now,
         )
     return iid
+
+
+_INSTANCE_IMAGE = "registry.example/sqli@sha256:abc"
+
+
+def _seed_build_image(db, *, image_ref=_INSTANCE_IMAGE, digest, bundle="bundle-1") -> None:
+    """Record a built image for the seeded sqli v1, keyed to the instance's ref."""
+    with db.session_scope() as s:
+        SqlAlchemyChallengeBuildImageRepository(s).add(
+            "sqli", 1, image_ref, digest, bundle, _now()
+        )
+
+
+def _seed_stack(db, *, primary_ref=_INSTANCE_IMAGE, bundle="bundle-stack-1") -> None:
+    """Record a two-service stack whose PRIMARY carries the instance's image_ref."""
+    with db.session_scope() as s:
+        repo = SqlAlchemyChallengeBuildStackImageRepository(s)
+        repo.add_service(
+            "sqli", 1, service_name="edge", image_ref=primary_ref,
+            image_digest="sha256:" + "ee" * 32, bundle_sha256=bundle,
+            depends_on=("internal",), expose=("8080",), is_primary=True, now=_now(),
+        )
+        repo.add_service(
+            "sqli", 1, service_name="internal",
+            image_ref="registry.example/internal@sha256:def",
+            image_digest="sha256:" + "11" * 32, bundle_sha256=bundle,
+            depends_on=(), expose=("9443",), is_primary=False, now=_now(),
+        )
+
+
+@unittest.skipUnless(_ENABLED, _SKIP_REASON)
+class HttpClientBuildRegistryTests(unittest.TestCase):
+    """The launch-time build-registry reads (digest-pin + stack) travel the REAL
+    FastAPI/HTTP seam: gateway route -> gated service -> DB -> wire DTO -> client
+    domain object, ownership-checked, not merely a fake."""
+
+    def test_expected_image_digest_round_trips(self) -> None:
+        with _migrated_database() as db:
+            token = _enroll(db)
+            iid = _seed_instance(db, assigned=_WORKER)
+            digest = "sha256:" + "ab" * 32
+            _seed_build_image(db, digest=digest)
+            client = _http_client(db, token)
+            self.assertEqual(client.expected_image_digest(iid, _now()), digest)
+
+    def test_expected_image_digest_none_when_no_build_recorded(self) -> None:
+        with _migrated_database() as db:
+            token = _enroll(db)
+            iid = _seed_instance(db, assigned=_WORKER)
+            client = _http_client(db, token)
+            # No build row -> the route returns a null digest -> pinning is skipped.
+            self.assertIsNone(client.expected_image_digest(iid, _now()))
+
+    def test_expected_image_digest_ownership_is_enforced(self) -> None:
+        with _migrated_database() as db:
+            token = _enroll(db, name=_WORKER)
+            _enroll(db, name=_OTHER)
+            iid = _seed_instance(db, assigned=_OTHER)
+            _seed_build_image(db, digest="sha256:" + "ab" * 32)
+            client = _http_client(db, token)
+            with self.assertRaises(InstanceOwnershipError):
+                client.expected_image_digest(iid, _now())
+
+    def test_launch_stack_services_round_trips(self) -> None:
+        with _migrated_database() as db:
+            token = _enroll(db)
+            iid = _seed_instance(db, assigned=_WORKER)
+            _seed_stack(db)
+            client = _http_client(db, token)
+            stack = client.launch_stack_services(iid, _now())
+            self.assertEqual({s.service_name for s in stack}, {"edge", "internal"})
+            edge = next(s for s in stack if s.service_name == "edge")
+            self.assertIsInstance(edge, StackServiceImage)
+            self.assertTrue(edge.is_primary)
+            self.assertEqual(edge.image_ref, _INSTANCE_IMAGE)
+            self.assertEqual(edge.depends_on, ("internal",))
+            self.assertEqual(edge.expose, ("8080",))
+            internal = next(s for s in stack if s.service_name == "internal")
+            self.assertFalse(internal.is_primary)
+
+    def test_launch_stack_services_empty_for_single_image(self) -> None:
+        with _migrated_database() as db:
+            token = _enroll(db)
+            iid = _seed_instance(db, assigned=_WORKER)
+            client = _http_client(db, token)
+            # No stack rows -> a single-image instance -> empty tuple.
+            self.assertEqual(client.launch_stack_services(iid, _now()), ())
+
+    def test_launch_stack_services_ownership_is_enforced(self) -> None:
+        with _migrated_database() as db:
+            token = _enroll(db, name=_WORKER)
+            _enroll(db, name=_OTHER)
+            iid = _seed_instance(db, assigned=_OTHER)
+            _seed_stack(db)
+            client = _http_client(db, token)
+            with self.assertRaises(InstanceOwnershipError):
+                client.launch_stack_services(iid, _now())
 
 
 @unittest.skipUnless(_ENABLED, _SKIP_REASON)
