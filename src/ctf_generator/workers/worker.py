@@ -48,11 +48,11 @@ from ctf_generator.application.execution.compose_manifest import (
     parse_compose_manifest,
 )
 from ctf_generator.domain.execution.runtime import (
+    MAX_BUILD_BUNDLE_BYTES,
     BuildBackend,
     BuildBundle,
     ContainerPolicy,
     ContainerRequest,
-    MAX_BUILD_BUNDLE_BYTES,
     RuntimeBackend,
     RuntimeLaunch,
     StackContainerSpec,
