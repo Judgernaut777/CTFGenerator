@@ -340,6 +340,14 @@ class RuntimeBackend(Protocol):
         reference (never the raw logs, which may contain challenge output)."""
         ...
 
+    def image_id(self, image_ref: str) -> str | None:
+        """The local content-addressed id (``sha256:...``) of ``image_ref``, or
+        ``None`` when the image is not present locally. Used for launch-time
+        digest-pinning: the worker compares this against the digest the control
+        plane recorded for the image at build time, refusing to launch a mutated
+        or substituted image. A read-only inspect (no run)."""
+        ...
+
     def find_container(self, instance_id: str) -> str | None:
         """Return THIS worker's container id for ``instance_id`` (scoped to the
         worker so a multi-worker host never returns a peer's container), or None.

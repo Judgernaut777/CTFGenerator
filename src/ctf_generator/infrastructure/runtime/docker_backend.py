@@ -763,6 +763,18 @@ class DockerRuntimeBackend:
         ).stdout.strip()
         return digest
 
+    def image_id(self, image_ref: str) -> str | None:
+        """The local ``{{.Id}}`` (``sha256:...``) of ``image_ref``, or ``None`` if
+        the image is absent locally. Same inspect idiom ``build_image`` uses to
+        report the digest, so a launch-time compare against the recorded digest is
+        string-exact for byte-identical image content."""
+        out = self._run(
+            ["image", "inspect", "--format", "{{.Id}}", image_ref], check=False
+        )
+        if out.returncode != 0:
+            return None
+        return out.stdout.strip() or None
+
     def _resolve_build_network(self, network: bool, allow_mirror: bool) -> str | None:
         """Pick the ``docker build`` network. ``None`` => omit the flag (the
         general-egress hatch, ``network=True``, unchanged and caller-less in-tree).

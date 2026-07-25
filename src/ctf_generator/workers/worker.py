@@ -285,6 +285,12 @@ class WorkerControlPlaneClient(Protocol):
         (the slice-2 launch contract) and return the re-placed instance."""
         ...
 
+    def expected_image_digest(self, instance_id: str, now: datetime) -> str | None:
+        """The recorded build digest to pin ``instance_id``'s launch to, or
+        ``None`` when none is recorded (pinning is then skipped). Authenticated +
+        ownership-checked control-plane read of the build-image registry."""
+        ...
+
     def report_health(self, observation: HealthObservation, now: datetime) -> None:
         """Report a health observation (authenticated + ownership-checked)."""
         ...
@@ -634,6 +640,9 @@ class Worker:
                 f"{self._config.worker_name!r}; refusing to launch"
             )
         request = self._build_request(instance)
+        # Digest-pin BEFORE starting a container: if the control plane recorded a
+        # build digest for this image, the local image MUST match it or we refuse.
+        self._verify_image_digest(instance_id, instance.image_ref, now)
         launched = self._backend.launch(request, command=self._command)
         container_id = launched.observation.container_id
         try:
@@ -658,6 +667,32 @@ class Worker:
                 "phase": launched.observation.phase,
             },
         )
+
+    def _verify_image_digest(
+        self, instance_id: str, image_ref: str, now: datetime
+    ) -> None:
+        """Refuse to launch a mutated or substituted image. If the control plane
+        recorded a build digest for ``image_ref`` (the registry row this instance's
+        image_ref resolves to), the locally-present image's id MUST equal it; a
+        missing local image OR a mismatch is refused with
+        :class:`UnsupportedRuntimeError` (``_process`` classifies it
+        infrastructure/non-retryable -- a tampered image must never launch and a
+        retry cannot fix it). No recorded digest (a digest-less build or no
+        registry row) => pinning is skipped, exactly as an image_ref miss already
+        degrades launch. image ids/digests are references, never secrets.
+
+        Reusable per image, so the compose-aware multi-image launch pins each
+        service's container against its own recorded digest."""
+        expected = self._client.expected_image_digest(instance_id, now)
+        if expected is None:
+            return
+        actual = self._backend.image_id(image_ref)
+        if actual != expected:
+            raise UnsupportedRuntimeError(
+                f"image {image_ref!r} local id {actual!r} does not match the "
+                f"recorded build digest {expected!r}; refusing to launch a "
+                "mutated or substituted image"
+            )
 
     def _do_reset(self, instance_id: str, now: datetime) -> _DispatchOutcome:
         # A reset is a clean rebuild: tear down the old runtime objects, relaunch.

@@ -191,6 +191,23 @@ class WorkerInstanceService:
             )
         return instance
 
+    def expected_image_digest(
+        self, token: str, instance_id: str, now: datetime
+    ) -> str | None:
+        """The recorded build digest the authenticated worker should pin its
+        launch of ``instance_id`` to, or ``None`` when the instance has no
+        ``image_ref`` or no digest is recorded (pinning is then skipped, exactly
+        as an image_ref miss already degrades launch). Authenticated + ownership-
+        checked identically to :meth:`get_owned_instance` -- a worker may pin only
+        an instance it owns (or an unassigned one it is about to launch). A pure DB
+        read of the registry (ADR-001)."""
+        instance = self.get_owned_instance(token, instance_id, now)
+        if instance.image_ref is None:
+            return None
+        return self._lifecycle.image_digest_for(
+            instance.definition_slug, instance.version_no, instance.image_ref
+        )
+
     def replace_instance(
         self, token: str, instance_id: str, now: datetime
     ) -> Instance:

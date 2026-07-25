@@ -45,11 +45,11 @@ def _worker(name: str) -> Worker:
     )
 
 
-def _instance(assigned: str | None) -> Instance:
+def _instance(assigned: str | None, image_ref: str | None = None) -> Instance:
     return Instance(
         instance_id="inst-1", competition_id="cup", team_name="Red",
         definition_slug="sql", version_no=1, state="queued",
-        assigned_worker=assigned,
+        assigned_worker=assigned, image_ref=image_ref,
     )
 
 
@@ -76,9 +76,13 @@ class _FakeLifecycle:
     resources: list = field(default_factory=list)
     endpoints: list = field(default_factory=list)
     transitions: list = field(default_factory=list)
+    image_digest: str | None = None
 
     def get(self, instance_id):
         return self.instance
+
+    def image_digest_for(self, definition_slug, version_no, image_ref):
+        return self.image_digest
 
     def record_observation(self, obs):
         self.observations.append(obs)
@@ -132,6 +136,31 @@ class OwnershipTests(unittest.TestCase):
         with self.assertRaises(InstanceOwnershipError):
             svc.report_health("tok", _health("w1"), _NOW)
         self.assertEqual(life.observations, [])
+
+    def test_owner_reads_expected_image_digest(self) -> None:
+        digest = "sha256:" + "ab" * 32
+        life = _FakeLifecycle(
+            instance=_instance("w1", image_ref="img:v1"), image_digest=digest
+        )
+        svc = WorkerInstanceService(life, _FakeEnrollment(worker_name="w1"))
+        self.assertEqual(svc.expected_image_digest("tok", "inst-1", _NOW), digest)
+
+    def test_expected_image_digest_is_none_without_an_image_ref(self) -> None:
+        life = _FakeLifecycle(
+            instance=_instance("w1", image_ref=None), image_digest="sha256:x"
+        )
+        svc = WorkerInstanceService(life, _FakeEnrollment(worker_name="w1"))
+        self.assertIsNone(svc.expected_image_digest("tok", "inst-1", _NOW))
+
+    def test_non_owner_cannot_read_expected_image_digest(self) -> None:
+        # Ownership-gated exactly like get_owned_instance: an instance owned by w2
+        # is unreadable by w1's credential.
+        life = _FakeLifecycle(
+            instance=_instance("w2", image_ref="img:v1"), image_digest="sha256:x"
+        )
+        svc = WorkerInstanceService(life, _FakeEnrollment(worker_name="w1"))
+        with self.assertRaises(InstanceOwnershipError):
+            svc.expected_image_digest("tok", "inst-1", _NOW)
 
     def test_non_owner_cannot_report_endpoint(self) -> None:
         # Endpoints are reported through the same ownership gate: a worker not

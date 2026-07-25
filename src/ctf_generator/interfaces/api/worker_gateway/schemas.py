@@ -157,6 +157,13 @@ class WorkerInstanceView(BaseModel):
     expires_at: str | None = None
 
 
+class WorkerExpectedDigestView(BaseModel):
+    """The recorded build digest a worker should pin its launch to (or ``None``
+    when none is recorded and pinning is skipped). References/hashes only."""
+
+    image_digest: str | None = None
+
+
 def instance_to_worker_view(instance: Instance) -> dict[str, Any]:
     return {
         "instance_id": instance.instance_id,

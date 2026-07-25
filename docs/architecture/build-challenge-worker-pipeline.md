@@ -254,9 +254,8 @@ of work as the job's terminalization.
   a **hard create-time reject** on "no built image yet" is a deliberate,
   documented non-goal here (it changes the API contract).
 
-**Still deferred** (honest scope): digest-pinning at launch (verifying the pulled
-image's digest matches the recorded one) and a compose-aware multi-image
-build/launch model — both named in slice 1 above.
+**Still deferred** (honest scope): a compose-aware multi-image build/launch model
+— named in slice 1 above.
 
 ## Tail slice A — build-time package mirror (landed)
 
@@ -290,6 +289,43 @@ network on each worker host, set `CTFGEN_WORKER_BUILD_MIRROR_NETWORK` to that
 network's name, and point the generated Dockerfiles' pip index at the mirror
 (renderer/template config — out of band of this backend seam). Left unset, builds
 that need egress continue to refuse (the safe default).
+
+## Tail slice B — digest-pinning at launch (landed)
+
+At build time the worker records the built image's content id (`docker image
+inspect {{.Id}}`) into `challenge_build_images.image_digest`. This slice makes the
+launch worker **verify** it: before starting a container, the worker asks the
+control plane for the digest recorded for the image its instance carries and
+refuses to launch a **mutated or substituted** image.
+
+* **Resolver** (`SqlAlchemyChallengeBuildImageRepository.digest_for_version_image`)
+  — keyed on the registry's unique `(challenge_version_id, image_ref)`, so it pins
+  the digest of the image the instance *actually* carries (fixed at request time),
+  not merely the newest build. Non-raising on a miss.
+* **Ownership-gated verb** (`WorkerInstanceService.expected_image_digest`) — the
+  launch worker holds a launch lease, so the digest read is gated by instance
+  OWNERSHIP (exactly like `get_owned_instance`), never a build-lease fence. A new
+  `GET /worker/instances/{id}/expected-image-digest` worker-gateway route carries
+  it over HTTP; the in-process `LocalControlPlaneClient` delegates to the service.
+  The frozen `Instance` aggregate and the DB schema are **untouched** — the digest
+  is sourced from the authoritative registry, not duplicated onto the instance.
+* **Comparison on the worker** (`RuntimeBackend.image_id` → `docker image inspect
+  {{.Id}}`) — the same idiom `build_image` used to record the digest, so the
+  compare is string-exact for byte-identical content. On a **mismatch** or a
+  **missing local image**, the worker refuses with `UnsupportedRuntimeError`
+  (`_process` classifies it infrastructure/non-retryable — a tampered image must
+  never launch and a retry cannot fix it). The reusable `_verify_image_digest`
+  helper pins one image, so the compose-aware multi-image launch pins each
+  service's container against its own recorded digest.
+
+No recorded digest (a digest-less build or no registry row) skips pinning,
+degrading exactly as an image_ref miss already does. **Honest scope**: this
+catches local image tamper/substitution between build and launch; it is **not**
+MITM-proof against a fully compromised control plane, which could lie about the
+expected digest just as it could serve any poisoned instruction (the same caveat
+as the bundle content-hash verify). Proven against real Docker
+(`RuntimeBackend.image_id` matches the build digest) and real PostgreSQL (the
+resolver + the ownership gate), plus host coverage of the launch refusal paths.
 
 ## Security posture summary (checklist against the hard rules)
 
