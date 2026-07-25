@@ -505,6 +505,71 @@ class ChallengeBuildImage(Base):
     )
 
 
+class ChallengeBuildStackImage(Base):
+    """One SERVICE image of a multi-service (compose) build (build_challenge tail
+    slice C). A single-image build records only ``challenge_build_images``; a
+    stack build records the primary there (back-compat) AND one row here per
+    service, so the launch worker can start the whole stack.
+
+    ``service_name`` is the compose service; ``image_ref``/``image_digest`` mirror
+    the single-image registry; ``bundle_sha256`` ties all services of ONE build
+    together (the launch reader groups by it); ``depends_on``/``expose`` are the
+    manifest bits launch needs (the bundle is gone at launch time); ``is_primary``
+    marks the ingress service whose image_ref the Instance carries. References/
+    hashes only -- never a flag or secret. APPEND-ONLY (shared ``reject_mutation``
+    triggers); a rebuild of the same frozen version collapses per service on the
+    deterministic ``image_ref`` via ON CONFLICT."""
+
+    __tablename__ = "challenge_build_stack_images"
+
+    id: Mapped[uuid.UUID] = mapped_column(sa.Uuid, primary_key=True, default=uuid.uuid4)
+    challenge_version_id: Mapped[uuid.UUID] = mapped_column(
+        sa.Uuid,
+        ForeignKey(
+            "challenge_versions.id",
+            ondelete="RESTRICT",
+            name="fk_challenge_build_stack_images_version",
+        ),
+        nullable=False,
+    )
+    service_name: Mapped[str] = mapped_column(sa.Text, nullable=False)
+    image_ref: Mapped[str] = mapped_column(sa.Text, nullable=False)
+    image_digest: Mapped[str] = mapped_column(sa.Text, nullable=False)
+    bundle_sha256: Mapped[str] = mapped_column(sa.Text, nullable=False)
+    depends_on: Mapped[list] = mapped_column(
+        JSONB, nullable=False, server_default=sa.text("'[]'::jsonb")
+    )
+    expose: Mapped[list] = mapped_column(
+        JSONB, nullable=False, server_default=sa.text("'[]'::jsonb")
+    )
+    is_primary: Mapped[bool] = mapped_column(
+        sa.Boolean, nullable=False, server_default=sa.false()
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        sa.DateTime(timezone=True), nullable=False, server_default=sa.func.now()
+    )
+
+    __table_args__ = (
+        UniqueConstraint(
+            "challenge_version_id",
+            "service_name",
+            "image_ref",
+            name="uq_challenge_build_stack_images_ver_svc_img",
+        ),
+        CheckConstraint(r"service_name !~ '^\s*$'", name="service_name_non_empty"),
+        CheckConstraint(r"image_ref !~ '^\s*$'", name="image_ref_non_empty"),
+        CheckConstraint(r"image_digest !~ '^\s*$'", name="image_digest_non_empty"),
+        Index(
+            "ix_challenge_build_stack_images_version", "challenge_version_id"
+        ),
+        Index(
+            "ix_challenge_build_stack_images_bundle",
+            "challenge_version_id",
+            "bundle_sha256",
+        ),
+    )
+
+
 class EvalRun(Base):
     """Persistent form of the domain ``EvalRun`` -- the durable, operator-visible
     agent-evaluation platform record (M15). ``id`` is the business ``eval_run_id``

@@ -39,6 +39,20 @@ def _nonempty_str(value: object) -> str | None:
 
 
 @dataclass(frozen=True)
+class ServiceImage:
+    """One service image of a multi-service (compose) build completion. Only
+    fully-specified services (non-empty name/ref/digest) are surfaced, so a stack
+    row can always be written. References/hashes only."""
+
+    service_name: str
+    image_ref: str
+    image_digest: str
+    depends_on: tuple[str, ...] = ()
+    expose: tuple[str, ...] = ()
+    is_primary: bool = False
+
+
+@dataclass(frozen=True)
 class BuildCompletion:
     """A build-job completion carrying a runnable image reference.
 
@@ -46,12 +60,15 @@ class BuildCompletion:
     them (or the build backend returned no digest): the worker-affinity cache
     keys on ``image_ref`` alone and is still written, but the version->image
     registry needs both (its columns are NOT NULL) and is skipped for that
-    completion (see :attr:`can_record_image`).
+    completion (see :attr:`can_record_image`). ``services`` is the per-service
+    stack (empty for a single-image build); the top-level ``image_ref``/
+    ``image_digest`` point at the primary service for back-compat.
     """
 
     image_ref: str
     bundle_sha256: str | None = None
     image_digest: str | None = None
+    services: tuple[ServiceImage, ...] = ()
 
     def __post_init__(self) -> None:
         # Defensive: direct construction must still uphold the non-empty invariant
@@ -89,4 +106,40 @@ def parse_build_completion(result_json: dict | None) -> BuildCompletion | None:
         image_ref=image_ref,
         bundle_sha256=_nonempty_str(result_json.get("bundle_sha256")),
         image_digest=_nonempty_str(result_json.get("digest")),
+        services=_parse_services(result_json.get("services")),
     )
+
+
+def _parse_services(raw: object) -> tuple[ServiceImage, ...]:
+    """Interpret the ``services`` list of a stack completion. Lenient: a non-list,
+    or any entry missing a non-empty name/ref/digest, is dropped (a partial/garbled
+    payload never raises out of the completion path). Empty for a single-image
+    build."""
+    if not isinstance(raw, list):
+        return ()
+    out: list[ServiceImage] = []
+    for entry in raw:
+        if not isinstance(entry, dict):
+            continue
+        name = _nonempty_str(entry.get("service"))
+        ref = _nonempty_str(entry.get("image_ref"))
+        digest = _nonempty_str(entry.get("digest"))
+        if name is None or ref is None or digest is None:
+            continue
+        out.append(
+            ServiceImage(
+                service_name=name,
+                image_ref=ref,
+                image_digest=digest,
+                depends_on=_str_tuple(entry.get("depends_on")),
+                expose=_str_tuple(entry.get("expose")),
+                is_primary=bool(entry.get("is_primary")),
+            )
+        )
+    return tuple(out)
+
+
+def _str_tuple(value: object) -> tuple[str, ...]:
+    if not isinstance(value, list):
+        return ()
+    return tuple(str(v) for v in value if isinstance(v, (str, int)))
