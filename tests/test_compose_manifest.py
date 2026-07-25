@@ -14,6 +14,13 @@ from ctf_generator.application.execution.compose_manifest import (
     parse_compose_manifest,
 )
 
+try:
+    import yaml  # noqa: F401 -- the parser needs it; skip cleanly without it
+
+    _HAVE_YAML = True
+except ImportError:  # pragma: no cover
+    _HAVE_YAML = False
+
 # A two-service compose shaped like the network_lateral_pivot family's output.
 _NET_COMPOSE = """
 services:
@@ -34,6 +41,7 @@ networks:
 """
 
 
+@unittest.skipUnless(_HAVE_YAML, "pyyaml required for the compose-manifest parser")
 class ComposeManifestTests(unittest.TestCase):
     def test_single_image_shapes_return_none(self) -> None:
         self.assertIsNone(parse_compose_manifest(None))

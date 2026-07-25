@@ -21,7 +21,10 @@ classifiers = [
 ]
 
 [project.optional-dependencies]
-dev = ["pytest>=8"]
+# pyyaml: the compose-manifest parser (a worker feature) has a HOST unit test
+# (test_compose_manifest) that must run in the base unit gate, which installs
+# only `.[dev]`.
+dev = ["pytest>=8", "pyyaml>=6"]
 # LLM-backed spec generation. Each provider is an independent optional extra so
 # the core tool stays dependency-free.
 anthropic = ["anthropic>=0.49"]
