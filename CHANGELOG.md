@@ -9,6 +9,31 @@ Release CI enforces that every tagged version has an entry here (see
 
 ## [Unreleased]
 
+### Added — `build_challenge` pipeline tail (mirror, digest-pinning, compose)
+
+Closes the three documented tail deferrals of v1.0 blocker #4, each verified
+end-to-end against real Docker + PostgreSQL (see
+`docs/architecture/build-challenge-worker-pipeline.md` tail slices A/B/C).
+
+- **Build-time package mirror** — `DockerRuntimeBackend.build_image` gains
+  `allow_mirror`; with `CTFGEN_WORKER_BUILD_MIRROR_NETWORK` set to a pre-warmed
+  **`--internal`** network, `RUN pip install` builds fetch from the mirror without
+  general egress. Default stays strict `--network=none`; a non-internal/missing
+  mirror is refused, never downgraded to open egress. (Named-network builds force
+  the classic builder, since BuildKit rejects them.)
+- **Digest-pinning at launch** — the worker verifies the local image's id matches
+  the digest the control plane recorded (a new ownership-gated
+  `expected-image-digest` verb + `RuntimeBackend.image_id`), refusing a mutated or
+  substituted image non-retryably. No recorded digest skips pinning.
+- **Compose-aware multi-image build + launch** — a multi-service (compose) family
+  now builds one image per service (new append-only `challenge_build_stack_images`
+  table, migration `0016`) and launches the whole stack as N policy-constrained
+  containers on one shared `--internal` network (`launch_stack`), each reachable
+  by its service name, in `depends_on` order, each digest-pinned. The generated
+  compose is read as a strict-allowlist MANIFEST, never executed (`docker compose
+  up` would bypass the hardening floor). Single-image bundles are unchanged.
+  Residual, documented sub-gaps: network segmentation and flag-via-compose-env.
+
 ### Added — `build_challenge` control-plane consumption (slice 2)
 
 Closes the control-plane half of v1.0 blocker #4 (`docs/RELEASE_QUALIFICATION.md`

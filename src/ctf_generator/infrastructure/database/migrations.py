@@ -15,7 +15,7 @@ import sqlalchemy as sa
 
 #: The Alembic revision the running code expects at head. Kept in lockstep with
 #: ``alembic/versions`` by a host drift test.
-CODE_MIGRATION_HEAD = "0015_challenge_build_images"
+CODE_MIGRATION_HEAD = "0016_build_stack_images"
 
 
 def current_db_revision(database) -> str | None:

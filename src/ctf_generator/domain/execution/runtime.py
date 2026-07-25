@@ -212,13 +212,79 @@ class ContainerRequest:
 
 
 @dataclass(frozen=True)
+class StackServiceImage:
+    """The launch-time registry view of one service image of a multi-service
+    build: its ``image_ref`` + recorded ``image_digest`` (to pin), the manifest
+    ``depends_on``/``expose`` the launch needs, and whether it is the primary
+    (ingress) service. References/hashes only. Lives in the domain so the
+    networked worker (no DB) can carry it across the transport seam."""
+
+    service_name: str
+    image_ref: str
+    image_digest: str
+    depends_on: tuple[str, ...] = ()
+    expose: tuple[str, ...] = ()
+    is_primary: bool = False
+
+
+@dataclass(frozen=True)
+class StackContainerSpec:
+    """One service's launch spec within a multi-service (compose) stack. Carries
+    references only: the ``service_name`` (also the in-network DNS alias sibling
+    services reach it by), its ``image_ref``, an optional ``expected_digest`` to
+    pin against, and the ports it exposes. No secrets."""
+
+    service_name: str
+    image_ref: str
+    expected_digest: str | None = None
+    exposed_ports: tuple[int, ...] = ()
+
+    def __post_init__(self) -> None:
+        _require_nonempty(self.service_name, "service_name")
+        _require_nonempty(self.image_ref, "image_ref")
+        for port in self.exposed_ports:
+            if not isinstance(port, int) or not (1 <= port <= 65535):
+                raise ValueError(f"exposed_ports entries must be 1..65535, got {port!r}")
+
+
+@dataclass(frozen=True)
+class StackRequest:
+    """A multi-service launch request: N :class:`StackContainerSpec` for ONE
+    instance, in dependency (start) order, sharing one per-instance isolated
+    network. The ``ContainerPolicy`` applies to EVERY container identically (the
+    generated compose's own runtime directives are never honored). References
+    only; no secrets."""
+
+    instance_id: str
+    team_key: str
+    policy: ContainerPolicy
+    containers: tuple[StackContainerSpec, ...] = ()
+    labels: tuple[tuple[str, str], ...] = ()
+
+    def __post_init__(self) -> None:
+        _require_nonempty(self.instance_id, "instance_id")
+        _require_nonempty(self.team_key, "team_key")
+        if not isinstance(self.policy, ContainerPolicy):
+            raise ValueError("policy must be a ContainerPolicy")
+        if not self.containers:
+            raise ValueError("a stack request needs at least one container")
+        names = [c.service_name for c in self.containers]
+        if len(names) != len(set(names)):
+            raise ValueError("stack service names must be unique")
+
+
+@dataclass(frozen=True)
 class RuntimeEndpoint:
     """A reachable address a launched container publishes (host:port for one
-    exposed container port)."""
+    exposed container port). ``service`` names the stack service the port belongs
+    to for a multi-container launch (``None`` for a single-container instance); a
+    consumer service-qualifies the endpoint's name so two services exposing the
+    SAME port number do not collide onto one record."""
 
     container_port: int
     host: str
     host_port: int
+    service: str | None = None
 
     def __post_init__(self) -> None:
         for port_name, port in (
@@ -228,6 +294,8 @@ class RuntimeEndpoint:
             if not isinstance(port, int) or not (1 <= port <= 65535):
                 raise ValueError(f"{port_name} must be 1..65535, got {port!r}")
         _require_nonempty(self.host, "host")
+        if self.service is not None:
+            _require_nonempty(self.service, "service")
 
 
 @dataclass(frozen=True)
@@ -313,6 +381,18 @@ class RuntimeBackend(Protocol):
         host-block -- cannot be enforced on this host."""
         ...
 
+    def launch_stack(
+        self, request: StackRequest, *, command: Sequence[str] | None = ...
+    ) -> RuntimeLaunch:
+        """Launch a multi-service stack: N policy-constrained containers on ONE
+        shared per-instance isolated network, each reachable by its service name.
+        Returns an aggregate :class:`RuntimeLaunch` (all container + network
+        resources; healthy iff every container is running). Refuses
+        (``UnsupportedRuntimeError``) BEFORE creating anything if the host cannot
+        enforce the isolation floor, and removes everything it created on any
+        mid-launch failure (no partial stack leaks)."""
+        ...
+
     def stop(self, instance_id: str, container_id: str) -> None:
         """Stop a running container (idempotent)."""
         ...
@@ -340,10 +420,29 @@ class RuntimeBackend(Protocol):
         reference (never the raw logs, which may contain challenge output)."""
         ...
 
+    def image_id(self, image_ref: str) -> str | None:
+        """The local content-addressed id (``sha256:...``) of ``image_ref``, or
+        ``None`` when the image is not present locally. Used for launch-time
+        digest-pinning: the worker compares this against the digest the control
+        plane recorded for the image at build time, refusing to launch a mutated
+        or substituted image. A read-only inspect (no run)."""
+        ...
+
     def find_container(self, instance_id: str) -> str | None:
         """Return THIS worker's container id for ``instance_id`` (scoped to the
         worker so a multi-worker host never returns a peer's container), or None.
         Keeps runtime-query verbs inside the adapter."""
+        ...
+
+    def find_stack_containers(
+        self, instance_id: str
+    ) -> tuple[tuple[str, str], ...]:
+        """Every one of THIS worker's containers for ``instance_id`` as
+        ``(container_id, service_name)`` pairs (scoped to the worker). ``service_name``
+        is the stack-service label, or ``""`` for a single-image instance's
+        container. Empty tuple if none. Lets the lifecycle verbs (health / restart /
+        logs) observe EVERY service of a multi-container stack rather than only one,
+        so a crashed sibling is never invisible."""
         ...
 
     def reap_managed(self, worker: str | None = ...) -> int:
@@ -405,12 +504,22 @@ class BuildBackend(Protocol):
     ``is_available`` methods match this shape) -- no new adapter class is
     required; see ``docs/architecture/build-challenge-worker-pipeline.md``."""
 
-    def build_image(self, *, context_dir: str, tag: str, network: bool = ...) -> str:
+    def build_image(
+        self,
+        *,
+        context_dir: str,
+        tag: str,
+        network: bool = ...,
+        allow_mirror: bool = ...,
+    ) -> str:
         """Build an image from ``context_dir`` and return its content-addressed
         digest (``sha256:...``). MUST default to no network access during the
         build (the generated Dockerfile is hostile input) and MUST refuse
         (never silently accept) an oversized result rather than leave it
-        behind."""
+        behind. ``allow_mirror=True`` opts the build into an operator-configured,
+        INTERNAL-only package-mirror network when one exists (a strict superset of
+        the no-network default; a non-internal/missing mirror MUST be refused, not
+        downgraded to open egress)."""
         ...
 
     def is_available(self) -> bool:

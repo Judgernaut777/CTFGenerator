@@ -35,11 +35,20 @@ from __future__ import annotations
 
 import hashlib
 import io
+import os
 import tarfile
+import tempfile
 import unittest
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from pathlib import Path
+
+try:
+    import yaml  # noqa: F401 -- the compose-manifest parser needs it
+
+    _HAVE_YAML = True
+except ImportError:  # pragma: no cover
+    _HAVE_YAML = False
 
 from ctf_generator.domain.execution.runtime import BuildBundle
 from ctf_generator.domain.work.models import Job, JobLease
@@ -88,7 +97,14 @@ class _FakeBuildBackend:
         self.raises = raises
         self.calls: list[dict] = []
 
-    def build_image(self, *, context_dir: str, tag: str, network: bool = False) -> str:
+    def build_image(
+        self,
+        *,
+        context_dir: str,
+        tag: str,
+        network: bool = False,
+        allow_mirror: bool = False,
+    ) -> str:
         # The temp dir is cleaned up once _do_build_challenge's `with` block
         # exits (before returning to the caller) -- snapshot what matters about
         # the context HERE, at call time, not after the fact.
@@ -100,6 +116,7 @@ class _FakeBuildBackend:
                 "has_dockerfile": (context_path / "Dockerfile").is_file(),
                 "tag": tag,
                 "network": network,
+                "allow_mirror": allow_mirror,
             }
         )
         if self.raises is not None:
@@ -212,6 +229,9 @@ class BuildChallengeDispatchTests(unittest.TestCase):
 
         self.assertEqual(len(backend.calls), 1)
         self.assertEqual(backend.calls[0]["network"], False)
+        # The worker opts each build into the (operator-configured) mirror; with
+        # no mirror configured this is a no-op --network=none build.
+        self.assertEqual(backend.calls[0]["allow_mirror"], True)
         # The build context is a REAL directory containing the extracted
         # Dockerfile -- never the raw tar bytes and never the temp root itself
         # (root-level Dockerfile in this fixture -> context IS the temp root's
@@ -453,6 +473,126 @@ class DispatchableJobsTests(unittest.TestCase):
 
         self.assertIn("build_challenge", BUILD_JOBS)
         self.assertTrue(BUILD_JOBS.issubset(DISPATCHABLE_JOBS))
+
+
+class _SpyBuildBackend:
+    """Records ``build_image`` args (no docker). Proves the build POLICY -- every
+    build opts into the mirror and never takes general egress -- without shelling
+    out to a real builder."""
+
+    def __init__(self) -> None:
+        self.calls: list[tuple[str, bool, bool]] = []
+
+    def build_image(self, *, context_dir, tag, network=False, allow_mirror=False):
+        self.calls.append((tag, network, allow_mirror))
+        return "sha256:" + "ab" * 32
+
+    def is_available(self) -> bool:  # pragma: no cover - not exercised here
+        return True
+
+
+def _write_file(path: str, text: str) -> None:
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    with open(path, "w") as fh:
+        fh.write(text)
+
+
+@unittest.skipUnless(_HAVE_YAML, "pyyaml required for the compose-manifest parser")
+class BuildMirrorOptInTests(unittest.TestCase):
+    """Every service build of an N-service (compose) bundle -- and the single-image
+    path -- must opt into the operator mirror (``allow_mirror=True``) and never take
+    general egress (``network=False``), so a pip/apk-installing family reaches the
+    pre-warmed INTERNAL mirror and nothing else. Host-level (a spy backend), so the
+    build-N + mirror POLICY is proven without a real per-service docker build."""
+
+    def _worker(self, build) -> Worker:
+        return Worker(
+            WorkerConfig(worker_name="w1", lease_seconds=60),
+            client=None,  # type: ignore[arg-type]
+            backend=None,  # type: ignore[arg-type]
+            build_backend=build,
+        )
+
+    def test_every_service_of_a_stack_opts_into_the_mirror(self) -> None:
+        root = tempfile.mkdtemp(prefix="ctfgen-mirror-stack-")
+        _write_file(
+            os.path.join(root, "docker-compose.yml"),
+            "services:\n"
+            "  alpha:\n"
+            "    build: ./services/alpha\n"
+            '    expose: ["8000"]\n'
+            "  beta:\n"
+            "    build: ./services/beta\n"
+            '    ports: ["8080:8080"]\n'
+            "    depends_on: [alpha]\n",
+        )
+        _write_file(os.path.join(root, "services", "alpha", "Dockerfile"), "FROM x\n")
+        _write_file(os.path.join(root, "services", "beta", "Dockerfile"), "FROM x\n")
+        build = _SpyBuildBackend()
+        self._worker(build)._build_from_bundle("demo", 1, "a" * 64, Path(root))
+        self.assertEqual(len(build.calls), 2)  # one build per service
+        for _tag, network, allow_mirror in build.calls:
+            self.assertFalse(network)  # never general egress
+            self.assertTrue(allow_mirror)  # always the INTERNAL mirror path
+
+    def test_single_image_build_also_opts_into_the_mirror(self) -> None:
+        root = tempfile.mkdtemp(prefix="ctfgen-mirror-single-")
+        _write_file(os.path.join(root, "Dockerfile"), "FROM x\n")
+        build = _SpyBuildBackend()
+        self._worker(build)._build_from_bundle("demo", 1, "a" * 64, Path(root))
+        self.assertEqual(len(build.calls), 1)
+        _tag, network, allow_mirror = build.calls[0]
+        self.assertFalse(network)
+        self.assertTrue(allow_mirror)
+
+
+class StackHelperTests(unittest.TestCase):
+    """Pure helpers the compose-aware launch relies on (no docker, no DB)."""
+
+    def test_expose_ports_tolerates_protocol_suffix_and_drops_junk(self) -> None:
+        from ctf_generator.workers.worker import _expose_ports
+
+        # "9443/tcp" -> 9443 (compose long-form); out-of-range / non-numeric drop.
+        self.assertEqual(
+            _expose_ports(("9443/tcp", "8080", "0", "70000", "http", "  443/udp ")),
+            (9443, 8080, 443),
+        )
+        self.assertEqual(_expose_ports(()), ())
+
+    def test_order_stack_places_dependencies_first(self) -> None:
+        from ctf_generator.domain.execution.runtime import StackServiceImage
+        from ctf_generator.workers.worker import _order_stack
+
+        stack = (
+            StackServiceImage(
+                service_name="edge", image_ref="ir-edge",
+                image_digest="sha256:" + "ee" * 32, depends_on=("internal",),
+                is_primary=True,
+            ),
+            StackServiceImage(
+                service_name="internal", image_ref="ir-internal",
+                image_digest="sha256:" + "11" * 32,
+            ),
+        )
+        ordered = [s.service_name for s in _order_stack(stack)]
+        self.assertLess(ordered.index("internal"), ordered.index("edge"))
+
+    def test_order_stack_is_stable_for_independent_services(self) -> None:
+        from ctf_generator.domain.execution.runtime import StackServiceImage
+        from ctf_generator.workers.worker import _order_stack
+
+        stack = tuple(
+            StackServiceImage(
+                service_name=n, image_ref=f"ir-{n}",
+                image_digest="sha256:" + "aa" * 32,
+            )
+            for n in ("beta", "alpha", "gamma")
+        )
+        # No deps -> name-sorted for determinism.
+        self.assertEqual(
+            [s.service_name for s in _order_stack(stack)],
+            ["alpha", "beta", "gamma"],
+        )
 
 
 if __name__ == "__main__":  # pragma: no cover

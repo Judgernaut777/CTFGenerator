@@ -47,6 +47,9 @@ from ctf_generator.domain.work.models import Job, JobLease
 from ctf_generator.infrastructure.database.challenge_build_image_repository import (
     SqlAlchemyChallengeBuildImageRepository,
 )
+from ctf_generator.infrastructure.database.challenge_build_stack_image_repository import (
+    SqlAlchemyChallengeBuildStackImageRepository,
+)
 from ctf_generator.infrastructure.database.job_queue_repository import (
     SqlAlchemyJobQueue,
 )
@@ -268,6 +271,32 @@ class WorkerJobService:
                             completion.bundle_sha256,
                             now,
                         )
+                    # Multi-service (compose) build: one stack row per service,
+                    # keyed to the JOB's own version. The primary is ALSO in the
+                    # single-image registry above (back-compat); these rows let the
+                    # launch worker start the whole stack.
+                    if (
+                        completion.services
+                        and completion.bundle_sha256 is not None
+                        and job.definition_slug is not None
+                        and job.version_no is not None
+                    ):
+                        stack_repo = SqlAlchemyChallengeBuildStackImageRepository(
+                            session
+                        )
+                        for svc in completion.services:
+                            stack_repo.add_service(
+                                job.definition_slug,
+                                job.version_no,
+                                service_name=svc.service_name,
+                                image_ref=svc.image_ref,
+                                image_digest=svc.image_digest,
+                                bundle_sha256=completion.bundle_sha256,
+                                depends_on=svc.depends_on,
+                                expose=svc.expose,
+                                is_primary=svc.is_primary,
+                                now=now,
+                            )
 
     def fail(
         self,

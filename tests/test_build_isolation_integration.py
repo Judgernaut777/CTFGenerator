@@ -55,6 +55,21 @@ class BuildIsolationIntegrationTests(unittest.TestCase):
         ).returncode
         self.assertEqual(rc, 0)
 
+    def test_image_id_matches_build_digest_and_is_none_when_absent(self) -> None:
+        # image_id() (used for launch-time digest-pinning) returns the SAME id
+        # build_image reports, so a launch-time compare is string-exact; an absent
+        # image yields None.
+        tag = f"ctfgen-build-idtest-{uuid.uuid4().hex[:8]}:latest"
+        self._tags.append(tag)
+        context = self._context('FROM alpine:latest\nCMD ["sleep","86400"]\n')
+        build_digest = _BACKEND.build_image(
+            context_dir=context, tag=tag, network=False
+        )
+        self.assertEqual(_BACKEND.image_id(tag), build_digest)
+        self.assertIsNone(
+            _BACKEND.image_id(f"ctfgen-absent-{uuid.uuid4().hex[:8]}:latest")
+        )
+
     def test_oversized_image_is_refused_and_removed(self) -> None:
         tag = f"ctfgen-build-oversize-{uuid.uuid4().hex[:8]}:latest"
         self._tags.append(tag)

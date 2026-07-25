@@ -102,3 +102,30 @@ class SqlAlchemyChallengeBuildImageRepository:
             )
             .limit(1)
         ).scalar_one_or_none()
+
+    def digest_for_version_image(
+        self, definition_slug: str, version_no: int, image_ref: str
+    ) -> str | None:
+        """The recorded ``image_digest`` for the EXACT ``(version, image_ref)``, or
+        ``None`` if none is recorded. Keyed on the registry's unique
+        ``(challenge_version_id, image_ref)`` so it resolves at most one row --
+        launch-time digest-pinning must verify the digest of the image the instance
+        ACTUALLY carries (pinned at request time), not merely the newest build,
+        which may have appended a different image since. Non-raising on an unknown
+        version/image (an inner-join miss), like the reader above."""
+        return self._session.execute(
+            select(ChallengeBuildImageRow.image_digest)
+            .join(
+                ChallengeVersionRow,
+                ChallengeBuildImageRow.challenge_version_id == ChallengeVersionRow.id,
+            )
+            .join(
+                ChallengeDefinitionRow,
+                ChallengeVersionRow.definition_id == ChallengeDefinitionRow.id,
+            )
+            .where(
+                ChallengeDefinitionRow.slug == definition_slug,
+                ChallengeVersionRow.version_no == version_no,
+                ChallengeBuildImageRow.image_ref == image_ref,
+            )
+        ).scalar_one_or_none()

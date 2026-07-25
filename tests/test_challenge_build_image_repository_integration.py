@@ -212,6 +212,31 @@ class ChallengeBuildImageRepositoryTests(unittest.TestCase):
                 ).latest_image_ref_for_version(_SLUG, 1)
         self.assertEqual(got, _IMG_B)
 
+    def test_digest_for_version_image_resolves_the_exact_image(self) -> None:
+        with _migrated_database() as db:
+            _seed_version(db)
+            # Two distinct built images for the same version (e.g. a re-drafted
+            # bundle). digest_for_version_image must return the digest of the
+            # EXACT image_ref asked for, not merely the newest.
+            with db.session_scope() as s:
+                SqlAlchemyChallengeBuildImageRepository(s).add(
+                    _SLUG, 1, _IMG_A, _DIGEST_A, _BUNDLE, _NOW
+                )
+            with db.session_scope() as s:
+                SqlAlchemyChallengeBuildImageRepository(s).add(
+                    _SLUG, 1, _IMG_B, _DIGEST_B, _BUNDLE, _LATER
+                )
+            with db.session_scope() as s:
+                repo = SqlAlchemyChallengeBuildImageRepository(s)
+                got_a = repo.digest_for_version_image(_SLUG, 1, _IMG_A)
+                got_b = repo.digest_for_version_image(_SLUG, 1, _IMG_B)
+                miss = repo.digest_for_version_image(_SLUG, 1, "ctfgen-build/no:v1")
+                unknown = repo.digest_for_version_image("no-slug", 9, _IMG_A)
+        self.assertEqual(got_a, _DIGEST_A)  # the OLDER image's digest, exactly
+        self.assertEqual(got_b, _DIGEST_B)
+        self.assertIsNone(miss)  # unknown image_ref for a known version
+        self.assertIsNone(unknown)  # unknown version -> non-raising miss
+
     def test_add_raises_lookup_error_for_unknown_version(self) -> None:
         with _migrated_database() as db:
             _seed_version(db)
