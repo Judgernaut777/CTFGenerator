@@ -63,17 +63,17 @@ try:
         InstanceEndpoint,
         RuntimeResource,
     )
+    from ctf_generator.domain.scheduling.models import (
+        PLATFORM_SCOPE_KEY,
+        ResourceQuota,
+    )
+    from ctf_generator.domain.work.models import Job, JobLease
     from ctf_generator.infrastructure.database.challenge_build_image_repository import (
         SqlAlchemyChallengeBuildImageRepository,
     )
     from ctf_generator.infrastructure.database.challenge_build_stack_image_repository import (
         SqlAlchemyChallengeBuildStackImageRepository,
     )
-    from ctf_generator.domain.scheduling.models import (
-        PLATFORM_SCOPE_KEY,
-        ResourceQuota,
-    )
-    from ctf_generator.domain.work.models import Job, JobLease
     from ctf_generator.infrastructure.database.config import DatabaseConfig
     from ctf_generator.infrastructure.database.instance_repository import (
         SqlAlchemyInstanceRepository,
