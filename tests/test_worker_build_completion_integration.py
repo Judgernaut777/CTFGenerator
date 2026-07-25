@@ -44,6 +44,9 @@ try:
     from ctf_generator.infrastructure.database.challenge_build_image_repository import (
         SqlAlchemyChallengeBuildImageRepository,
     )
+    from ctf_generator.infrastructure.database.challenge_build_stack_image_repository import (
+        SqlAlchemyChallengeBuildStackImageRepository,
+    )
     from ctf_generator.infrastructure.database.challenge_definition_repository import (
         SqlAlchemyChallengeDefinitionRepository,
     )
@@ -56,6 +59,9 @@ try:
     )
     from ctf_generator.infrastructure.database.models import (
         ChallengeBuildImage as ChallengeBuildImageRow,
+    )
+    from ctf_generator.infrastructure.database.models import (
+        ChallengeBuildStackImage as StackImageRow,
     )
     from ctf_generator.infrastructure.database.models import (
         Worker as WorkerRow,
@@ -184,6 +190,83 @@ _BUILD_RESULT = {
     "image_ref": _IMG,
     "digest": _DIGEST,
 }
+
+
+_PRIMARY_IMG = "ctfgen-build/invoice-drift-beta:v1-abcdef0123456789"
+_ALPHA_IMG = "ctfgen-build/invoice-drift-alpha:v1-abcdef0123456789"
+_STACK_RESULT = {
+    "definition_slug": _SLUG,
+    "version_no": 1,
+    "bundle_sha256": _BUNDLE,
+    # top-level = the primary (ingress) service, for single-image back-compat
+    "image_ref": _PRIMARY_IMG,
+    "digest": "sha256:" + "1" * 64,
+    "services": [
+        {
+            "service": "alpha",
+            "image_ref": _ALPHA_IMG,
+            "digest": "sha256:" + "2" * 64,
+            "expose": ["8000"],
+            "depends_on": [],
+            "is_primary": False,
+        },
+        {
+            "service": "beta",
+            "image_ref": _PRIMARY_IMG,
+            "digest": "sha256:" + "1" * 64,
+            "expose": [],
+            "depends_on": ["alpha"],
+            "is_primary": True,
+        },
+    ],
+}
+
+
+@unittest.skipUnless(_ENABLED, _SKIP_REASON)
+class BuildStackCompletionTests(unittest.TestCase):
+    def test_stack_completion_writes_primary_and_all_service_rows(self) -> None:
+        with _migrated_database() as db:
+            _seed_version(db)
+            enrollment = WorkerEnrollmentService(db)
+            token = _enroll(db, enrollment, "wbuild")
+            svc = WorkerJobService(db, enrollment)
+            _enqueue_build_job(db)
+            _run_to_completion(svc, token, _STACK_RESULT)
+
+            with db.session_scope() as s:
+                single = list(s.scalars(sa.select(ChallengeBuildImageRow)))
+                stack = list(s.scalars(sa.select(StackImageRow)))
+                resolved = SqlAlchemyChallengeBuildStackImageRepository(
+                    s
+                ).stack_for_primary_image(_SLUG, 1, _PRIMARY_IMG)
+        # The primary is in the single-image registry (back-compat).
+        self.assertEqual(len(single), 1)
+        self.assertEqual(single[0].image_ref, _PRIMARY_IMG)
+        # Both services are in the stack registry, keyed to the version.
+        self.assertEqual({r.service_name for r in stack}, {"alpha", "beta"})
+        # The full stack resolves from the primary image_ref.
+        self.assertEqual({s.service_name for s in resolved}, {"alpha", "beta"})
+        beta = next(s for s in resolved if s.service_name == "beta")
+        self.assertTrue(beta.is_primary)
+        self.assertEqual(beta.depends_on, ("alpha",))
+
+    def test_stack_write_is_idempotent(self) -> None:
+        with _migrated_database() as db:
+            _seed_version(db)
+            enrollment = WorkerEnrollmentService(db)
+            token = _enroll(db, enrollment, "wbuild")
+            svc = WorkerJobService(db, enrollment)
+            # Two separate build jobs of the SAME version reporting the SAME stack
+            # (deterministic image_refs) must collapse per service.
+            _enqueue_build_job(db)
+            _run_to_completion(svc, token, _STACK_RESULT)
+            _enqueue_build_job(db)
+            _run_to_completion(svc, token, _STACK_RESULT)
+            with db.session_scope() as s:
+                count = s.scalar(
+                    sa.select(sa.func.count()).select_from(StackImageRow)
+                )
+        self.assertEqual(count, 2)  # alpha + beta, not 4
 
 
 @unittest.skipUnless(_ENABLED, _SKIP_REASON)

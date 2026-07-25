@@ -44,6 +44,9 @@ if TYPE_CHECKING:  # typing-only: importing these at runtime would pull the
     # effectful eval engine onto the worker's import graph (see EvalJobRunner).
     from ctf_generator.agent_eval import AdversarialDeltaReport, AgentEvalReport
 
+from ctf_generator.application.execution.compose_manifest import (
+    parse_compose_manifest,
+)
 from ctf_generator.domain.execution.runtime import (
     BuildBackend,
     BuildBundle,
@@ -168,6 +171,17 @@ def _build_tag(definition_slug: str, version_no: int, bundle_sha256: str) -> str
     """A deterministic, docker-tag-safe reference for a build's output image."""
     safe_slug = _TAG_UNSAFE.sub("-", definition_slug.lower()).strip("-") or "challenge"
     return f"ctfgen-build/{safe_slug}:v{version_no}-{bundle_sha256[:16]}"
+
+
+def _stack_service_tag(
+    definition_slug: str, version_no: int, bundle_sha256: str, service: str
+) -> str:
+    """A deterministic image tag for ONE service of a multi-service build. The
+    service name is folded into the repository so a stack's services never collide
+    with each other or with the single-image tag."""
+    safe_slug = _TAG_UNSAFE.sub("-", definition_slug.lower()).strip("-") or "challenge"
+    safe_svc = _TAG_UNSAFE.sub("-", service.lower()).strip("-") or "service"
+    return f"ctfgen-build/{safe_slug}-{safe_svc}:v{version_no}-{bundle_sha256[:16]}"
 
 
 def _safe_extract_bundle(data: bytes, dest: Path) -> None:
@@ -941,29 +955,109 @@ class Worker:
             bundle_root = Path(tmp_dir) / "bundle"
             bundle_root.mkdir()
             _safe_extract_bundle(bundle.data, bundle_root)
-            context_dir = _select_build_context(bundle_root)
-            tag = _build_tag(definition_slug, version_no, bundle.bundle_sha256)
-            # network=False: the generated Dockerfile is hostile input; no general
-            # egress during the build. allow_mirror=True opts into the operator's
-            # INTERNAL-only package mirror when one is configured (else this stays
-            # a strict --network=none build) so families that RUN pip install can
-            # fetch from the pre-warmed mirror without reaching the internet.
-            digest = self._build_backend.build_image(
-                context_dir=str(context_dir),
-                tag=tag,
-                network=False,
-                allow_mirror=True,
+            result = self._build_from_bundle(
+                definition_slug, version_no, bundle.bundle_sha256, bundle_root
             )
 
-        return _DispatchOutcome(
-            result={
+        return _DispatchOutcome(result=result)
+
+    def _build_image(self, context_dir: Path, tag: str) -> str:
+        """Build one image with the standard build posture. network=False: the
+        generated Dockerfile is hostile input; no general egress. allow_mirror=True
+        opts into the operator's INTERNAL-only package mirror when one is
+        configured (else a strict --network=none build) so families that RUN pip
+        install can fetch from the pre-warmed mirror without reaching the internet."""
+        return self._build_backend.build_image(
+            context_dir=str(context_dir), tag=tag, network=False, allow_mirror=True
+        )
+
+    def _build_from_bundle(
+        self,
+        definition_slug: str,
+        version_no: int,
+        bundle_sha256: str,
+        bundle_root: Path,
+    ) -> dict:
+        """Build a bundle into an image (single-image families) OR a stack of
+        service images (compose families), returning the completion result.
+
+        A ``docker-compose.yml`` present in the bundle is read as a MANIFEST (never
+        executed -- see ``compose_manifest``): each service's context is built into
+        its own image, and the result carries a ``services`` list PLUS a top-level
+        ``image_ref``/``digest`` pointing at the PRIMARY (ingress) service, so a
+        single-image consumer stays back-compatible. A bundle with no compose keeps
+        the original single-image path byte-for-byte."""
+        manifest = self._read_compose_manifest(bundle_root)
+        if manifest is None:
+            context_dir = _select_build_context(bundle_root)
+            tag = _build_tag(definition_slug, version_no, bundle_sha256)
+            digest = self._build_image(context_dir, tag)
+            return {
                 "definition_slug": definition_slug,
                 "version_no": version_no,
-                "bundle_sha256": bundle.bundle_sha256,
+                "bundle_sha256": bundle_sha256,
                 "image_ref": tag,
                 "digest": digest,
             }
-        )
+
+        services: list[dict] = []
+        primary: dict | None = None
+        for svc in manifest.services:
+            context_dir = self._resolve_service_context(bundle_root, svc.build_context)
+            svc_tag = _stack_service_tag(
+                definition_slug, version_no, bundle_sha256, svc.name
+            )
+            svc_digest = self._build_image(context_dir, svc_tag)
+            entry = {
+                "service": svc.name,
+                "image_ref": svc_tag,
+                "digest": svc_digest,
+                "depends_on": list(svc.depends_on),
+                "expose": list(svc.expose),
+                "is_primary": svc.is_primary,
+            }
+            services.append(entry)
+            if svc.is_primary:
+                primary = entry
+        primary = primary or services[0]
+        return {
+            "definition_slug": definition_slug,
+            "version_no": version_no,
+            "bundle_sha256": bundle_sha256,
+            # Top-level = the PRIMARY service (back-compat with single-image
+            # consumers and the Instance's single image_ref).
+            "image_ref": primary["image_ref"],
+            "digest": primary["digest"],
+            "services": services,
+        }
+
+    @staticmethod
+    def _read_compose_manifest(bundle_root: Path):
+        """Parse the bundle's compose file (if any) into a validated stack manifest,
+        or ``None`` for a single-image bundle. Checks the standard compose names."""
+        for name in ("docker-compose.yml", "docker-compose.yaml", "compose.yaml", "compose.yml"):
+            path = bundle_root / name
+            if path.is_file():
+                return parse_compose_manifest(path.read_text(encoding="utf-8"))
+        return None
+
+    @staticmethod
+    def _resolve_service_context(bundle_root: Path, build_context: str) -> Path:
+        """Resolve a service's build context to a real dir strictly inside the
+        bundle (defence-in-depth over the manifest parser's lexical check), with a
+        Dockerfile. A context escaping the bundle or missing a Dockerfile is a
+        clean content error."""
+        root = bundle_root.resolve()
+        ctx = (bundle_root / build_context).resolve()
+        if ctx != root and root not in ctx.parents:
+            raise ValueError(
+                f"service build context {build_context!r} escapes the bundle"
+            )
+        if not (ctx / "Dockerfile").is_file():
+            raise ValueError(
+                f"service build context {build_context!r} has no Dockerfile"
+            )
+        return ctx
 
     def _current_container(self, instance_id: str) -> str | None:
         # Via the Protocol -- keeps docker-CLI verbs inside the adapter and scopes
