@@ -88,7 +88,14 @@ class _FakeBuildBackend:
         self.raises = raises
         self.calls: list[dict] = []
 
-    def build_image(self, *, context_dir: str, tag: str, network: bool = False) -> str:
+    def build_image(
+        self,
+        *,
+        context_dir: str,
+        tag: str,
+        network: bool = False,
+        allow_mirror: bool = False,
+    ) -> str:
         # The temp dir is cleaned up once _do_build_challenge's `with` block
         # exits (before returning to the caller) -- snapshot what matters about
         # the context HERE, at call time, not after the fact.
@@ -100,6 +107,7 @@ class _FakeBuildBackend:
                 "has_dockerfile": (context_path / "Dockerfile").is_file(),
                 "tag": tag,
                 "network": network,
+                "allow_mirror": allow_mirror,
             }
         )
         if self.raises is not None:
@@ -212,6 +220,9 @@ class BuildChallengeDispatchTests(unittest.TestCase):
 
         self.assertEqual(len(backend.calls), 1)
         self.assertEqual(backend.calls[0]["network"], False)
+        # The worker opts each build into the (operator-configured) mirror; with
+        # no mirror configured this is a no-op --network=none build.
+        self.assertEqual(backend.calls[0]["allow_mirror"], True)
         # The build context is a REAL directory containing the extracted
         # Dockerfile -- never the raw tar bytes and never the temp root itself
         # (root-level Dockerfile in this fixture -> context IS the temp root's

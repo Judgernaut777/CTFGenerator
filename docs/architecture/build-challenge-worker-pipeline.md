@@ -255,9 +255,41 @@ of work as the job's terminalization.
   documented non-goal here (it changes the API contract).
 
 **Still deferred** (honest scope): digest-pinning at launch (verifying the pulled
-image's digest matches the recorded one), a compose-aware multi-image build/launch
-model, and the build-time package-mirror that would let network-dependent families
-build under `network=none` — all named in slice 1 above and unchanged.
+image's digest matches the recorded one) and a compose-aware multi-image
+build/launch model — both named in slice 1 above.
+
+## Tail slice A — build-time package mirror (landed)
+
+`DockerRuntimeBackend.build_image` gained `allow_mirror: bool = False` (and a new
+`build_mirror_network: str | None` constructor arg, wired from
+`CTFGEN_WORKER_BUILD_MIRROR_NETWORK`). The worker passes `allow_mirror=True` for
+every `build_challenge` build. The mechanism is a strict superset of the
+`--network=none` default:
+
+* With **no** mirror configured, the build stays `--network=none` — byte-identical
+  to before, so the security floor never weakens by default.
+* With a mirror configured **and** opted in, the build attaches to that network —
+  but only after `build_image` verifies it is `Internal: true` (`docker network
+  inspect`). An `--internal` network has **no route to the internet or the host**,
+  so even a hostile generated `RUN pip install` can reach only the pre-warmed,
+  in-subnet mirror. A **missing or non-internal** mirror network is **refused**
+  (`UnsupportedRuntimeError`), never silently downgraded to open egress — an
+  operator misconfiguration fails loud instead of opening the internet to a
+  hostile build.
+* BuildKit rejects a *named* `--network` for `docker build`, so the mirror attach
+  forces the classic builder (`DOCKER_BUILDKIT=0`) for that call only — a
+  documented fallback (`docs/security/runtime-isolation.md`); the `none`/default
+  paths keep using BuildKit. No `--build-arg` is added; the child env carries no
+  secrets. Proven end-to-end against real Docker in
+  `tests/test_build_mirror_integration.py` (internal mirror reachable; `none`
+  cannot reach it; non-internal/missing refused).
+
+**Operator note.** The mirror is an operator-supplied service: stand up a
+pre-warmed PyPI proxy (e.g. `devpi`/`bandersnatch`) on an `--internal` docker
+network on each worker host, set `CTFGEN_WORKER_BUILD_MIRROR_NETWORK` to that
+network's name, and point the generated Dockerfiles' pip index at the mirror
+(renderer/template config — out of band of this backend seam). Left unset, builds
+that need egress continue to refuse (the safe default).
 
 ## Security posture summary (checklist against the hard rules)
 

@@ -405,12 +405,22 @@ class BuildBackend(Protocol):
     ``is_available`` methods match this shape) -- no new adapter class is
     required; see ``docs/architecture/build-challenge-worker-pipeline.md``."""
 
-    def build_image(self, *, context_dir: str, tag: str, network: bool = ...) -> str:
+    def build_image(
+        self,
+        *,
+        context_dir: str,
+        tag: str,
+        network: bool = ...,
+        allow_mirror: bool = ...,
+    ) -> str:
         """Build an image from ``context_dir`` and return its content-addressed
         digest (``sha256:...``). MUST default to no network access during the
         build (the generated Dockerfile is hostile input) and MUST refuse
         (never silently accept) an oversized result rather than leave it
-        behind."""
+        behind. ``allow_mirror=True`` opts the build into an operator-configured,
+        INTERNAL-only package-mirror network when one exists (a strict superset of
+        the no-network default; a non-internal/missing mirror MUST be refused, not
+        downgraded to open egress)."""
         ...
 
     def is_available(self) -> bool:
