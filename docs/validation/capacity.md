@@ -83,13 +83,50 @@ per successful request. It proves the harness WORKS; it does not certify the SLO
 
 This is an honest, uncomfortable result and it is reported as-is. At 25 concurrent
 submitters this **in-process, single-PostgreSQL** configuration does **NOT** meet
-the 500 ms submission SLO. Contributing factors observed in this configuration
-(NOT product-inherent, and NOT tuned here): the default 15-connection SQLAlchemy
-pool throttling ~29 concurrent request threads, synchronous per-request JSON
-logging to stdout, the single arm64 host running the DB + app + load generator
-together, and outbox-trigger contention on the shared score projection. Tuning any
-of these is deployment work, not a change to the thing under test — so this run is
-recorded as a data point, not acted on here.
+the 500 ms submission SLO.
+
+### Follow-up investigation + the two ceilings that were fixed
+
+A later pass profiled the path and split the causes into *product* serialization
+ceilings (fixable in code) and a *harness* artifact:
+
+- **Product ceiling #1 — the submission advisory lock was competition-wide.**
+  `SubmissionProcessingService` took a `pg_advisory_xact_lock` keyed on the
+  *competition* only, held for the whole ~9–18-round-trip transaction, so **every
+  submission across every team serialized** on one lock — and the harness funnels
+  all 25 teams into one competition. The at-most-one-solve invariant does **not**
+  depend on that lock (the `uq_solves_(competition,team,version)` UNIQUE + the
+  service's SAVEPOINT retry are the authoritative backstop; the projector's
+  `as_of_seq` UPSERT makes a refold idempotent). **Fixed:** the submission path now
+  uses `acquire_submission_lock` keyed at `(competition, team, challenge-version)`
+  (`infrastructure/database/locks.py`), so different teams/challenges — and a
+  concurrent projector refold — never block each other.
+- **Product ceiling #2 — the connection pool was the library default (15).**
+  With ~29 concurrent request threads, threads blocked acquiring a *connection*
+  before doing any work, serializing requests independently of any lock.
+  **Fixed:** `DatabaseConfig` now sizes the `QueuePool` to 20 + 20 = 40 (env-tunable
+  via `CTFGEN_DB_POOL_SIZE` / `CTFGEN_DB_MAX_OVERFLOW`).
+
+- **Harness artifact — the in-process run is GIL-bound.** With those two ceilings
+  removed, in-process throughput barely moved (≈29.5 → ≈33 req/s) and stayed flat
+  as thread count grew 8× (3-team smoke ≈26 req/s vs 25-team ≈33 req/s). That flat
+  ceiling is the signature of the **single-process GIL**: app + DB driver + load
+  generator all execute Python on one interpreter, so the run saturates one core's
+  Python execution (ORM hydration, per-request `json.dumps` access logging) before
+  the advisory lock or the connection pool can bind. The measured p95 is therefore
+  substantially a **measurement-environment** artifact of the co-located,
+  single-GIL harness — not a product limit — which is exactly why capacity.md has
+  always called this run a *lower bound / harness proof*, not a sign-off.
+
+The two code fixes remove the real serialization ceilings that **would** bind in a
+production topology (multiple app processes/hosts, each its own GIL; DB on its own
+host); they cannot be *demonstrated* by this GIL-bound in-process harness, which is
+a limitation of the harness, not of the fixes. The remaining per-submission-cost
+lever — collapsing the redundant `_resolve.*` uuid look-ups (competition/team/
+version are re-resolved 3–4× each across the lock/submission/solve/event steps)
+into a single resolve passed down — is the identified next step; it is an invasive
+change to the scoring-path repository signatures and is deliberately left for a
+separate, reviewed pass rather than bundled here.
 
 ## UNVERIFIED here (charter §5 — blunt statement)
 
