@@ -143,13 +143,13 @@ executed assertion are marked **IMPLEMENTED (not independently qualified)**.
 | **v0.2-alpha** (isolated execution) | PG job system (leases/heartbeats/retries/idempotency/dead-letter): `tests/test_worker_job_service_integration.py`, `test_worker_repository_integration.py`, `test_worker_loop_integration.py` (PG-gated). Instance lifecycle + reconciliation of orphans: `test_instance_lifecycle_integration.py` (10 drift cases incl. orphaned). Resource/network isolation: S2 Docker tests. Bundle code runs only on isolated workers: S9 (host static + Docker runtime). | **Rootless Docker/Podman + rootless BuildKit** is capability-gated on this rootful arm64 host → NOT-QUALIFIED here ([`security/runtime-isolation.md`](security/runtime-isolation.md)). |
 | **v0.3-alpha** (persistent control plane) | PG domain model + Alembic (head `0014`): migration-drift + full-downgrade tests. Immutable content-addressed publish + at-most-one-solve + score-event reconstruction: `alpha_sim.py` / `beta_sim.py` + `test_e2e_flow_integration.py` + S8 restore parity. AuthN/AuthZ across roles: S1/S7. Audit trail: S8 ledger append-only. | All PG-gated (integration env, not host). Production-deployment authz sweep NOT-QUALIFIED. |
 | **v0.4-beta** (complete workflow) | Organizer web (M11), contestant portal (M12), live-ops orchestration (M8), reports via API (M9/M16) — exercised by `test_web_*`, `test_api_*`, `test_instance_lifecycle_integration.py`. One organizer→contestant workflow: `alpha_sim.py` Half A over real PG. | **Supported deployment (reverse proxy + TLS, S3 artifact storage)** NOT-QUALIFIED — not stood up. **Operating targets (25×20, ≥99% launch, <3 s/<500 ms)** NOT-QUALIFIED — see §5. The single joined organizer→contestant→worker-launch flow is now **one executed flow** over real PG + Docker, in-process (`test_joined_e2e_integration.py`) and networked (`test_joined_e2e_http_integration.py`); only its **multi-host at-scale** form remains NOT-QUALIFIED (§4). |
-| **v0.5-beta** (quality + evaluation) | Scenario engine live + provably blocks the real attack surface (offline) for 4 families: `tests/test_family_scenarios.py` (host). Single-host scripted eval delta machinery exists and is exercisable (`agent_eval`, `SingleHostEvalJobRunner`). | **Distributed / at-scale / real-LLM adversarial eval NOT-QUALIFIED** — `build_challenge` unbuilt; LLM profile credential-blocked; no continuous automated resistance-number artifact ([`validation/ai-resistance.md`](validation/ai-resistance.md), §6). |
+| **v0.5-beta** (quality + evaluation) | Scenario engine live + provably blocks the real attack surface (offline) for 4 families: `tests/test_family_scenarios.py` (host). Single-host scripted eval delta machinery exists and is exercisable (`agent_eval`, `SingleHostEvalJobRunner`). | **At-scale / real-LLM adversarial eval NOT-QUALIFIED** — the distributed build/launch pipeline is now built (`build_challenge`; joined-flow tests), but adaptive/LLM eval is credential-blocked and there is no continuous automated resistance-number artifact ([`validation/ai-resistance.md`](validation/ai-resistance.md), §6). |
 
 ---
 
 ## 4. Alpha / beta gates
 
-### Internal-alpha — MET-by-simulation, with one composite seam UNVERIFIED
+### Internal-alpha — MET-by-simulation (joined worker-launch seam now closed)
 
 From [`validation/internal-alpha-report.md`](validation/internal-alpha-report.md).
 Every **technical** exit criterion is backed by an executed test on this host at
@@ -235,7 +235,7 @@ are UNVERIFIED and block closed-beta **exit** and v1.0.
 | **Continuous RPO ≤ 5 min** (REQ-NFR-006) | **NOT-QUALIFIED / UNVERIFIED** | Only a logical `pg_dump` **baseline** RPO (≈0 s at snapshot) exists — reported as baseline-only, **not a gate**. Continuous RPO needs **WAL archiving / PITR**, not configured on this host. |
 | **Submission processing < 500 ms** (REQ-NFR-005) | **QUALIFIED at smoke scale only; NOT-QUALIFIED at production scale** | Smoke (3×2): submission p95 ≈435 ms (under target). At the **25×20** concurrency, in-process single-PG: submission p95 ≈**2050 ms — OVER TARGET** ([`validation/capacity.md`](validation/capacity.md)). Sustained production sign-off UNVERIFIED. |
 | **Scoreboard update < 3 s** (REQ-NFR-004) | **QUALIFIED at smoke; degrading at scale** | Smoke p95 ≈115 ms; at 25×20 in-process p95 ≈1180 ms (still under 3 s but degrading). Sustained production sign-off UNVERIFIED. |
-| **Instance launch success ≥ 99%** (REQ-NFR-003) | **NOT-QUALIFIED / UNVERIFIED** | No real launch of the published bundle on a worker fleet exists (`build_challenge` unbuilt); the harness probes the instances API surface and reports launch success UNVERIFIED — it never fabricates a ≥99% number. |
+| **Instance launch success ≥ 99%** (REQ-NFR-003) | **NOT-QUALIFIED / UNVERIFIED** | A single published-bundle launch on a worker is now proven end to end (`test_joined_e2e_integration` + `test_joined_e2e_http_integration`), but **≥99% success at scale on a real multi-host worker fleet** has no evidence; `loadtest.py`'s `_probe_launch` reports it UNVERIFIED — it never fabricates a ≥99% number. |
 | **25 teams × 20 challenges envelope** (REQ-NFR-001/002) | **NOT-QUALIFIED / UNVERIFIED** | The harness can seed/drive that concurrency for submission + scoreboard paths, but "20 live challenges" in production means 20 launched, reachable instances, which the in-process harness does not stand up. |
 | **Determinism (zero rebuild failures)** (REQ-NFR-009) | **QUALIFIED (host)** | `tests/test_conformance_suite.py` — byte-stable golden manifests + run-to-run determinism + no-wall-clock-in-provenance (52 OK). |
 | **Zero public flag leak** (REQ-NFR-008) | **QUALIFIED (host)** | S4 (`test_public_flag_leak.py`, `test_score.py`). |
@@ -270,8 +270,10 @@ supported deployment path; anything not listed is unsupported by definition.
 - **Production-scale performance** — degrades OVER the submission SLO at 25×20
   in-process; no tuned multi-host sustained run exists.
 - **A real TLS / reverse-proxy / S3-storage deployment** — not stood up here.
-- **Distributed worker bundle launch** (`build_challenge`) — UNBUILT; ≥99% launch
-  success has no evidence.
+- **Distributed worker bundle launch** (`build_challenge`) — the pipeline is now
+  BUILT and proven on one host over both the in-process and networked transports
+  (`test_joined_e2e_integration` / `test_joined_e2e_http_integration`); a real
+  MULTI-HOST fleet with ≥99% launch success at scale has no evidence.
 - **Rootless / userns worker isolation** — capability-gated on this rootful arm64
   host.
 - **Continuous RPO / PITR** — not configured; only baseline `pg_dump` RPO exists.
@@ -287,8 +289,10 @@ supported deployment path; anything not listed is unsupported by definition.
      autonomous agent defeated by a running instance**;
   3. the Evaluation Lab **can** compute a single-host scripted (non-LLM)
      solved-with-vs-without-defense delta — but the real-LLM adversary and the
-     distributed/at-scale eval are **UNVERIFIED** (credential-blocked; pipeline
-     unbuilt; no continuous automated resistance-number artifact).
+     distributed/at-scale eval are **UNVERIFIED** (credential-blocked; the eval
+     RUN is not yet productized as a managed job; no continuous automated
+     resistance-number artifact — note the underlying build/launch pipeline is now
+     built, so this is no longer a `build_challenge` gap).
 
 ---
 
