@@ -50,6 +50,12 @@ services:
       CTFGEN_ARTIFACT_ROOT: /var/lib/ctfgen/artifacts
       CTFGEN_API_RATE_LIMIT: ${CTFGEN_API_RATE_LIMIT:-1}
       CTFGEN_API_TRUSTED_PROXY: ${CTFGEN_API_TRUSTED_PROXY:-1}
+      # uvicorn worker processes + per-worker DB pool. Default 1 worker (demo).
+      # Size up for concurrency; keep (workers x (pool+overflow)) < PG
+      # max_connections.
+      CTFGEN_API_WORKERS: ${CTFGEN_API_WORKERS:-1}
+      CTFGEN_DB_POOL_SIZE: ${CTFGEN_DB_POOL_SIZE:-20}
+      CTFGEN_DB_MAX_OVERFLOW: ${CTFGEN_DB_MAX_OVERFLOW:-20}
       # Do NOT co-mount the flag-bearing worker routes on the public human edge.
       # The worker gateway runs as its OWN listener (docker-compose.worker-gateway.yml,
       # MODE=worker-gateway) on a private interface; keeping /api/v1/worker/* off the
