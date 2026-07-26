@@ -1,0 +1,57 @@
+# CTFGenerator EXECUTION-PLANE worker host (M18 18a) -- runs on a SEPARATE host.
+#
+# ============================ ISOLATION CONTRACT =============================
+# This compose runs ONLY the worker -- the ONE process that executes challenge
+# containers (REQ-INV-010 / ADR-001). It MUST run on a DIFFERENT host from the
+# control plane (deploy/docker-compose.yml): the control-plane host holds NO docker
+# socket, and this host holds NO control-plane DB credential / session key. The two
+# planes share nothing but the scoped worker bearer token + the gateway URL.
+#
+# HOST REQUIREMENTS (provided by the host, NOT by this file or the image):
+#   * A ROOTLESS docker/container engine, reached via the socket mounted below
+#     (default: the rootless dockerd socket at $XDG_RUNTIME_DIR/docker.sock). Point
+#     CTFGEN_DOCKER_SOCK at your rootless socket in deploy/.env.
+#   * NET_ADMIN so the worker's DockerRuntimeBackend can install the host-block
+#     iptables floor; without it the backend REFUSES to launch (fail-safe) -- no
+#     challenge runs unisolated.
+# ============================================================================
+#
+# SECRET-FREE: the worker's scoped bearer token is interpolated from the env
+# (${CTFGEN_WORKER_TOKEN} in deploy/.env, gitignored); nothing secret is baked here.
+#
+#   cp deploy/.env.example deploy/.env   # set CTFGEN_WORKER_* + CTFGEN_DOCKER_SOCK
+#   docker compose -f deploy/docker-compose.worker.yml --env-file deploy/.env up
+
+services:
+  worker:
+    build:
+      context: ..
+      dockerfile: deploy/Dockerfile.worker
+    environment:
+      # Networked transport ONLY: the worker reaches the control plane over HTTP
+      # (never an in-process DB session -- it has no DB credential).
+      CTFGEN_WORKER_TRANSPORT: http
+      # The control plane's WORKER-GATEWAY listener (MODE=worker-gateway), NOT the
+      # human API. In production this is a separate host:port / TLS vhost, disjoint
+      # from the public human edge.
+      CTFGEN_WORKER_CONTROL_PLANE_URL: ${CTFGEN_WORKER_CONTROL_PLANE_URL}
+      CTFGEN_WORKER_TOKEN: ${CTFGEN_WORKER_TOKEN}
+      CTFGEN_WORKER_NAME: ${CTFGEN_WORKER_NAME:-worker-1}
+      CTFGEN_WORKER_LEASE_SECONDS: ${CTFGEN_WORKER_LEASE_SECONDS:-60}
+      # Optional: attach challenge builds to a package-mirror network (capability-
+      # gated egress). Leave unset to keep builds fully offline.
+      CTFGEN_WORKER_BUILD_MIRROR_NETWORK: ${CTFGEN_WORKER_BUILD_MIRROR_NETWORK:-}
+      # The worker drives the HOST's rootless engine over this socket path.
+      DOCKER_HOST: unix:///var/run/ctfgen-docker.sock
+    volumes:
+      # Mount the HOST's ROOTLESS docker socket read-write (the worker needs to
+      # create/stop challenge containers). Point ${CTFGEN_DOCKER_SOCK} at the
+      # rootless socket, e.g. /run/user/1000/docker.sock -- NOT the rootful
+      # /var/run/docker.sock.
+      - ${CTFGEN_DOCKER_SOCK}:/var/run/ctfgen-docker.sock
+    cap_add:
+      # Required for the host-block iptables floor; without it the backend refuses
+      # to launch (fail-safe). Everything else stays dropped by the runtime backend
+      # per challenge container.
+      - NET_ADMIN
+    restart: unless-stopped

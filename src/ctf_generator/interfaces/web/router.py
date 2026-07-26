@@ -42,16 +42,20 @@ from ctf_generator.application.catalog.competition_service import (
 from ctf_generator.application.catalog.publication_service import PublicationService
 from ctf_generator.application.instances.service import InstanceLifecycleService
 from ctf_generator.application.jobs.service import JobService
+from ctf_generator.application.reports.service import ReportService
 from ctf_generator.application.scoring.scoreboard_service import ScoreboardService
 from ctf_generator.domain.authoring.models import ChallengePublication
 from ctf_generator.domain.challenges.models import CompetitionConfig
 from ctf_generator.domain.identity.models import Team
+from ctf_generator.domain.reports.models import report_subject
 from ctf_generator.interfaces.api.deps import (
     Permission,
     Principal,
+    VersionReportType,
     assert_competition_permission_or_404,
     authorized_competitions,
     competition_permissions,
+    version_report_permission,
 )
 from ctf_generator.interfaces.api.exceptions import AuthorizationError
 
@@ -78,6 +82,7 @@ from .deps import (
     get_web_instance_lifecycle_service,
     get_web_job_service,
     get_web_publication_service,
+    get_web_report_service,
     get_web_scoreboard_service,
     get_web_settings,
     get_web_team_service,
@@ -94,6 +99,8 @@ from .views import (
     instance_row,
     job_row,
     publication_row,
+    report_snapshot_detail,
+    report_snapshot_row,
     scoreboard_entry,
     scoreboard_entry_key,
     team_row,
@@ -1082,6 +1089,10 @@ def _render_builds(
         "version_no": version_no,
         "builds": [build_row(b) for b in builds],
         "can_trigger": can_trigger,
+        # Reachability of the per-version reports: validation + build ride the SAME
+        # build:read this page already required; eval needs eval:read (an organizer/
+        # author holds it, a build-only ops caller may not -> hide that one link).
+        "can_view_eval_report": principal.has(Permission.EVAL_READ),
         "values": values,
         "errors": errors,
         "notice": notice,
@@ -1212,4 +1223,166 @@ def scoreboard_view(
     }
     return renderer.render(
         request, "scoreboard.html", context, principal=principal
+    )
+
+
+# -- reports (organizer read + freeze a snapshot) ---------------------------
+#
+# A report is a read-only summary of already-persisted data; a POST FREEZES an
+# immutable snapshot, a GET reads the latest snapshot + history. Authorization is
+# IDENTICAL to the JSON API: the version-scoped kinds (validation / build / eval)
+# ride a FLAT authoring read permission (``version_report_permission`` -- the SAME
+# mapping the API dependency uses, none held by a contestant); the competition-run
+# report is competition-scoped on SCOREBOARD_READ (existence-hiding 404 on a
+# cross-competition caller). Every payload is secret-free by construction.
+
+
+def _render_version_report(
+    request: Request,
+    renderer: TemplateRenderer,
+    principal: Principal,
+    service: ReportService,
+    slug: str,
+    version_no: int,
+    report_type: VersionReportType,
+    *,
+    notice: str | None = None,
+    error: str | None = None,
+    status_code: int = 200,
+) -> Response:
+    subject = report_subject(
+        report_type.value, definition_slug=slug, version_no=version_no
+    )
+    snapshots = service.list_snapshots(report_type.value, subject)
+    latest = snapshots[0] if snapshots else None
+    context = {
+        "slug": slug,
+        "version_no": version_no,
+        "report_type": report_type.value,
+        "latest": report_snapshot_detail(latest) if latest is not None else None,
+        "history": [report_snapshot_row(s) for s in snapshots],
+        "notice": notice,
+        "error": error,
+    }
+    return renderer.render(
+        request, "report_version.html", context,
+        principal=principal, status_code=status_code,
+    )
+
+
+@router.get(
+    "/challenge-definitions/{slug}/versions/{version_no}/reports/{report_type}",
+    name="web_version_report",
+)
+def version_report_view(
+    slug: str,
+    version_no: int,
+    report_type: VersionReportType,
+    request: Request,
+    principal: Principal = Depends(get_web_principal),
+    renderer: TemplateRenderer = Depends(get_renderer),
+    service: ReportService = Depends(get_web_report_service),
+) -> Response:
+    # Same FLAT authoring permission the API enforces (contestant-excluding).
+    _require_flat(principal, version_report_permission(report_type))
+    return _render_version_report(
+        request, renderer, principal, service, slug, version_no, report_type
+    )
+
+
+@router.post(
+    "/challenge-definitions/{slug}/versions/{version_no}/reports/{report_type}",
+    name="web_version_report_snapshot",
+)
+async def version_report_snapshot(
+    slug: str,
+    version_no: int,
+    report_type: VersionReportType,
+    request: Request,
+    principal: Principal = Depends(get_web_principal),
+    renderer: TemplateRenderer = Depends(get_renderer),
+    service: ReportService = Depends(get_web_report_service),
+    _csrf: None = Depends(require_csrf),
+) -> Response:
+    _require_flat(principal, version_report_permission(report_type))
+    try:
+        service.snapshot(
+            report_type.value, principal.subject,
+            definition_slug=slug, version_no=version_no,
+        )
+    except LookupError:
+        # A nonexistent version is a friendly re-render, never a 500.
+        return _render_version_report(
+            request, renderer, principal, service, slug, version_no, report_type,
+            error="That challenge version was not found.", status_code=404,
+        )
+    return _redirect(
+        request, "web_version_report",
+        slug=slug, version_no=str(version_no), report_type=report_type.value,
+    )
+
+
+def _render_competition_run_report(
+    request: Request,
+    renderer: TemplateRenderer,
+    principal: Principal,
+    service: ReportService,
+    competition_id: str,
+    *,
+    notice: str | None = None,
+    status_code: int = 200,
+) -> Response:
+    subject = report_subject("competition_run", competition_id=competition_id)
+    snapshots = service.list_snapshots("competition_run", subject)
+    latest = snapshots[0] if snapshots else None
+    context = {
+        "competition_id": competition_id,
+        "latest": report_snapshot_detail(latest) if latest is not None else None,
+        "history": [report_snapshot_row(s) for s in snapshots],
+        "notice": notice,
+    }
+    return renderer.render(
+        request, "report_competition_run.html", context,
+        principal=principal, status_code=status_code,
+    )
+
+
+@router.get(
+    "/competitions/{competition_id}/reports/run", name="web_competition_run_report"
+)
+def competition_run_report_view(
+    competition_id: str,
+    request: Request,
+    principal: Principal = Depends(get_web_principal),
+    renderer: TemplateRenderer = Depends(get_renderer),
+    service: ReportService = Depends(get_web_report_service),
+) -> Response:
+    # Competition-scoped SCOREBOARD_READ; a cross-competition caller is the same
+    # existence-hiding 404 as a nonexistent competition (no existence oracle).
+    assert_competition_permission_or_404(
+        principal, competition_id, Permission.SCOREBOARD_READ, not_found=_NOT_FOUND
+    )
+    return _render_competition_run_report(
+        request, renderer, principal, service, competition_id
+    )
+
+
+@router.post(
+    "/competitions/{competition_id}/reports/run",
+    name="web_competition_run_snapshot",
+)
+async def competition_run_report_snapshot(
+    competition_id: str,
+    request: Request,
+    principal: Principal = Depends(get_web_principal),
+    renderer: TemplateRenderer = Depends(get_renderer),
+    service: ReportService = Depends(get_web_report_service),
+    _csrf: None = Depends(require_csrf),
+) -> Response:
+    assert_competition_permission_or_404(
+        principal, competition_id, Permission.SCOREBOARD_READ, not_found=_NOT_FOUND
+    )
+    service.snapshot("competition_run", principal.subject, competition_id=competition_id)
+    return _redirect(
+        request, "web_competition_run_report", competition_id=competition_id
     )

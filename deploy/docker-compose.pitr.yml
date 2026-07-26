@@ -1,0 +1,48 @@
+# CTFGenerator PITR overlay (M20) -- enable continuous WAL archiving on PostgreSQL
+# so a point-in-time restore can meet the RPO <= 5 min posture (REQ-NFR-006) that a
+# logical pg_dump baseline alone cannot.
+#
+#   docker compose -f deploy/docker-compose.yml -f deploy/docker-compose.pitr.yml \
+#     --env-file deploy/.env up
+#
+# This overlay ONLY adds WAL archiving to the base compose's `postgres` service:
+# every committed transaction's WAL segment is copied to the `walarchive` volume as
+# it fills (or every `archive_timeout`), so a base backup + the archived WAL can be
+# replayed forward to any target time between the base backup and the last archived
+# segment. Recovery-window (RPO) = age of the newest archived segment, bounded by
+# archive_timeout.
+#
+# The base backups themselves are operator-scheduled (a periodic `pg_basebackup -D
+# <dir> -Ft` into off-host/object storage) -- see docs/operations/
+# backup-recovery-upgrade.md. scripts/pitr_drill.sh exercises the WHOLE
+# base-backup -> archive -> point-in-time-restore path against a throwaway cluster
+# and asserts the recovered state stops exactly at the target time.
+#
+# SECRET-FREE: no credential appears here; archiving is a local file copy into a
+# named volume. Ship the archive off-host (object storage) in a real deployment so
+# a host loss does not take the WAL with it.
+
+services:
+  postgres:
+    # wal_level=replica + archive_mode=on make every filled WAL segment eligible
+    # for archiving; archive_command copies it, refusing to clobber an existing
+    # segment (the `test ! -f` guard is the documented-safe idempotent form).
+    # archive_timeout caps how long a low-traffic segment waits before being forced
+    # out, which is the effective RPO floor.
+    command:
+      - postgres
+      - -c
+      - wal_level=replica
+      - -c
+      - archive_mode=on
+      - -c
+      - archive_command=test ! -f /walarchive/%f && cp %p /walarchive/%f
+      - -c
+      - archive_timeout=60
+      - -c
+      - max_wal_senders=3
+    volumes:
+      - walarchive:/walarchive
+
+volumes:
+  walarchive:
