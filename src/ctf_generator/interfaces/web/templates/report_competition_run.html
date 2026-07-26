@@ -1,0 +1,51 @@
+{% extends "base.html" %}
+{% block title %}Run report - {{ competition_id }}{% endblock %}
+{% block content %}
+<div class="card">
+  <h1>Competition run report</h1>
+  <p class="muted mono">{{ competition_id }}</p>
+  {% if notice %}<div class="notice-ok">{{ notice }}</div>{% endif %}
+  <p class="muted">Final standings and the solve timeline / first bloods, summarized
+    from the scoreboard projection and the solve ledger. Freezing records an
+    immutable snapshot of the results as they stand now.</p>
+  <form method="post" action="{{ mount_path }}/competitions/{{ competition_id }}/reports/run">
+    {% if csrf_token %}<input type="hidden" name="csrf_token" value="{{ csrf_token }}">{% endif %}
+    <button type="submit" class="btn">Freeze run snapshot</button>
+  </form>
+</div>
+
+<div class="card">
+  <h2>Latest snapshot</h2>
+  {% if latest %}
+  <dl class="kv">
+    <dt>Report id</dt><dd class="mono">{{ latest.report_id }}</dd>
+    <dt>Subject</dt><dd class="mono">{{ latest.subject }}</dd>
+    <dt>Frozen by</dt><dd>{{ latest.created_by }}</dd>
+    <dt>Frozen at</dt><dd class="mono">{{ latest.created_at }}</dd>
+  </dl>
+  <pre class="mono">{{ latest.payload_json }}</pre>
+  {% else %}
+  <p class="muted">No snapshots yet. Freeze one to archive the final results.</p>
+  {% endif %}
+</div>
+
+{% if history %}
+<div class="card">
+  <h2>History</h2>
+  <table>
+    <thead>
+      <tr><th>Report id</th><th>Frozen by</th><th>Frozen at</th></tr>
+    </thead>
+    <tbody>
+      {% for s in history %}
+      <tr>
+        <td class="muted mono">{{ s.report_id }}</td>
+        <td>{{ s.created_by }}</td>
+        <td class="muted mono">{{ s.created_at }}</td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+{% endif %}
+{% endblock %}

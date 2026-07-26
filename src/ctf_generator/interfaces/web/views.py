@@ -9,6 +9,7 @@ and this mapping renders only its timing/scoring configuration.
 
 from __future__ import annotations
 
+import json
 from typing import Any
 
 from ctf_generator.domain.authoring.models import (
@@ -25,6 +26,7 @@ from ctf_generator.domain.instances.models import (
     InstanceEndpoint,
 )
 from ctf_generator.domain.ledger.models import LedgerSubmission
+from ctf_generator.domain.reports.models import ReportSnapshot
 from ctf_generator.domain.work.models import Job
 from ctf_generator.interfaces.api.schemas.builds import build_to_list_item
 from ctf_generator.interfaces.api.schemas.instances import (
@@ -200,6 +202,43 @@ def roster_member(membership: Membership) -> dict[str, Any]:
         "user_email": membership.user_email,
         "role": membership.role,
         "team_name": membership.team_name,
+    }
+
+
+# -- reports (M11 report view) ----------------------------------------------
+#
+# A report snapshot is an immutable, ALREADY secret-free summary (references /
+# hashes / counts / booleans only -- the ReportService guarantees no flag / token /
+# candidate can enter a payload). The web view adds no field the JSON API would not
+# also surface: the header facts plus the payload rendered as pretty JSON, which
+# Jinja autoescapes so even a hostile string value renders as inert text.
+
+
+def report_snapshot_row(snapshot: ReportSnapshot) -> dict[str, Any]:
+    """A compact list-row view of one frozen snapshot (identity + who/when)."""
+    return {
+        "report_id": snapshot.report_id,
+        "report_type": snapshot.report_type,
+        "created_by": snapshot.created_by,
+        "created_at": _iso(snapshot.created_at),
+    }
+
+
+def report_snapshot_detail(snapshot: ReportSnapshot) -> dict[str, Any]:
+    """The full read view of one snapshot: identity + scope + the payload rendered
+    as sorted, indented JSON for display (autoescaped by the template)."""
+    return {
+        "report_id": snapshot.report_id,
+        "report_type": snapshot.report_type,
+        "subject": snapshot.subject,
+        "definition_slug": snapshot.definition_slug,
+        "version_no": snapshot.version_no,
+        "competition_id": snapshot.competition_id,
+        "created_by": snapshot.created_by,
+        "created_at": _iso(snapshot.created_at),
+        "payload_json": json.dumps(
+            dict(snapshot.payload), indent=2, sort_keys=True, default=str
+        ),
     }
 
 

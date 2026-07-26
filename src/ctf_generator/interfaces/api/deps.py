@@ -677,6 +677,13 @@ _VERSION_REPORT_PERMISSION: dict[VersionReportType, Permission] = {
 }
 
 
+def version_report_permission(report_type: VersionReportType) -> Permission:
+    """The flat AUTHORING read permission gating a version-scoped report kind. The
+    single source of truth shared by the JSON API dependency and the web UI router,
+    so both surfaces enforce the identical, contestant-excluding mapping."""
+    return _VERSION_REPORT_PERMISSION[report_type]
+
+
 def require_version_report_permission(
     report_type: VersionReportType, principal: Principal = Depends(get_principal)
 ) -> Principal:
