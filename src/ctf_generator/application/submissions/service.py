@@ -63,6 +63,7 @@ from ctf_generator.infrastructure.database.challenge_version_repository import (
     SqlAlchemyChallengeVersionRepository,
 )
 from ctf_generator.infrastructure.database.locks import acquire_submission_lock
+from ctf_generator.infrastructure.database.resolvers import resolve_submission_scope
 from ctf_generator.infrastructure.database.score_ledger_repository import (
     SqlAlchemyScoreLedger,
 )
@@ -142,6 +143,19 @@ class SubmissionProcessingService:
                     f"v{request.version_no} is a draft and not submittable"
                 )
 
+            # Resolve the (competition, team, version) surrogate uuids ONCE (the
+            # version/publication existence is already established above, so this
+            # only adds the team resolve) and thread them into the append-only
+            # writes below, instead of submissions.add / solves.add /
+            # ScoreLedger.append each re-resolving the same three rows.
+            comp_uuid, team_uuid, version_uuid = resolve_submission_scope(
+                session,
+                request.competition_id,
+                request.team_name,
+                request.definition_slug,
+                request.version_no,
+            )
+
             # (4) Normalize + verify (constant time; candidate never persisted).
             candidate = normalize_candidate(request.candidate_flag)
             correct = self._verifier.verify(
@@ -170,7 +184,12 @@ class SubmissionProcessingService:
             # rather than a raw IntegrityError.
             try:
                 with session.begin_nested():
-                    submissions.add(submission)
+                    submissions.add(
+                        submission,
+                        competition_uuid=comp_uuid,
+                        team_uuid=team_uuid,
+                        version_uuid=version_uuid,
+                    )
             except IntegrityError:
                 stored = submissions.get(request.submission_id)
                 if stored is None:  # pragma: no cover - not a pk collision
@@ -225,7 +244,12 @@ class SubmissionProcessingService:
             # dependency.
             try:
                 with session.begin_nested():
-                    solves.add(solve)
+                    solves.add(
+                        solve,
+                        competition_uuid=comp_uuid,
+                        team_uuid=team_uuid,
+                        version_uuid=version_uuid,
+                    )
                     event = SqlAlchemyScoreLedger(session).append(
                         ScoreEvent(
                             competition_id=request.competition_id,
@@ -237,7 +261,10 @@ class SubmissionProcessingService:
                             submission_id=submission.submission_id,
                             solve_id=solve.solve_id,
                             payload={},
-                        )
+                        ),
+                        competition_uuid=comp_uuid,
+                        team_uuid=team_uuid,
+                        version_uuid=version_uuid,
                     )
             except IntegrityError as exc:
                 constraint = _violated_constraint(exc)
