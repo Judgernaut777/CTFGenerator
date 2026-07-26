@@ -71,6 +71,10 @@ class Permission(StrEnum):
     # slice-b contestant competition-loop surface.
     USER_READ = "user:read"
     USER_WRITE = "user:write"
+    # Manage a competition's roster: assign/re-role/place a user's membership
+    # (role + team) in one competition. COMPETITION-scoped (an organizer of A
+    # cannot seed memberships in B).
+    MEMBERSHIP_WRITE = "membership:write"
     SUBMISSION_CREATE = "submission:create"
     SUBMISSION_READ = "submission:read"
     SCOREBOARD_READ = "scoreboard:read"
@@ -142,6 +146,7 @@ PERMISSION_SCOPE: dict[Permission, PermissionScope] = {
     Permission.COMPETITION_WRITE: PermissionScope.COMPETITION,
     Permission.TEAM_READ: PermissionScope.COMPETITION,
     Permission.TEAM_WRITE: PermissionScope.COMPETITION,
+    Permission.MEMBERSHIP_WRITE: PermissionScope.COMPETITION,
     Permission.SUBMISSION_CREATE: PermissionScope.COMPETITION,
     Permission.SUBMISSION_READ: PermissionScope.COMPETITION,
     Permission.SCOREBOARD_READ: PermissionScope.COMPETITION,
@@ -186,6 +191,8 @@ ROLE_PERMISSIONS: dict[str, frozenset[Permission]] = {
             Permission.COMPETITION_WRITE,
             Permission.TEAM_READ,
             Permission.TEAM_WRITE,
+            # Organizer manages the roster of their own competition.
+            Permission.MEMBERSHIP_WRITE,
             Permission.CHALLENGE_READ,
             Permission.USER_READ,
             Permission.USER_WRITE,
