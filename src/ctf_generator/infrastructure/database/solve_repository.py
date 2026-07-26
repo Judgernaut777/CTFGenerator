@@ -58,12 +58,30 @@ class SqlAlchemySolveRepository:
     def __init__(self, session: Session) -> None:
         self._session = session
 
-    def add(self, solve: Solve) -> None:
-        competition_uuid = _resolve.competition_uuid(self._session, solve.competition_id)
-        team_uuid = _resolve.team_uuid(self._session, competition_uuid, solve.team_name)
-        version_uuid = _resolve.version_uuid(
-            self._session, solve.definition_slug, solve.version_no
-        )
+    def add(
+        self,
+        solve: Solve,
+        *,
+        competition_uuid=None,
+        team_uuid=None,
+        version_uuid=None,
+    ) -> None:
+        """Insert a solve. Pre-resolved uuids (from
+        ``resolvers.resolve_submission_scope``) are used as-is when supplied,
+        else resolved on demand -- so the submission path resolves the scope once
+        and passes it here instead of re-resolving."""
+        if competition_uuid is None:
+            competition_uuid = _resolve.competition_uuid(
+                self._session, solve.competition_id
+            )
+        if team_uuid is None:
+            team_uuid = _resolve.team_uuid(
+                self._session, competition_uuid, solve.team_name
+            )
+        if version_uuid is None:
+            version_uuid = _resolve.version_uuid(
+                self._session, solve.definition_slug, solve.version_no
+            )
         row = solve_to_orm(solve, competition_uuid, team_uuid, version_uuid)
         self._session.add(row)
         self._session.flush()
