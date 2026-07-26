@@ -1,6 +1,10 @@
 # Capacity / load validation (M20)
 
-Status: **HARNESS PROOF + FIRST DATA POINT — NOT the production capacity sign-off.**
+Status: **SINGLE-HOST DEPLOYMENT TARGETS MET (out-of-process, real TLS) — the
+multi-host production sign-off is still its own step.** The 25×20 submission
+(<500 ms) and scoreboard (<3 s) latency targets are met on the deployed stack when
+the API is sized to multiple uvicorn workers (see the out-of-process section
+below); instance-launch ≥99% still needs a real worker fleet.
 
 This documents the in-process capacity harness (`scripts/loadtest.py`), the SMOKE
 numbers actually measured on this host, and — bluntly, per charter §5 — exactly
@@ -128,6 +132,49 @@ into a single resolve passed down — is the identified next step; it is an inva
 change to the scoring-path repository signatures and is deliberately left for a
 separate, reviewed pass rather than bundled here.
 
+## OUT-OF-PROCESS measurement on the deployed stack (`scripts/loadtest_http.py`)
+
+The in-process harness above could not *demonstrate* that the p95 was a GIL
+artifact rather than a product limit — proving it needs a real, multi-process
+client hitting a real deployment. `scripts/loadtest_http.py` does exactly that: it
+provisions a competition (25 teams × 20 published+attached challenges + 25 player
+memberships via the roster API) and then drives **real HTTPS submissions from
+`--procs` separate OS processes** against the **supported Docker deployment**
+(`deploy/`, Caddy TLS → uvicorn → PostgreSQL 16), reporting p50/p95/max.
+
+Measured on this single 12-core rootful arm64 host, 25 teams × 20 challenges,
+30 s sustained, 16 load processes:
+
+| API sizing | Submission p95 (REQ-NFR-005, <500 ms) | Scoreboard p95 (REQ-NFR-004, <3 s) | Throughput | Errors |
+|---|---|---|---|---|
+| **1 uvicorn worker** (default) | ≈ **1140 ms — OVER** | ≈ 650 ms — under | ≈ 13 req/s | 0 |
+| **6 uvicorn workers** (`CTFGEN_API_WORKERS=6`, pool 8+4) | ≈ **131 ms — UNDER** | ≈ 70 ms — under | ≈ **178 req/s** | 0 (5352 submissions) |
+
+This **confirms the earlier diagnosis and closes it**: the single-interpreter p95
+was **deployment sizing**, not a product serialization limit. With the reference
+deployment sized to multiple uvicorn workers (added: `CTFGEN_API_WORKERS`, with the
+already-present `CTFGEN_DB_POOL_SIZE`/`CTFGEN_DB_MAX_OVERFLOW` keeping N × pool under
+PostgreSQL `max_connections`), the 25×20 submission and scoreboard latency targets
+are **MET on the deployed stack over real TLS**, out of process, with zero errors.
+
+Run it:
+
+```
+python scripts/loadtest_http.py all --base-url https://localhost --insecure \
+  --admin-email admin@ctf.local --admin-password "$PW" \
+  --admin-exec 'docker compose -f deploy/docker-compose.yml -f deploy/docker-compose.worker-gateway.yml --env-file deploy/.env exec -T api ctfgen-admin' \
+  --teams 25 --challenges 20 --duration 30 --procs 16
+```
+
+**Honest caveats on this result:** (1) a **single physical host** with one
+PostgreSQL and loopback TLS — not a multi-host fleet; (2) the per-IP edge **rate
+limiter was disabled** for the run (`CTFGEN_API_RATE_LIMIT=0`) because a
+single-source load generator otherwise shares one token bucket — real contestants
+arrive from distinct IPs, so the limiter is orthogonal to processing capacity;
+(3) this measures the **submission + scoreboard** paths, not instance launch
+(below). It is a real, re-runnable single-host capacity result; a multi-host
+production sign-off is still its own step.
+
 ## UNVERIFIED here (charter §5 — blunt statement)
 
 The full `REQ-NFR-001..005` targets at **production scale** are **NOT signed off**
@@ -139,11 +186,12 @@ by this harness. Specifically:
   harness only probes that the instances API surface answers and reports launch
   success as UNVERIFIED — it never fabricates a ≥ 99% number.
 - **REQ-NFR-005 (submission < 500 ms) and REQ-NFR-004 (scoreboard < 3 s) at 25
-  steady-state teams — UNVERIFIED as a production sign-off.** The in-process
-  single-PG measurement above is a **lower bound / harness proof**. A real sign-off
-  needs the supported deployment (`docs/HOSTING.md`: separate PostgreSQL, tuned
-  connection pool, reverse proxy, log shipping off the hot path, ≥ 1 isolated
-  worker host) under a sustained load profile — with launched instances included.
+  steady-state teams — MET on the single-host deployment, multi-host sign-off
+  PENDING.** The out-of-process run on the deployed stack (above) meets both
+  targets (submission p95 ≈131 ms, scoreboard p95 ≈70 ms) once the API is sized to
+  multiple uvicorn workers. What remains is the **multi-host** form — separate
+  PostgreSQL host, real reverse-proxy TLS across hosts, several API replicas, and
+  launched instances included — under a sustained profile.
 - **REQ-NFR-001/002 (25 teams × 20 live challenges) as an end-to-end envelope —
   UNVERIFIED.** The harness seeds and drives that many teams/challenges for the
   submission + scoreboard paths, but "live challenges" in production also means 20
