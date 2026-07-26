@@ -46,19 +46,20 @@ here should be read to imply more.
 The outstanding v1.0 blockers — each a real gap that no evidence on this host can
 close — are:
 
-1. **Production-scale capacity is UNVERIFIED.** The beta/v1.0 target (25 concurrent
-   teams, 20 active challenges, ≥99% launch success, scoreboard <3 s / submission
-   <500 ms **sustained**) is not met on this host. At the 25×20 concurrency the
-   in-process, single-PostgreSQL submission p95 was measured **OVER target
-   (≈2050 ms vs the 500 ms SLO)** — reported honestly, not softened. Since that
-   run, the two *product* serialization ceilings behind it were fixed (the
-   submission advisory lock narrowed from competition-wide to
-   `(competition, team, challenge-version)`, and the connection pool sized above
-   the request-thread count), and the residual in-process p95 was shown to be a
-   **GIL-bound harness artifact** (app + DB + load-gen on one interpreter), not a
-   product limit ([`validation/capacity.md`](validation/capacity.md)). The
-   **sustained production-scale sign-off** — a real multi-process/multi-host run —
-   remains UNVERIFIED.
+1. **Submission/scoreboard capacity MET on the single-host deployment; the
+   multi-host + ≥99%-launch sign-off remains.** The in-process 25×20 run measured
+   submission p95 **≈2050 ms** — but that was shown to be a single-worker/GIL
+   harness artifact, not a product limit. Re-measured **out of process against the
+   deployed stack** (`scripts/loadtest_http.py`, real HTTPS, 25 teams × 20
+   challenges, 30 s sustained), with the API sized to 6 uvicorn workers, the
+   targets are **MET: submission p95 ≈131 ms and scoreboard p95 ≈70 ms** at
+   ≈178 req/s with 0 errors ([`validation/capacity.md`](validation/capacity.md)).
+   The two product serialization ceilings (competition-wide advisory lock → narrowed
+   to `(competition, team, version)`; pool sizing) were also fixed. What remains
+   UNVERIFIED is the **multi-host** form of this (separate PostgreSQL host, TLS
+   across hosts, several API replicas) *with launched instances included* and the
+   **≥99% instance-launch success** number (blocker #4) — one single host with an
+   in-process control plane cannot exhibit those.
 2. **A real TLS / multi-host deployment run is UNVERIFIED.** No reverse proxy +
    TLS ingress and no S3-compatible artifact backend were stood up; all API
    evidence drives the ASGI app in-process (Starlette `TestClient`, no real
@@ -241,8 +242,8 @@ are UNVERIFIED and block closed-beta **exit** and v1.0.
 |---|---|---|
 | **RTO ≤ 30 min** (REQ-NFR-007) | **QUALIFIED (integration-gated, mechanism; small dataset)** | `scripts/recovery_drill.sh` + `tests/test_recovery_drill_integration.py` measured **RTO ≈ 1.7 s** wall-clock (restore→verified-usable) vs the ≤1800 s SLO against live PG, with live negative controls (`--rto-slo-seconds 0` and `--empty-target` both breach & exit nonzero). Small representative dataset; **production-scale-volume RTO UNVERIFIED** ([`operations/backup-recovery-upgrade.md §5`](operations/backup-recovery-upgrade.md)). |
 | **Continuous RPO ≤ 5 min** (REQ-NFR-006) | **QUALIFIED (mechanism, integration-gated); production measurement PENDING** | The PITR **mechanism** is configured (`deploy/docker-compose.pitr.yml` — WAL archiving) and **drilled**: `scripts/pitr_drill.sh` + `tests/test_pitr_drill_integration.py` perform a real point-in-time restore (base backup → archived-WAL replay to a target time), asserting recovery stops exactly at the target with an RPO window ~3–4 s ≤ 300 s + a negative control. Measuring **continuous** RPO on the real production deployment remains PENDING (same dimension as the TLS/multi-host deployment blocker). |
-| **Submission processing < 500 ms** (REQ-NFR-005) | **QUALIFIED at smoke scale only; NOT-QUALIFIED at production scale** | Smoke (3×2): submission p95 ≈435 ms (under target). At the **25×20** concurrency, in-process single-PG: submission p95 ≈**2050 ms — OVER TARGET** ([`validation/capacity.md`](validation/capacity.md)). Sustained production sign-off UNVERIFIED. |
-| **Scoreboard update < 3 s** (REQ-NFR-004) | **QUALIFIED at smoke; degrading at scale** | Smoke p95 ≈115 ms; at 25×20 in-process p95 ≈1180 ms (still under 3 s but degrading). Sustained production sign-off UNVERIFIED. |
+| **Submission processing < 500 ms** (REQ-NFR-005) | **QUALIFIED on the single-host deployment (out-of-process, real TLS); multi-host sign-off PENDING** | The in-process 25×20 run measured p95 ≈2050 ms, shown to be a single-worker/GIL artifact. The out-of-process run against the **deployed** stack (`scripts/loadtest_http.py`, 25×20, 30 s sustained, real HTTPS) meets it: submission p95 ≈**131 ms — UNDER target** at ≈178 req/s, 0 errors, once the API is sized to 6 uvicorn workers ([`validation/capacity.md`](validation/capacity.md)). Multi-host production sign-off PENDING. |
+| **Scoreboard update < 3 s** (REQ-NFR-004) | **QUALIFIED on the single-host deployment; multi-host sign-off PENDING** | Out-of-process on the deployed stack at 25×20: scoreboard p95 ≈**70 ms — UNDER target** ([`validation/capacity.md`](validation/capacity.md)). Multi-host sign-off PENDING. |
 | **Instance launch success ≥ 99%** (REQ-NFR-003) | **NOT-QUALIFIED / UNVERIFIED** | A single published-bundle launch on a worker is now proven end to end (`test_joined_e2e_integration` + `test_joined_e2e_http_integration`), but **≥99% success at scale on a real multi-host worker fleet** has no evidence; `loadtest.py`'s `_probe_launch` reports it UNVERIFIED — it never fabricates a ≥99% number. |
 | **25 teams × 20 challenges envelope** (REQ-NFR-001/002) | **NOT-QUALIFIED / UNVERIFIED** | The harness can seed/drive that concurrency for submission + scoreboard paths, but "20 live challenges" in production means 20 launched, reachable instances, which the in-process harness does not stand up. |
 | **Determinism (zero rebuild failures)** (REQ-NFR-009) | **QUALIFIED (host)** | `tests/test_conformance_suite.py` — byte-stable golden manifests + run-to-run determinism + no-wall-clock-in-provenance (52 OK). |
