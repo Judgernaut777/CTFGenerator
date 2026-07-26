@@ -62,13 +62,22 @@ class SqlAlchemyScoreLedger:
     def __init__(self, session: Session) -> None:
         self._session = session
 
-    def append(self, event: ScoreEvent) -> ScoreEvent:
+    def append(
+        self,
+        event: ScoreEvent,
+        *,
+        competition_uuid=None,
+        team_uuid=None,
+        version_uuid=None,
+    ) -> ScoreEvent:
         """Append an event, assigning ``seq``. Returns the persisted event
         carrying its ``seq``. Raises :class:`LookupError` if a parent is missing,
         and :class:`ValueError` (failing the appending transaction) if ``ts`` is
         not an ISO-8601 timestamp carrying a timezone offset -- a naive instant
         is ambiguous and the projector's fold contract requires tz-aware
-        timestamps."""
+        timestamps. Pre-resolved uuids (from
+        ``resolvers.resolve_submission_scope``) are used as-is when supplied, else
+        resolved on demand."""
         try:
             parsed_ts = datetime.fromisoformat(event.ts)
         except (ValueError, TypeError) as exc:
@@ -80,11 +89,18 @@ class SqlAlchemyScoreLedger:
                 "ScoreEvent.ts must carry a timezone offset (got a naive "
                 "instant); the fold requires an unambiguous UTC instant"
             )
-        competition_uuid = _resolve.competition_uuid(self._session, event.competition_id)
-        team_uuid = _resolve.team_uuid(self._session, competition_uuid, event.team_name)
-        version_uuid = _resolve.version_uuid(
-            self._session, event.definition_slug, event.version_no
-        )
+        if competition_uuid is None:
+            competition_uuid = _resolve.competition_uuid(
+                self._session, event.competition_id
+            )
+        if team_uuid is None:
+            team_uuid = _resolve.team_uuid(
+                self._session, competition_uuid, event.team_name
+            )
+        if version_uuid is None:
+            version_uuid = _resolve.version_uuid(
+                self._session, event.definition_slug, event.version_no
+            )
         row = score_event_to_orm(event, competition_uuid, team_uuid, version_uuid)
         self._session.add(row)
         self._session.flush()  # assigns seq

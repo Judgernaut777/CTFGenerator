@@ -65,19 +65,33 @@ class SqlAlchemyLedgerSubmissionRepository:
     def __init__(self, session: Session) -> None:
         self._session = session
 
-    def add(self, submission: LedgerSubmission) -> None:
+    def add(
+        self,
+        submission: LedgerSubmission,
+        *,
+        competition_uuid=None,
+        team_uuid=None,
+        version_uuid=None,
+    ) -> None:
         """Insert an attempt. Raises :class:`LookupError` if the competition,
         team, version or submitter is missing; IntegrityError on a duplicate
-        ``submission_id`` at flush time."""
-        competition_uuid = _resolve.competition_uuid(
-            self._session, submission.competition_id
-        )
-        team_uuid = _resolve.team_uuid(
-            self._session, competition_uuid, submission.team_name
-        )
-        version_uuid = _resolve.version_uuid(
-            self._session, submission.definition_slug, submission.version_no
-        )
+        ``submission_id`` at flush time. Pre-resolved
+        ``competition_uuid``/``team_uuid``/``version_uuid`` (from
+        ``resolvers.resolve_submission_scope``) are used as-is when supplied so a
+        caller that already resolved the scope does not pay for a re-resolve;
+        each defaults to resolving on demand for any other caller."""
+        if competition_uuid is None:
+            competition_uuid = _resolve.competition_uuid(
+                self._session, submission.competition_id
+            )
+        if team_uuid is None:
+            team_uuid = _resolve.team_uuid(
+                self._session, competition_uuid, submission.team_name
+            )
+        if version_uuid is None:
+            version_uuid = _resolve.version_uuid(
+                self._session, submission.definition_slug, submission.version_no
+            )
         user_uuid = _resolve.user_uuid_optional(
             self._session, submission.submitter_email
         )
