@@ -189,10 +189,14 @@ def create_app(
 
     # The worker-facing gateway. Included here for the single-host / dev / test
     # path; a PRODUCTION deployment SHOULD bind it to a separate interface/port via
-    # ``create_worker_app`` (control-plane / worker listener separation, M18). Worker
-    # auth is a plane disjoint from the human Principal auth (see worker_gateway.deps)
-    # so co-mounting never weakens the boundary.
-    app.include_router(worker_router, prefix=API_V1_PREFIX)
+    # ``create_worker_app`` (control-plane / worker listener separation, M18) AND
+    # set ``mount_worker_routes=False`` here so the flag-bearing worker routes are
+    # not also reachable through the public human edge. Worker auth is a plane
+    # disjoint from the human Principal auth (see worker_gateway.deps) so
+    # co-mounting never weakens the AUTHZ boundary -- this toggle narrows the
+    # network attack surface (pre-auth reachability), not the authz guarantee.
+    if settings.mount_worker_routes:
+        app.include_router(worker_router, prefix=API_V1_PREFIX)
 
     return app
 
@@ -353,6 +357,12 @@ app = create_app(
     ApiSettings(
         rate_limit_enabled=os.environ.get("CTFGEN_API_RATE_LIMIT", "1") != "0",
         trust_forwarded_for=os.environ.get("CTFGEN_API_TRUSTED_PROXY", "0") == "1",
+        # Co-mount the worker gateway by default (single-host path). A production
+        # deployment that runs a separate worker-gateway listener sets
+        # CTFGEN_API_MOUNT_WORKER_ROUTES=0 so /api/v1/worker/* is NOT on the public
+        # human edge.
+        mount_worker_routes=os.environ.get("CTFGEN_API_MOUNT_WORKER_ROUTES", "1")
+        != "0",
     ),
     database=_module_database,
     auth_service=_module_auth_service,
