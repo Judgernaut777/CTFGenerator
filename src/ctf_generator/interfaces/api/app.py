@@ -50,6 +50,7 @@ from .routers import (
     jobs,
     oidc,
     publications,
+    reports,
     scoreboard,
     submissions,
     system,
@@ -176,6 +177,7 @@ def create_app(
         artifacts,
         jobs,
         audit,
+        reports,
         system,
     ):
         app.include_router(module.router, prefix=API_V1_PREFIX)
