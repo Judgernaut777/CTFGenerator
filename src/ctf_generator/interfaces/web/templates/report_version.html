@@ -1,0 +1,52 @@
+{% extends "base.html" %}
+{% block title %}{{ report_type }} report - {{ slug }} v{{ version_no }}{% endblock %}
+{% block content %}
+<div class="card">
+  <h1>{{ report_type }} report</h1>
+  <p class="muted mono">{{ slug }} v{{ version_no }}</p>
+  {% if error %}<div class="error-banner">{{ error }}</div>{% endif %}
+  {% if notice %}<div class="notice-ok">{{ notice }}</div>{% endif %}
+  <p class="muted">A report is a read-only summary of already-stored data. Freezing
+    records an immutable snapshot; it never re-runs the challenge.</p>
+  <form method="post"
+        action="{{ mount_path }}/challenge-definitions/{{ slug }}/versions/{{ version_no }}/reports/{{ report_type }}">
+    {% if csrf_token %}<input type="hidden" name="csrf_token" value="{{ csrf_token }}">{% endif %}
+    <button type="submit" class="btn">Freeze {{ report_type }} snapshot</button>
+  </form>
+</div>
+
+<div class="card">
+  <h2>Latest snapshot</h2>
+  {% if latest %}
+  <dl class="kv">
+    <dt>Report id</dt><dd class="mono">{{ latest.report_id }}</dd>
+    <dt>Subject</dt><dd class="mono">{{ latest.subject }}</dd>
+    <dt>Frozen by</dt><dd>{{ latest.created_by }}</dd>
+    <dt>Frozen at</dt><dd class="mono">{{ latest.created_at }}</dd>
+  </dl>
+  <pre class="mono">{{ latest.payload_json }}</pre>
+  {% else %}
+  <p class="muted">No snapshots yet. Freeze one to record the current summary.</p>
+  {% endif %}
+</div>
+
+{% if history %}
+<div class="card">
+  <h2>History</h2>
+  <table>
+    <thead>
+      <tr><th>Report id</th><th>Frozen by</th><th>Frozen at</th></tr>
+    </thead>
+    <tbody>
+      {% for s in history %}
+      <tr>
+        <td class="muted mono">{{ s.report_id }}</td>
+        <td>{{ s.created_by }}</td>
+        <td class="muted mono">{{ s.created_at }}</td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+{% endif %}
+{% endblock %}

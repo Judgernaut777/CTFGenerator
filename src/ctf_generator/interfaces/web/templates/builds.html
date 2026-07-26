@@ -41,6 +41,18 @@
   {% endif %}
 </div>
 
+<div class="card">
+  <h2>Reports</h2>
+  <p class="muted">Read-only summaries of this version; each can be frozen as an immutable snapshot.</p>
+  <div class="actions">
+    <a href="{{ mount_path }}/challenge-definitions/{{ slug }}/versions/{{ version_no }}/reports/validation">Validation</a>
+    <a href="{{ mount_path }}/challenge-definitions/{{ slug }}/versions/{{ version_no }}/reports/build">Build</a>
+    {% if can_view_eval_report %}
+    <a href="{{ mount_path }}/challenge-definitions/{{ slug }}/versions/{{ version_no }}/reports/eval">Evaluation</a>
+    {% endif %}
+  </div>
+</div>
+
 {% if can_trigger %}
 <div class="card">
   <h2>Trigger a build</h2>
