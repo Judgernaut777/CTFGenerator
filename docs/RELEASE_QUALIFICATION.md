@@ -284,7 +284,12 @@ supported deployment path; anything not listed is unsupported by definition.
   MULTI-HOST fleet with ≥99% launch success at scale has no evidence.
 - **Rootless / userns worker isolation** — capability-gated on this rootful arm64
   host.
-- **Continuous RPO / PITR** — not configured; only baseline `pg_dump` RPO exists.
+- **Continuous RPO / PITR at production scale** — the PITR **mechanism** is
+  configured and drilled (`deploy/docker-compose.pitr.yml` WAL archiving +
+  `scripts/pitr_drill.sh`, drill RPO ~3–4 s ≤ 300 s); what remains UNVERIFIED is
+  running it on the real production deployment/dataset to measure **continuous**
+  RPO ≤ 5 min there (same dimension as the TLS/multi-host blocker) — not a missing
+  mechanism.
 - **AI-resistance beyond the proven core.** Per [`validation/ai-resistance.md`](validation/ai-resistance.md),
   the claim has **three distinct signals that must be claimed separately** — do not
   collapse them into one "resistance score":
@@ -320,13 +325,18 @@ concrete artifact that would close it:
    `docs/HOSTING.md`, then re-run the S1–S9 sweep against that deployed stack.
 3. **Real external closed beta.** Invite real external organizers + contestants,
    run a competition, and gate the findings into the v1.0 external-review scope.
-4. **`build_challenge` distributed-launch pipeline.** Build the full-bundle
-   delivery + worker-side image build so the **published bundle** launches on a
-   real remote worker, joining internal-alpha Half A + Half B into one verified
-   flow and unlocking the ≥99% launch-success measurement and distributed eval.
-5. **WAL/PITR for continuous RPO.** Configure WAL archiving / PITR in the beta
-   deployment and re-run `scripts/recovery_drill.sh` to demonstrate continuous
-   RPO ≤5 min (today: baseline-only) and production-volume RTO.
+4. **Multi-host worker fleet at ≥99% launch.** The `build_challenge`
+   distributed-launch pipeline (full-bundle delivery + worker-side image build) is
+   now **BUILT** and the published-bundle launch is proven end to end on one host
+   over both the in-process and networked (real-socket) transports
+   (`test_joined_e2e_integration` / `test_joined_e2e_http_integration`). What
+   remains is running **multiple** real worker hosts against the gateway under load
+   to measure ≥99% launch success at the 25×20 target (folds into blocker #1).
+5. **Continuous RPO on the production DB.** The WAL-archiving/PITR **mechanism** is
+   already configured and drilled (`deploy/docker-compose.pitr.yml`,
+   `scripts/pitr_drill.sh`; RTO also measured by `scripts/recovery_drill.sh`). Run
+   the overlay on the real production deployment/dataset and measure **continuous**
+   RPO ≤5 min + production-volume RTO there.
 6. **External security review.** Commission an independent external assessment of
    S1–S9 against the deployed stack; resolve any critical/high before v1.0.
 
