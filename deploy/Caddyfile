@@ -1,0 +1,54 @@
+# CTFGenerator reference TLS-terminating reverse proxy (M18 18a).
+#
+# Mounted read-only into the `proxy` (caddy:2) service by deploy/docker-compose.yml.
+# Caddy AUTO-PROVISIONS + renews a real certificate for {$PUBLIC_DOMAIN} over
+# ACME (HTTP-01/TLS-ALPN) when that name is a public FQDN; for a localhost demo it
+# serves Caddy's local CA cert instead. TLS is terminated HERE and forwarded to the
+# API over the internal compose network as plain HTTP -- the API never needs its
+# own cert, and no plaintext contestant traffic leaves the host.
+#
+# SECRET-FREE: this file carries no key, password, or token. The only interpolated
+# value is {$PUBLIC_DOMAIN} (a hostname), read from the environment / .env. The
+# ACME account key + issued certs live in the `caddy_data` volume, never in git.
+#
+# TRUST BOUNDARY: only the human CONTROL-PLANE API is proxied here. The worker
+# gateway is a DISJOINT trust plane and in production binds a SEPARATE listener on
+# a SEPARATE host (see deploy/Dockerfile.worker + the compose PRODUCTION WARNING) --
+# it is deliberately NOT reverse-proxied by this public edge.
+
+{$PUBLIC_DOMAIN} {
+	# Terminate TLS and forward to the API container on the internal network.
+	# Caddy sets X-Forwarded-For / X-Forwarded-Proto, which the API honors only
+	# when CTFGEN_API_TRUSTED_PROXY=1 (set in the compose api service), so the
+	# real client IP reaches the rate limiter / audit log without being spoofable
+	# by a client that bypasses the proxy.
+	reverse_proxy api:8000
+
+	# Hardened response headers. HSTS is emitted only over real HTTPS (Caddy omits
+	# it for the localhost/local-CA case), so a demo on http://localhost is not
+	# pinned to HTTPS on the operator's browser.
+	header {
+		Strict-Transport-Security "max-age=31536000; includeSubDomains"
+		X-Content-Type-Options "nosniff"
+		X-Frame-Options "DENY"
+		Referrer-Policy "strict-origin-when-cross-origin"
+		Cross-Origin-Opener-Policy "same-origin"
+		# The app already sends its own strict, per-response nonce'd CSP; do not
+		# override it here. Strip any server identity leak.
+		-Server
+	}
+
+	# Cap request bodies at the edge (defense in depth; the API validates too).
+	request_body {
+		max_size 10MB
+	}
+
+	encode gzip
+
+	# Access logs to stdout in JSON (captured by the container runtime); no request
+	# body, no Authorization header, no cookie value is logged.
+	log {
+		output stdout
+		format json
+	}
+}

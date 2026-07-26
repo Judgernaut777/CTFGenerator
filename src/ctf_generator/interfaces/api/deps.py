@@ -46,6 +46,7 @@ from ctf_generator.application.evaluation import EvalRunService
 from ctf_generator.application.identity import IdentityService
 from ctf_generator.application.instances.service import InstanceLifecycleService
 from ctf_generator.application.jobs.service import JobService
+from ctf_generator.application.reports.service import ReportService
 from ctf_generator.application.scheduling.service import SchedulingService
 from ctf_generator.application.scoring.scoreboard_service import ScoreboardService
 from ctf_generator.application.submissions.query_service import SubmissionQueryService
@@ -644,6 +645,59 @@ def get_audit_query_service(
 
 def get_build_service(database: Database = Depends(get_database)) -> BuildService:
     return BuildService(database, jobs=JobService(database))
+
+
+def get_report_service(database: Database = Depends(get_database)) -> ReportService:
+    return ReportService(database)
+
+
+class VersionReportType(StrEnum):
+    """The version-scoped report kinds exposed on the path (FastAPI rejects any
+    other value with 422 before a handler runs)."""
+
+    VALIDATION = "validation"
+    BUILD = "build"
+    EVAL = "eval"
+
+
+# Each version-scoped report kind carries its own flat AUTHORING read permission,
+# so a reviewer who can read builds is not thereby granted eval visibility -- and,
+# critically, NONE of these is held by a contestant. Validation is deliberately
+# NOT gated on ``challenge:read``: that is the CATALOG-read permission every
+# contestant holds, so gating on it would let any authenticated player enumerate
+# and snapshot the authoring internals (draft state, family, mode, spec errors) of
+# arbitrary -- including unpublished -- versions. Validation is the static-analysis
+# precondition of the build pipeline, so it rides the same ``build:read`` marker
+# that separates authoring staff (organizer / author / support) from contestants:
+# every role that can build a version can read its validation, no contestant can.
+_VERSION_REPORT_PERMISSION: dict[VersionReportType, Permission] = {
+    VersionReportType.VALIDATION: Permission.BUILD_READ,
+    VersionReportType.BUILD: Permission.BUILD_READ,
+    VersionReportType.EVAL: Permission.EVAL_READ,
+}
+
+
+def version_report_permission(report_type: VersionReportType) -> Permission:
+    """The flat AUTHORING read permission gating a version-scoped report kind. The
+    single source of truth shared by the JSON API dependency and the web UI router,
+    so both surfaces enforce the identical, contestant-excluding mapping."""
+    return _VERSION_REPORT_PERMISSION[report_type]
+
+
+def require_version_report_permission(
+    report_type: VersionReportType, principal: Principal = Depends(get_principal)
+) -> Principal:
+    """Authenticate, then enforce the flat AUTHORING read permission mapped to the
+    ``{report_type}`` path segment (validation->build:read, build->build:read,
+    eval->eval:read). All three exclude contestants by construction. The enum path
+    type constrains ``report_type`` to that closed set, so an unmapped value never
+    reaches here."""
+    permission = _VERSION_REPORT_PERMISSION[report_type]
+    if not principal.has(permission):
+        raise AuthorizationError(
+            f"principal lacks required permission {permission.value!r}"
+        )
+    return principal
 
 
 def get_eval_run_service(

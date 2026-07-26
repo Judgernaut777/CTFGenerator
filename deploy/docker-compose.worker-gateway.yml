@@ -1,0 +1,58 @@
+# CTFGenerator worker-gateway LISTENER overlay (M18 18a) -- control-plane side.
+#
+#   docker compose -f deploy/docker-compose.yml \
+#     -f deploy/docker-compose.worker-gateway.yml --env-file deploy/.env up
+#
+# The worker gateway is the endpoint remote WORKERS connect to (claim jobs, report
+# results) with their scoped bearer token. It is a DISJOINT trust plane from the
+# human control-plane API: no human Principal token reaches it, and it wires NO
+# resource routers (see interfaces.api.worker_app / entrypoint MODE=worker-gateway).
+# This overlay runs it as its OWN listener/container -- the production-recommended
+# LISTENER SEPARATION so the worker plane and the human plane are network-isolable
+# (bind them to different interfaces / TLS vhosts / firewall zones).
+#
+# It reuses the SAME control-plane image (Dockerfile.api) and DATABASE as the api
+# service -- it is control-plane infrastructure, not an execution-plane worker (it
+# holds NO docker socket). Keep the execution-plane WORKER on a separate host
+# (deploy/docker-compose.worker.yml); this service is safe beside the api because it
+# is the same trust plane.
+#
+# SECRET-FREE: the DSN is the same interpolated ${POSTGRES_*} the api service uses;
+# nothing secret is baked here.
+
+services:
+  worker-gateway:
+    build:
+      context: ..
+      dockerfile: deploy/Dockerfile.api
+    environment:
+      MODE: worker-gateway
+      PORT: "8001"
+      CTFGEN_DATABASE_URL: postgresql+psycopg://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}
+      CTFGEN_ARTIFACT_ROOT: /var/lib/ctfgen/artifacts
+      CTFGEN_API_RATE_LIMIT: ${CTFGEN_API_RATE_LIMIT:-1}
+      CTFGEN_LOG_FORMAT: ${CTFGEN_LOG_FORMAT:-json}
+    volumes:
+      # Shares the artifact volume with the api so a worker can fetch/return
+      # content-addressed bundles through the gateway.
+      - artifacts:/var/lib/ctfgen/artifacts
+    depends_on:
+      postgres:
+        condition: service_healthy
+    # Publish the gateway on the host so a worker on another host can reach it.
+    # In production, bind this to a private interface / put it behind its own TLS
+    # vhost -- do NOT co-expose it on the public human edge (the Caddyfile proxies
+    # ONLY the api service).
+    ports:
+      - "${CTFGEN_WORKER_GATEWAY_PORT:-8001}:8001"
+    healthcheck:
+      # The worker gateway exposes NO unauthenticated health path (every /worker
+      # route requires a scoped worker token), so probe the LISTENER: healthy once
+      # the port accepts a TCP connection (the entrypoint serves only after
+      # `alembic upgrade head` succeeds, so an accepting socket means migrated+up).
+      test: ["CMD-SHELL", "python -c \"import socket,sys; s=socket.socket(); s.settimeout(3); sys.exit(s.connect_ex(('127.0.0.1',8001)))\""]
+      interval: 15s
+      timeout: 5s
+      retries: 10
+      start_period: 40s
+    restart: unless-stopped

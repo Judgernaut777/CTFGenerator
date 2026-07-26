@@ -55,6 +55,8 @@ AUDIT_EVENT_LIST_SCHEMA = "ctfgen.audit-event-list"
 SYSTEM_HEALTH_SCHEMA = "ctfgen.system-health"
 SYSTEM_READINESS_SCHEMA = "ctfgen.system-readiness"
 SYSTEM_VERSION_SCHEMA = "ctfgen.system-version"
+REPORT_SNAPSHOT_SCHEMA = "ctfgen.report-snapshot"
+REPORT_SNAPSHOT_LIST_SCHEMA = "ctfgen.report-snapshot-list"
 
 
 def resource_envelope(schema_id: str, body: Mapping[str, Any]) -> dict[str, Any]:

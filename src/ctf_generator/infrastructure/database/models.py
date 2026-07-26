@@ -42,6 +42,7 @@ from ...domain.ledger.models import (
     VALID_PROJECTION_TASK_STATUSES,
     VALID_SCORE_EVENT_TYPES,
 )
+from ...domain.reports.models import VALID_REPORT_TYPES
 from ...domain.scheduling.models import (
     CEILING_DIMENSIONS,
     VALID_DIMENSIONS,
@@ -86,6 +87,9 @@ _EVAL_RUN_STATUS_IN_LIST = ", ".join(
 # frozenset (single source of truth) and sorted so the ORM CHECK SQL and the
 # migration SQL cannot drift.
 _AUDIT_OUTCOME_IN_LIST = ", ".join(f"'{o}'" for o in sorted(VALID_AUDIT_OUTCOMES))
+# Reports: the closed set of report kinds, rendered from the domain frozenset so
+# the ORM CHECK and the migration SQL cannot drift.
+_REPORT_TYPE_IN_LIST = ", ".join(f"'{t}'" for t in sorted(VALID_REPORT_TYPES))
 # M7: job queue, worker trust, and projection-outbox enumerations -- rendered
 # from the domain frozensets (single source of truth) and sorted, so the ORM
 # CHECK SQL and the migration SQL cannot drift from the domain or each other.
@@ -1902,4 +1906,42 @@ class AuditEvent(Base):
         Index("ix_audit_events_action", "action"),
         Index("ix_audit_events_outcome", "outcome"),
         Index("ix_audit_events_occurred_at", "occurred_at"),
+    )
+
+
+class ReportSnapshot(Base):
+    """One report FROZEN at a moment -- an immutable, append-only record (M-reports).
+
+    A report is a read-only summary computed from already-persisted data
+    (``validation`` / ``build`` / ``competition_run`` / ``eval``); a snapshot
+    freezes it so a competition can archive an auditable "run report". TAMPER-
+    EVIDENT + IMMUTABLE: the shared ``reject_mutation`` BEFORE UPDATE OR DELETE +
+    BEFORE TRUNCATE triggers (see migration 0004) make a persisted row impossible
+    to alter or delete. ``subject`` groups snapshots of one logical subject
+    (``version:<slug>:<n>`` / ``competition:<id>``); exactly one scope is set.
+    ``payload`` is the report body (jsonb; secret-free -- references/hashes/counts
+    only, never a flag or token)."""
+
+    __tablename__ = "report_snapshots"
+
+    id: Mapped[uuid.UUID] = mapped_column(sa.Uuid, primary_key=True)
+    report_type: Mapped[str] = mapped_column(sa.Text, nullable=False)
+    subject: Mapped[str] = mapped_column(sa.Text, nullable=False)
+    definition_slug: Mapped[str | None] = mapped_column(sa.Text, nullable=True)
+    version_no: Mapped[int | None] = mapped_column(sa.Integer, nullable=True)
+    competition_id: Mapped[str | None] = mapped_column(sa.Text, nullable=True)
+    payload: Mapped[dict] = mapped_column(JSONB, nullable=False)
+    created_by: Mapped[str] = mapped_column(sa.Text, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        sa.DateTime(timezone=True), nullable=False, server_default=sa.func.now()
+    )
+
+    __table_args__ = (
+        CheckConstraint(
+            f"report_type IN ({_REPORT_TYPE_IN_LIST})", name="report_type_valid"
+        ),
+        CheckConstraint(r"subject !~ '^\s*$'", name="subject_non_empty"),
+        CheckConstraint(r"created_by !~ '^\s*$'", name="created_by_non_empty"),
+        Index("ix_report_snapshots_type_subject", "report_type", "subject"),
+        Index("ix_report_snapshots_created_at", "created_at"),
     )

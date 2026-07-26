@@ -25,6 +25,7 @@ from ctf_generator.application.catalog.publication_service import PublicationSer
 from ctf_generator.application.identity import IdentityService
 from ctf_generator.application.instances.service import InstanceLifecycleService
 from ctf_generator.application.jobs.service import JobService
+from ctf_generator.application.reports.service import ReportService
 from ctf_generator.application.scheduling.service import SchedulingService
 from ctf_generator.application.scoring.scoreboard_service import ScoreboardService
 from ctf_generator.application.submissions.query_service import SubmissionQueryService
@@ -117,6 +118,12 @@ def get_web_artifact_download_service(
 
 def get_web_scoreboard_service(request: Request) -> ScoreboardService:
     return ScoreboardService(get_web_database(request))
+
+
+def get_web_report_service(request: Request) -> ReportService:
+    # The SAME permission-agnostic ReportService the JSON API uses; the web router
+    # gates each report kind identically to its API sibling before calling it.
+    return ReportService(get_web_database(request))
 
 
 def get_web_identity_service(request: Request) -> IdentityService:

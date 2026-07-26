@@ -38,13 +38,15 @@ mutating the append-only tables), `artifacts.tar`, and a secret-free `MANIFEST`
 read-only on the source and refuses to overwrite an existing backup.
 
 **Cadence / RPO.** The logical dump is a point-in-time **baseline**. Meeting
-RPO ≤ 5 min in production is **continuous WAL archiving / PITR** layered on top
-(e.g. `pgBackRest`/`barman` streaming WAL to object storage) — a deployment-infra
-concern outside these scripts. The logical dump's row-count provenance assumes a
-**quiescent** backup (no concurrent scoring/audit writes); take scheduled logical
-dumps in a maintenance window or with the control plane drained, and rely on
-PITR/WAL for hot, sub-5-min-RPO recovery (a PITR restore is inherently
-snapshot-consistent, so the quiescence caveat does not apply to it).
+RPO ≤ 5 min in production is **continuous WAL archiving / PITR** layered on top:
+`deploy/docker-compose.pitr.yml` enables `archive_mode`/`archive_command` on
+PostgreSQL and `scripts/pitr_drill.sh` proves point-in-time recovery to an
+arbitrary target time (see §5; in a real deployment stream the archive off-host,
+e.g. `pgBackRest`/`barman` to object storage). The logical dump's row-count
+provenance assumes a **quiescent** backup (no concurrent scoring/audit writes);
+take scheduled logical dumps in a maintenance window or with the control plane
+drained, and rely on PITR/WAL for hot, sub-5-min-RPO recovery (a PITR restore is
+inherently snapshot-consistent, so the quiescence caveat does not apply to it).
 
 **Artifacts.** `artifacts.tar` of `CTFGEN_ARTIFACT_ROOT`; because artifacts are
 content-addressed and rebuildable, their RPO is relaxed — a lost artifact is
@@ -181,16 +183,43 @@ large headroom; production-scale RTO on a full dataset is **UNVERIFIED here**
 (no production-scale corpus on this host) — re-run the drill against a
 production-sized restore to close that.
 
-**RPO — honest status (charter §5).** A logical `pg_dump` is a point-in-time
-**baseline**: at the instant of backup everything committed is captured, so the
-drill reports only "baseline snapshot staleness" (backup age vs the newest datum),
-which is **not a gate**. The continuous **RPO ≤ 5 min (REQ-NFR-006)** posture
-requires **WAL archiving / PITR**, which is **NOT configured on this host** →
-**UNVERIFIED**. The drill deliberately does **not** fake a 5-minute RPO; it
-validates RTO end-to-end and documents the PITR requirement as the remaining RPO
-work (configure `archive_mode`/`archive_command` + base backups, then drill a
-point-in-time restore to a target recovery timestamp and assert the recoverable
-window ≤ 5 min).
+**RPO — continuous WAL archiving / PITR (charter §5).** A logical `pg_dump` is a
+point-in-time **baseline** (its "snapshot staleness" is not a gate). The continuous
+**RPO ≤ 5 min (REQ-NFR-006)** posture requires **WAL archiving / PITR**, which is
+now **configured and drilled**:
+
+* **Config** — `deploy/docker-compose.pitr.yml` overlays the base compose to run
+  PostgreSQL with `wal_level=replica`, `archive_mode=on`, an idempotent
+  `archive_command` copying each filled segment to a `walarchive` volume, and
+  `archive_timeout=60` (the effective RPO floor). Ship the archive off-host
+  (object storage) in production so a host loss does not take the WAL with it;
+  schedule periodic base backups (`pg_basebackup -Ft`).
+* **Drill** — `scripts/pitr_drill.sh` is the **executed** PITR drill (self-
+  contained via docker + `postgres:16`; touches no control-plane DB). It starts a
+  source cluster with the overlay's exact archive settings, takes a base backup,
+  seeds a `before-target` row, captures a target time **T**, seeds an
+  `after-target` row, archives the WAL, **drops the source**, then restores the
+  base backup + replays archived WAL to `recovery_target_time = T` and asserts the
+  recovered cluster holds the **before-target** row and **not** the after-target
+  one — i.e. recovery stopped **exactly at T** — and that the archive lag (RPO
+  window) is within target. `--negative-control` recovers past T so the after-row
+  survives and the drill **must** exit nonzero (the boundary assertion is not
+  vacuous).
+
+**Measured (docker + `postgres:16`):**
+
+| Metric | Measured | Target | Result |
+|--------|----------|--------|--------|
+| **PITR boundary** (before-row present, after-row absent at T) | exact | exact | **PASS** |
+| **RPO window** (archived-WAL lag, `archive_timeout=60`) | ≈ 3–4 s | ≤ 300 s | **PASS** |
+
+Regression-guarded by `tests/test_pitr_drill_integration.py` (docker-gated; skips
+cleanly when docker is unavailable). The drill deliberately does **not** fake a
+5-minute RPO — it recovers to a real target time and proves the boundary.
+
+**Scope.** The drill validates the PITR *mechanism* + the archive-lag RPO on a
+throwaway cluster; production-scale WAL volume and off-host archive latency are
+deployment-specific and should be re-measured against the real archive target.
 
 **Host caveat.** On an operator host with the `postgresql-client` binaries,
 `scripts/backup.sh` + `restore.sh` run verbatim. This rootful arm64 CI host has no
