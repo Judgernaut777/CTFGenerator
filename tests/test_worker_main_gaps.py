@@ -7,6 +7,10 @@ acknowledged gaps) unless the operator explicitly sets
 contract WITHOUT a real docker CLI / network by patching the lazily-imported
 collaborators and capturing the backend constructor kwargs.
 
+SKIPS cleanly without the worker transport extra (``httpx``): ``worker.main``
+lazily imports the HTTP client, so the entrypoint is unexercisable there. The
+logic still runs in the full ([worker]/[api]) env (nightly + local).
+
     PYTHONPATH=src:tests python -m unittest test_worker_main_gaps
 """
 
@@ -15,7 +19,18 @@ from __future__ import annotations
 import unittest
 from unittest import mock
 
-from ctf_generator.workers import worker as worker_mod
+try:  # the worker transport extra (httpx) -- worker.main lazily imports it
+    import httpx  # noqa: F401
+
+    # Import the lazily-loaded submodules up front so mock.patch.object has a real
+    # module object to patch (otherwise the submodule is not yet imported).
+    from ctf_generator.infrastructure.runtime import docker_backend
+    from ctf_generator.workers import http_client
+    from ctf_generator.workers import worker as worker_mod
+
+    _HAVE_TRANSPORT = True
+except Exception:  # pragma: no cover - exercised only without the extra
+    _HAVE_TRANSPORT = False
 
 _BASE_ENV = {
     "CTFGEN_WORKER_TRANSPORT": "http",
@@ -35,13 +50,11 @@ def _run_main(env: dict[str, str]):
 
     with (
         mock.patch.dict("os.environ", env, clear=True),
-        mock.patch(
-            "ctf_generator.infrastructure.runtime.docker_backend.DockerRuntimeBackend",
-            side_effect=_fake_backend,
+        mock.patch.object(
+            docker_backend, "DockerRuntimeBackend", side_effect=_fake_backend
         ),
-        mock.patch(
-            "ctf_generator.workers.http_client.HttpControlPlaneClient",
-            return_value=mock.MagicMock(name="HttpControlPlaneClient"),
+        mock.patch.object(
+            http_client, "HttpControlPlaneClient", return_value=mock.MagicMock()
         ),
         mock.patch.object(worker_mod, "Worker", return_value=mock.MagicMock()),
     ):
@@ -49,6 +62,7 @@ def _run_main(env: dict[str, str]):
     return rc, captured
 
 
+@unittest.skipUnless(_HAVE_TRANSPORT, "requires the worker transport extra (httpx)")
 class WorkerMainGapsTest(unittest.TestCase):
     def test_default_is_secure_rootless_required(self) -> None:
         rc, kwargs = _run_main(dict(_BASE_ENV))
