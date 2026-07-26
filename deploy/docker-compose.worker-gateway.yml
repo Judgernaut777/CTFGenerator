@@ -39,12 +39,14 @@ services:
     depends_on:
       postgres:
         condition: service_healthy
-    # Publish the gateway on the host so a worker on another host can reach it.
-    # In production, bind this to a private interface / put it behind its own TLS
-    # vhost -- do NOT co-expose it on the public human edge (the Caddyfile proxies
-    # ONLY the api service).
+    # Publish the gateway so a worker can reach it. It binds the LOOPBACK
+    # interface by DEFAULT (127.0.0.1) so it is never accidentally world-reachable;
+    # a real multi-host deployment sets CTFGEN_WORKER_GATEWAY_BIND to the PRIVATE
+    # interface the worker host routes to (e.g. a VPN/overlay address), never
+    # 0.0.0.0 on the public edge. The Caddyfile proxies ONLY the api service, so
+    # the worker plane stays off the public human edge.
     ports:
-      - "${CTFGEN_WORKER_GATEWAY_PORT:-8001}:8001"
+      - "${CTFGEN_WORKER_GATEWAY_BIND:-127.0.0.1}:${CTFGEN_WORKER_GATEWAY_PORT:-8001}:8001"
     healthcheck:
       # The worker gateway exposes NO unauthenticated health path (every /worker
       # route requires a scoped worker token), so probe the LISTENER: healthy once

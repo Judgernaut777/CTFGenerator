@@ -2,12 +2,12 @@
 
 The in-process joined spine (``test_joined_e2e_integration``) proves the wiring;
 this proves the same publish -> build -> launch -> submit -> score spine driven by
-a worker that talks to the control plane ONLY over the HTTP worker gateway
-(``HttpControlPlaneClient`` against ``create_app``'s ``TestClient`` ASGI app) --
-the DISTRIBUTED-worker path (release-qualification gap #4). The worker holds only
-its scoped bearer token and a local ``DockerRuntimeBackend``; every job-queue verb,
-the FULL (flag-bearing) bundle fetch, the digest/stack reads, and every fact report
-cross the real gateway.
+a worker that talks to the control plane ONLY over the HTTP worker gateway. The
+gateway is the REAL production ``create_worker_app`` listener (worker routes only,
+the disjoint trust plane), served by uvicorn on a real loopback TCP socket, and the
+worker drives it through a real ``httpx.Client`` -- an actual network round trip,
+not an in-process ASGI shortcut. Every job-queue verb, the FULL (flag-bearing)
+bundle fetch, the digest/stack reads, and every fact report cross that real socket.
 
     (operator, in-process) BuildService.trigger_build
     -> worker.run_once() claims the build job OVER HTTP, fetches the FULL bundle
@@ -35,18 +35,22 @@ Real wall-clock time throughout (the gateway stamps its own ``now``), mirroring
 from __future__ import annotations
 
 import os
+import socket
 import subprocess
+import threading
+import time
 import unittest
 import uuid
-from contextlib import contextmanager
+from contextlib import ExitStack, contextmanager
 from datetime import UTC, datetime, timedelta
 
 try:
+    import httpx
     import sqlalchemy as sa
+    import uvicorn
     from alembic import command
     from alembic.config import Config as AlembicConfig
     from sqlalchemy.engine import make_url
-    from starlette.testclient import TestClient
 
     # Reuse the offline-buildable spec + base-image gate from the in-process joined
     # test (pure, docker-free spec rendering; both need the same extras).
@@ -112,7 +116,7 @@ try:
         SqlAlchemyWorkerRegistry,
     )
     from ctf_generator.infrastructure.runtime.docker_backend import DockerRuntimeBackend
-    from ctf_generator.interfaces.api.app import create_app
+    from ctf_generator.interfaces.api.app import create_worker_app
     from ctf_generator.interfaces.api.settings import ApiSettings
     from ctf_generator.workers.http_client import HttpControlPlaneClient
     from ctf_generator.workers.worker import Worker, WorkerConfig
@@ -152,6 +156,40 @@ _SLUG = "heap-http-1"
 
 def _now() -> datetime:
     return datetime.now(UTC)
+
+
+def _free_port() -> int:
+    s = socket.socket()
+    s.bind(("127.0.0.1", 0))
+    port = int(s.getsockname()[1])
+    s.close()
+    return port
+
+
+@contextmanager
+def _serve(app, port: int):
+    """Run ``app`` under uvicorn on 127.0.0.1:``port`` in a background thread for the
+    life of the block, so the worker's HTTP calls are REAL loopback TCP round trips
+    (not an in-process ASGI shortcut). ``lifespan="off"`` -- the app needs no
+    startup/shutdown hooks; its DB collaborator is injected."""
+    config = uvicorn.Config(
+        app, host="127.0.0.1", port=port, log_level="warning", lifespan="off"
+    )
+    server = uvicorn.Server(config)
+    thread = threading.Thread(target=server.run, name="gateway-uvicorn", daemon=True)
+    thread.start()
+    deadline = time.monotonic() + 30.0
+    while not server.started:
+        if time.monotonic() > deadline:  # pragma: no cover - startup wedged
+            server.should_exit = True
+            thread.join(timeout=5)
+            raise RuntimeError("worker gateway did not start within 30s")
+        time.sleep(0.02)
+    try:
+        yield
+    finally:
+        server.should_exit = True
+        thread.join(timeout=10)
 
 
 @contextmanager
@@ -266,10 +304,21 @@ class NetworkedJoinedE2ETests(unittest.TestCase):
             issued = enrollment.approve_worker("w1", now)  # default scopes incl artifacts:pull
             token = f"{CREDENTIAL_TOKEN_PREFIX}.{issued.credential_id}.{issued.secret}"
 
-            # The worker's ONLY link to the control plane is the HTTP gateway.
-            http = HttpControlPlaneClient(
-                token=token, client=TestClient(create_app(ApiSettings(), database=db))
+            # The worker's ONLY link to the control plane is the HTTP gateway --
+            # the REAL disjoint worker-gateway listener (create_worker_app) served
+            # over a loopback TCP socket, driven by a real httpx client. ExitStack
+            # (via addCleanup) tears the server + client down even if an assertion
+            # below fails.
+            port = _free_port()
+            stack = ExitStack()
+            self.addCleanup(stack.close)
+            stack.enter_context(
+                _serve(create_worker_app(ApiSettings(), database=db), port)
             )
+            client = stack.enter_context(
+                httpx.Client(base_url=f"http://127.0.0.1:{port}", timeout=30.0)
+            )
+            http = HttpControlPlaneClient(token=token, client=client)
             worker = Worker(
                 WorkerConfig(worker_name="w1", lease_seconds=300),
                 http, self._backend, command=("sleep", "3600"),

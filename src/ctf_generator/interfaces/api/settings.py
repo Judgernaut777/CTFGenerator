@@ -27,3 +27,11 @@ class ApiSettings:
     # rotate buckets and bypass the login limiter. Turn ON only behind a trusted
     # reverse proxy that owns X-Forwarded-For (an M18 deployment concern).
     trust_forwarded_for: bool = False
+    # Co-mount the worker-gateway routes on the human control-plane app. Default
+    # ON for the single-host/dev/test path (the worker plane's auth is disjoint,
+    # so co-mounting never weakens the boundary). A PRODUCTION deployment that
+    # serves the worker gateway on its own listener (``create_worker_app``) SHOULD
+    # turn this OFF so the flag-bearing worker routes (`/api/v1/worker/*`) are not
+    # also reachable through the public human edge -- defence in depth behind the
+    # reverse proxy, which should additionally refuse `/api/v1/worker/*`.
+    mount_worker_routes: bool = True
