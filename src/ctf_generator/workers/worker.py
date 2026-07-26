@@ -1227,6 +1227,13 @@ def main(argv: Sequence[str] | None = None) -> int:  # pragma: no cover - entryp
       NEVER a control-plane DB DSN and NEVER a signing key.
     * ``CTFGEN_WORKER_NAME``               -- the worker's registered name.
     * ``CTFGEN_WORKER_LEASE_SECONDS``      -- lease duration (default 60).
+    * ``CTFGEN_WORKER_ACKNOWLEDGED_GAPS``  -- OPTIONAL, single-host escape hatch.
+      Comma-separated subset of {rootless, user_namespace, apparmor}. UNSET (the
+      default) is the secure production posture: a rootful/un-namespaced host is
+      REFUSED at launch. Set it ONLY for a deliberate single-host demo where the
+      operator accepts those outer-layer gaps; it is logged LOUDLY and disables the
+      rootless requirement for exactly the named gaps (never seccomp/caps/network,
+      which stay enforced). Production runs a rootless engine and leaves this unset.
 
     The token is never logged.
     """
@@ -1258,6 +1265,7 @@ def main(argv: Sequence[str] | None = None) -> int:  # pragma: no cover - entryp
 
     # Imported lazily so importing this module never requires httpx / a docker CLI.
     from ctf_generator.infrastructure.runtime.docker_backend import (
+        ACKNOWLEDGEABLE_GAPS,
         DockerRuntimeBackend,
     )
     from ctf_generator.workers.http_client import HttpControlPlaneClient
@@ -1268,7 +1276,34 @@ def main(argv: Sequence[str] | None = None) -> int:  # pragma: no cover - entryp
     # Optional pre-warmed, INTERNAL-only package mirror network for builds that
     # RUN pip install; unset => strict --network=none builds (the secure default).
     build_mirror_network = os.environ.get("CTFGEN_WORKER_BUILD_MIRROR_NETWORK") or None
-    backend = DockerRuntimeBackend(build_mirror_network=build_mirror_network)
+    # Single-host escape hatch: an operator may explicitly acknowledge outer-layer
+    # runtime gaps (rootless/userns/apparmor) so a rootful demo host can launch.
+    # Unset => secure default (require_rootless=True, refuse a rootful host).
+    raw_gaps = os.environ.get("CTFGEN_WORKER_ACKNOWLEDGED_GAPS", "").strip()
+    acknowledged_gaps = frozenset(
+        g.strip() for g in raw_gaps.split(",") if g.strip()
+    )
+    unknown = acknowledged_gaps - ACKNOWLEDGEABLE_GAPS
+    if unknown:
+        _LOG.error(
+            "ctfgen-worker: CTFGEN_WORKER_ACKNOWLEDGED_GAPS has unknown gaps %s; "
+            "allowed: %s",
+            sorted(unknown),
+            sorted(ACKNOWLEDGEABLE_GAPS),
+        )
+        return 2
+    if acknowledged_gaps:
+        _LOG.warning(
+            "INSECURE(single-host): acknowledging runtime isolation gaps %s and "
+            "disabling the rootless requirement -- NEVER use this in production; "
+            "run a rootless engine instead. Seccomp/caps/network stay enforced.",
+            sorted(acknowledged_gaps),
+        )
+    backend = DockerRuntimeBackend(
+        build_mirror_network=build_mirror_network,
+        require_rootless=not acknowledged_gaps,
+        acknowledged_gaps=acknowledged_gaps,
+    )
     # DockerRuntimeBackend already satisfies the BuildBackend Protocol
     # structurally (build_image/is_available) -- one instance serves both
     # roles; see docs/architecture/build-challenge-worker-pipeline.md.
