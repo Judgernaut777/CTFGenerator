@@ -27,6 +27,12 @@ set -euo pipefail
 
 MODE="${MODE:-api}"
 PORT="${PORT:-8000}"
+# Number of uvicorn worker PROCESSES. Default 1 (a small/demo deployment). Size it
+# up for real concurrency -- one worker serializes CPU-bound request work on the
+# GIL. When >1, also cap the PER-WORKER DB pool (CTFGEN_DB_POOL_SIZE /
+# CTFGEN_DB_MAX_OVERFLOW) so N workers x pool stays under PostgreSQL
+# max_connections. Migrations still run ONCE here before any worker is forked.
+API_WORKERS="${CTFGEN_API_WORKERS:-1}"
 
 # A DSN is REQUIRED to migrate + serve real data. Fail loud (never echo it).
 if [ -z "${CTFGEN_DATABASE_URL:-}" ]; then
@@ -42,14 +48,14 @@ echo "entrypoint: migrations at head." >&2
 
 case "$MODE" in
     api)
-        echo "entrypoint: serving control-plane API on :${PORT}" >&2
+        echo "entrypoint: serving control-plane API on :${PORT} (workers=${API_WORKERS})" >&2
         exec uvicorn ctf_generator.interfaces.api.app:app \
-            --host 0.0.0.0 --port "${PORT}"
+            --host 0.0.0.0 --port "${PORT}" --workers "${API_WORKERS}"
         ;;
     worker-gateway)
-        echo "entrypoint: serving worker gateway on :${PORT}" >&2
+        echo "entrypoint: serving worker gateway on :${PORT} (workers=${API_WORKERS})" >&2
         exec uvicorn ctf_generator.interfaces.api.worker_app:worker_app \
-            --host 0.0.0.0 --port "${PORT}"
+            --host 0.0.0.0 --port "${PORT}" --workers "${API_WORKERS}"
         ;;
     *)
         echo "entrypoint: unknown MODE='${MODE}' (expected api | worker-gateway)" >&2
