@@ -207,6 +207,50 @@ class SubmissionProcessingTests(unittest.TestCase):
                 level = s.execute(sa.text("SHOW transaction_isolation")).scalar()
         self.assertEqual(level, "read committed")
 
+    def test_submission_path_resolves_each_scope_uuid_at_most_once(self) -> None:
+        # Opt B: the (competition, team, version) surrogate uuids are resolved
+        # ONCE per submission (resolvers.resolve_submission_scope) and threaded
+        # into the append-only writes, instead of submissions.add / solves.add /
+        # ScoreLedger.append each re-resolving the same three rows (previously
+        # ~4-5x each). Count the resolves for one correct first-solve.
+        import ctf_generator.infrastructure.database._resolve as _R
+
+        with _migrated_database() as (db, _url):
+            _seed(db)
+            counts = {"competition": 0, "team": 0, "version": 0}
+            originals = {
+                "competition": _R.competition_uuid,
+                "team": _R.team_uuid,
+                "version": _R.version_uuid,
+            }
+
+            def _wrap(fn, key):
+                def inner(*a, **k):
+                    counts[key] += 1
+                    return fn(*a, **k)
+
+                return inner
+
+            _R.competition_uuid = _wrap(originals["competition"], "competition")
+            _R.team_uuid = _wrap(originals["team"], "team")
+            _R.version_uuid = _wrap(originals["version"], "version")
+            try:
+                outcome = SubmissionProcessingService(db).process_submission(
+                    _request(_FLAG)
+                )
+            finally:
+                _R.competition_uuid = originals["competition"]
+                _R.team_uuid = originals["team"]
+                _R.version_uuid = originals["version"]
+
+            self.assertTrue(outcome.first_solve)
+            # team + version: exactly one scope resolve (the first-solve read joins
+            # directly, it does not resolve). competition: the scope resolve plus
+            # the advisory lock's own competition resolve = at most two.
+            self.assertEqual(counts["team"], 1)
+            self.assertEqual(counts["version"], 1)
+            self.assertLessEqual(counts["competition"], 2)
+
     def test_correct_first_submission_produces_solve_and_event(self) -> None:
         with _migrated_database() as (db, _url):
             _seed(db)
