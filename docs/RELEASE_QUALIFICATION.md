@@ -79,9 +79,17 @@ close — are:
    What remains UNVERIFIED is the same production-scale dimension as blockers #1/#2:
    a real **multi-host worker fleet** sustaining **≥99% launch success** at the
    25×20 target — one host with an in-process control plane cannot exhibit it.
-5. **Continuous RPO / PITR is UNVERIFIED.** RTO was measured by a real drill
-   (≈1.7 s vs the ≤30 min SLO); continuous RPO ≤5 min needs WAL archiving / PITR,
-   not configured on this host — only a `pg_dump` baseline RPO exists
+5. **Continuous RPO / PITR — mechanism now proven; production measurement
+   PENDING.** RTO was measured by a real drill (≈1.7 s vs the ≤30 min SLO). The
+   continuous-RPO **mechanism** is no longer missing: `deploy/docker-compose.pitr.yml`
+   configures WAL archiving (`archive_mode`/`archive_command`), and
+   `scripts/pitr_drill.sh` (+ `tests/test_pitr_drill_integration.py`) is an
+   **executed** point-in-time-recovery drill — base backup → archived-WAL replay to
+   a target time, asserting recovery stops exactly at the target (before-row present,
+   after-row absent) with an RPO window ~3–4 s ≤ 300 s and a negative control that
+   must fail. What remains is running that overlay on the **real production
+   deployment** and measuring continuous RPO ≤5 min there — the same
+   production-deployment dimension as blocker #2, not a missing mechanism
    ([`operations/backup-recovery-upgrade.md §5`](operations/backup-recovery-upgrade.md)).
 6. **An external security review is UNVERIFIED.** All S1–S9 evidence here is
    self-run; an independent external assessment is required for v1.0 and is out of
@@ -232,7 +240,7 @@ are UNVERIFIED and block closed-beta **exit** and v1.0.
 | Target | Verdict | Evidence |
 |---|---|---|
 | **RTO ≤ 30 min** (REQ-NFR-007) | **QUALIFIED (integration-gated, mechanism; small dataset)** | `scripts/recovery_drill.sh` + `tests/test_recovery_drill_integration.py` measured **RTO ≈ 1.7 s** wall-clock (restore→verified-usable) vs the ≤1800 s SLO against live PG, with live negative controls (`--rto-slo-seconds 0` and `--empty-target` both breach & exit nonzero). Small representative dataset; **production-scale-volume RTO UNVERIFIED** ([`operations/backup-recovery-upgrade.md §5`](operations/backup-recovery-upgrade.md)). |
-| **Continuous RPO ≤ 5 min** (REQ-NFR-006) | **NOT-QUALIFIED / UNVERIFIED** | Only a logical `pg_dump` **baseline** RPO (≈0 s at snapshot) exists — reported as baseline-only, **not a gate**. Continuous RPO needs **WAL archiving / PITR**, not configured on this host. |
+| **Continuous RPO ≤ 5 min** (REQ-NFR-006) | **QUALIFIED (mechanism, integration-gated); production measurement PENDING** | The PITR **mechanism** is configured (`deploy/docker-compose.pitr.yml` — WAL archiving) and **drilled**: `scripts/pitr_drill.sh` + `tests/test_pitr_drill_integration.py` perform a real point-in-time restore (base backup → archived-WAL replay to a target time), asserting recovery stops exactly at the target with an RPO window ~3–4 s ≤ 300 s + a negative control. Measuring **continuous** RPO on the real production deployment remains PENDING (same dimension as the TLS/multi-host deployment blocker). |
 | **Submission processing < 500 ms** (REQ-NFR-005) | **QUALIFIED at smoke scale only; NOT-QUALIFIED at production scale** | Smoke (3×2): submission p95 ≈435 ms (under target). At the **25×20** concurrency, in-process single-PG: submission p95 ≈**2050 ms — OVER TARGET** ([`validation/capacity.md`](validation/capacity.md)). Sustained production sign-off UNVERIFIED. |
 | **Scoreboard update < 3 s** (REQ-NFR-004) | **QUALIFIED at smoke; degrading at scale** | Smoke p95 ≈115 ms; at 25×20 in-process p95 ≈1180 ms (still under 3 s but degrading). Sustained production sign-off UNVERIFIED. |
 | **Instance launch success ≥ 99%** (REQ-NFR-003) | **NOT-QUALIFIED / UNVERIFIED** | A single published-bundle launch on a worker is now proven end to end (`test_joined_e2e_integration` + `test_joined_e2e_http_integration`), but **≥99% success at scale on a real multi-host worker fleet** has no evidence; `loadtest.py`'s `_probe_launch` reports it UNVERIFIED — it never fabricates a ≥99% number. |
