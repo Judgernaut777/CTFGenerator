@@ -17,6 +17,15 @@
 # it is deliberately NOT reverse-proxied by this public edge.
 
 {$PUBLIC_DOMAIN} {
+	# DEFENSE IN DEPTH: refuse the worker plane at the public edge. The worker
+	# gateway is a disjoint trust plane served on its OWN private listener
+	# (MODE=worker-gateway); the api service also runs with
+	# CTFGEN_API_MOUNT_WORKER_ROUTES=0 so these routes are not even mounted there.
+	# This block is the belt-and-suspenders: even if a future change re-mounted
+	# them, /api/v1/worker/* never answers through this human edge.
+	@worker path /api/v1/worker/*
+	respond @worker 403
+
 	# Terminate TLS and forward to the API container on the internal network.
 	# Caddy sets X-Forwarded-For / X-Forwarded-Proto, which the API honors only
 	# when CTFGEN_API_TRUSTED_PROXY=1 (set in the compose api service), so the
