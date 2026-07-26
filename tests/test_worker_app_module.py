@@ -98,6 +98,35 @@ class WorkerAppModuleTest(unittest.TestCase):
         self.assertIn("/api/v1/competitions", paths)
         self.assertIn("/api/v1/worker/auth", paths)
 
+    def test_worker_routes_excludable_from_the_human_app(self) -> None:
+        # A production deployment runs the worker gateway on its own listener and
+        # sets mount_worker_routes=False so the flag-bearing /api/v1/worker/* routes
+        # are NOT reachable through the public human edge -- while the human surface
+        # is entirely unchanged, and create_worker_app still serves them.
+        from ctf_generator.interfaces.api.app import create_app, create_worker_app
+        from ctf_generator.interfaces.api.settings import ApiSettings
+
+        human = create_app(ApiSettings(mount_worker_routes=False))
+        human_paths = self._paths(human)
+        worker_paths = [p for p in human_paths if p.startswith("/api/v1/worker/")]
+        self.assertEqual(
+            worker_paths,
+            [],
+            f"worker routes must be absent from the human app: {worker_paths}",
+        )
+        # The human control-plane surface is untouched.
+        self.assertIn("/api/v1/competitions", human_paths)
+        self.assertIn("/api/v1/auth/login", human_paths)
+        # And the dedicated worker gateway still serves the worker plane.
+        self.assertIn("/api/v1/worker/auth", self._paths(create_worker_app()))
+
+    def test_worker_routes_present_by_default(self) -> None:
+        # The default (single-host/dev) shape keeps co-mounting the worker routes.
+        from ctf_generator.interfaces.api.app import create_app
+        from ctf_generator.interfaces.api.settings import ApiSettings
+
+        self.assertIn("/api/v1/worker/auth", self._paths(create_app(ApiSettings())))
+
 
 if __name__ == "__main__":
     unittest.main()
