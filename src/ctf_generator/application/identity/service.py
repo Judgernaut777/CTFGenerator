@@ -44,6 +44,41 @@ class IdentityService:
         with self._database.session_scope() as session:
             return SqlAlchemyUserRepository(session).list()
 
+    def assign_membership(
+        self,
+        competition_id: str,
+        user_email: str,
+        role: str,
+        team_name: str | None = None,
+    ) -> Membership:
+        """Assign (or re-assign) a user's role + team placement in one competition.
+
+        Idempotent UPSERT keyed by ``(user_email, competition_id)``: creates the
+        membership if absent, else updates its mutable fields (role, team). This is
+        the operator path that turns a registered user into a competition
+        participant (e.g. a ``player`` on a team) -- without it a user can be
+        created but never granted a competition-scoped permission. ``Membership``'s
+        own construction validates the role; the repository raises
+        :class:`LookupError` if the user, competition, or team is unknown."""
+        membership = Membership(
+            user_email=user_email,
+            competition_id=competition_id,
+            role=role,
+            team_name=team_name,
+        )
+        with self._database.session_scope() as session:
+            repo = SqlAlchemyMembershipRepository(session)
+            if repo.get(user_email, competition_id) is None:
+                repo.add(membership)
+            else:
+                repo.update(membership)
+            stored = repo.get(user_email, competition_id)
+        if stored is None:  # pragma: no cover - just upserted in the same UoW
+            raise LookupError(
+                f"membership lost after upsert: {user_email!r} in {competition_id!r}"
+            )
+        return stored
+
     def list_memberships_for_competition(
         self, competition_id: str
     ) -> list[Membership]:

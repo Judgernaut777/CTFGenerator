@@ -137,12 +137,87 @@ def _enroll_worker(args: argparse.Namespace) -> int:
     return 0
 
 
+def _set_password(args: argparse.Namespace) -> int:
+    """Set (provision/reset) a user's local password credential.
+
+    The operator path to give a contestant a login credential: `POST /users`
+    creates the profile but no password, and only bootstrap-admin sets one today.
+    The password is resolved exactly like bootstrap-admin (--password > env >
+    prompt) and never printed/logged. Idempotent overwrite of the credential."""
+    try:
+        database = Database(DatabaseConfig.from_env())
+    except DatabaseConfigError as exc:
+        raise SystemExit(f"database not configured: {exc}") from exc
+    try:
+        service = AuthService(database)
+        password = _resolve_password(args.password)
+        service.set_password(args.email, password, datetime.now(UTC))
+    finally:
+        database.dispose()
+    print(f"set password credential for {args.email}")
+    return 0
+
+
+def _grant_membership(args: argparse.Namespace) -> int:
+    """Assign a user's role + team placement in a competition (operator roster).
+
+    The CLI twin of PUT /competitions/{id}/members/{email}: turns a registered
+    user into a participant (e.g. a player on a team) so they hold a
+    competition-scoped permission. Idempotent upsert."""
+    from ctf_generator.application.identity.service import IdentityService
+
+    try:
+        database = Database(DatabaseConfig.from_env())
+    except DatabaseConfigError as exc:
+        raise SystemExit(f"database not configured: {exc}") from exc
+    try:
+        membership = IdentityService(database).assign_membership(
+            competition_id=args.competition,
+            user_email=args.email,
+            role=args.role,
+            team_name=args.team,
+        )
+    finally:
+        database.dispose()
+    where = f" on team {membership.team_name!r}" if membership.team_name else ""
+    print(
+        f"granted {membership.role!r} to {args.email} in {args.competition!r}{where}"
+    )
+    return 0
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="ctfgen-admin",
         description="Operator bootstrap for the CTFGenerator control plane.",
     )
     sub = parser.add_subparsers(dest="command", required=True)
+
+    setpw = sub.add_parser(
+        "set-password",
+        help="Set/reset a user's local password credential (operator provisioning).",
+    )
+    setpw.add_argument("--email", required=True)
+    setpw.add_argument(
+        "--password",
+        default=None,
+        help=(
+            "The password. If omitted, taken from "
+            f"{_PASSWORD_ENV} or an interactive prompt. Never a default/logged."
+        ),
+    )
+    setpw.set_defaults(func=_set_password)
+
+    grant = sub.add_parser(
+        "grant-membership",
+        help="Assign a user's role + team in a competition (roster).",
+    )
+    grant.add_argument("--competition", required=True, help="competition id")
+    grant.add_argument("--email", required=True, help="the user to place")
+    grant.add_argument("--role", required=True, help="e.g. player, captain, organizer")
+    grant.add_argument("--team", default=None, help="team name (for contestant roles)")
+    grant.set_defaults(func=_grant_membership)
+
     enroll = sub.add_parser(
         "enroll-worker",
         help="Register + approve a worker and print its scoped bearer token once.",
