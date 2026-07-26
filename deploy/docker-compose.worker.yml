@@ -41,6 +41,13 @@ services:
       # Optional: attach challenge builds to a package-mirror network (capability-
       # gated egress). Leave unset to keep builds fully offline.
       CTFGEN_WORKER_BUILD_MIRROR_NETWORK: ${CTFGEN_WORKER_BUILD_MIRROR_NETWORK:-}
+      # SINGLE-HOST ESCAPE HATCH -- leave UNSET in production. A rootless host
+      # needs nothing here (the secure default refuses a rootful host). Set it
+      # ONLY for a deliberate single-host demo on a rootful engine to acknowledge
+      # the named outer-layer gaps (comma-separated subset of
+      # rootless,user_namespace,apparmor); the worker logs it loudly. Seccomp,
+      # dropped caps, and network isolation stay enforced regardless.
+      CTFGEN_WORKER_ACKNOWLEDGED_GAPS: ${CTFGEN_WORKER_ACKNOWLEDGED_GAPS:-}
       # The worker drives the HOST's rootless engine over this socket path.
       DOCKER_HOST: unix:///var/run/ctfgen-docker.sock
     volumes:
