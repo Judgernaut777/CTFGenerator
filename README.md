@@ -455,15 +455,116 @@ dashboard are deliberately not exposed over MCP** — `validate-runtime`,
 this server never hands it container builds, host execution, or a live
 scoreboard/admin surface. Run those from the CLI.
 
-## Host a competition
+## Run a competition end-to-end (the platform)
 
-To run a live event end-to-end on the supported platform — deploy the control
-plane, PostgreSQL, and isolated workers; seed an admin; author and publish
-challenges; open the organizer and contestant web apps; record solves — see
-**[docs/HOSTING.md](docs/HOSTING.md)** (§0 is the supported platform;
-[docs/operations/configuration.md](docs/operations/configuration.md) is the
-`CTFGEN_*` env reference). The legacy single-process `ctfgen serve` demo path is
-§1 onward of the same document.
+A copy-pasteable walkthrough of the supported platform: deploy → bootstrap →
+add a worker → author a challenge → onboard contestants → play. Everything below
+uses the `deploy/` stack and the `ctfgen-admin` operator CLI (baked into the API
+image). For the full reference see **[docs/HOSTING.md](docs/HOSTING.md)** and the
+`CTFGEN_*` env reference in
+[docs/operations/configuration.md](docs/operations/configuration.md).
+
+**1. Configure secrets.** Copy the env template and fill in real values (the file
+is gitignored — never commit it):
+
+```bash
+cp deploy/.env.example deploy/.env
+# edit deploy/.env: set POSTGRES_PASSWORD, CTFGEN_WEB_CSRF_SECRET,
+# CTFGEN_BOOTSTRAP_ADMIN_PASSWORD, and PUBLIC_DOMAIN (localhost is fine for a demo).
+```
+
+**2. Bring up the control plane** (PostgreSQL + API + worker-gateway + Caddy TLS).
+The API migrates the database then serves; it is ready only once
+`/api/v1/system/ready` returns 200:
+
+```bash
+docker compose -f deploy/docker-compose.yml \
+  -f deploy/docker-compose.worker-gateway.yml --env-file deploy/.env up -d
+# health-check over TLS (Caddy uses a local CA for PUBLIC_DOMAIN=localhost):
+curl -sk https://localhost/api/v1/system/ready      # -> 200 when migrated + serving
+```
+
+Verify the control-plane container is docker-free and non-root with
+`bash deploy/verify-deploy.sh` (the supported deploy invariant).
+
+**3. Seed the first admin** — a one-time step, run by hand (never auto-run):
+
+```bash
+COMPOSE="docker compose -f deploy/docker-compose.yml -f deploy/docker-compose.worker-gateway.yml --env-file deploy/.env"
+$COMPOSE exec api ctfgen-admin bootstrap-admin --email admin@example.com --display-name "Admin"
+# reads the password from CTFGEN_BOOTSTRAP_ADMIN_PASSWORD (in deploy/.env), or pass --password.
+```
+
+You can now sign in to the organizer web app at **`https://localhost/app`** and to
+the JSON API (`POST /api/v1/auth/login` → a bearer session token).
+
+**4. Add an execution worker.** Workers run challenge containers on a **separate**
+host with a rootless engine + `NET_ADMIN` (see
+[docs/security/runtime-isolation.md](docs/security/runtime-isolation.md)). Mint its
+scoped token, then start it on the worker host:
+
+```bash
+# on the control plane: mint the token (printed ONCE)
+$COMPOSE exec api ctfgen-admin enroll-worker --name worker-1
+#   -> CTFGEN_WORKER_TOKEN=ctfw1....
+
+# on the worker host: set CTFGEN_WORKER_CONTROL_PLANE_URL + CTFGEN_WORKER_TOKEN in
+# deploy/.env, then:
+docker compose -f deploy/docker-compose.worker.yml --env-file deploy/.env up -d
+```
+
+For a single-host demo on a rootful engine, set
+`CTFGEN_WORKER_ACKNOWLEDGED_GAPS=rootless,user_namespace,apparmor` in `deploy/.env`
+first (it is logged loudly; never use it in production).
+
+**5. Author and publish a challenge.** Use the organizer portal at
+`https://localhost/app`, or the platform CLI (`ctfgen <area> <verb>`, see
+[docs/supported-cli.md](docs/supported-cli.md)), to create a competition, create
+challenge definitions/versions, publish them, and attach them to the competition.
+Generated (untrusted) workloads build and launch only on the worker.
+
+**6. Onboard contestants.** Register each user, place them on a team in the
+competition, and set their password. Membership assignment is what grants a
+contestant permission to submit:
+
+```bash
+# create the team + user via the organizer portal or the API, then:
+$COMPOSE exec api ctfgen-admin grant-membership \
+  --competition spring-ctf --email alice@example.com --role player --team red-team
+$COMPOSE exec api ctfgen-admin set-password --email alice@example.com --password '...'
+```
+
+The same assignment is available to organizers over the API:
+`PUT /api/v1/competitions/{competition_id}/members/{email}` with
+`{"role": "player", "team_name": "red-team"}` (competition-scoped).
+
+**7. Play.** Contestants sign in at `https://localhost/app`, launch their team's
+instances, submit flags, and watch the scoreboard. Solves are recorded
+at-most-once per (team, challenge, competition), and the scoreboard is
+reconstructable from the persisted score-event log.
+
+### Sizing and load-testing
+
+The reference API runs a single uvicorn worker by default. For real concurrency,
+size it with `CTFGEN_API_WORKERS` (and keep `CTFGEN_API_WORKERS ×
+(CTFGEN_DB_POOL_SIZE + CTFGEN_DB_MAX_OVERFLOW)` under PostgreSQL's
+`max_connections`). Measure the deployed stack out-of-process with the HTTP
+capacity harness:
+
+```bash
+python scripts/loadtest_http.py all --base-url https://localhost --insecure \
+  --admin-email admin@example.com --admin-password "$CTFGEN_BOOTSTRAP_ADMIN_PASSWORD" \
+  --admin-exec "$COMPOSE exec -T api ctfgen-admin" \
+  --teams 25 --challenges 20 --duration 30 --procs 16
+```
+
+It provisions 25 teams × 20 challenges and drives real HTTPS submissions from
+multiple processes, reporting submission/scoreboard p50/p95/max against the
+targets (see [docs/validation/capacity.md](docs/validation/capacity.md)).
+
+> **Legacy demo path.** The single-process stdlib `ctfgen serve` dashboard is a
+> non-production offline demo; its walkthrough is §1 onward of
+> [docs/HOSTING.md](docs/HOSTING.md).
 
 ## Development
 
