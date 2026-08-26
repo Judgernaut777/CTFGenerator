@@ -13,8 +13,9 @@ from __future__ import annotations
 from datetime import datetime
 from typing import Any
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 
+from ctf_generator.domain.answers.models import AnswerSpecError, parse_answer_spec
 from ctf_generator.domain.authoring.models import (
     ChallengeDefinition,
     ChallengeVersion,
@@ -67,6 +68,18 @@ class ChallengeVersionCreateRequest(BaseModel):
     mode: str = Field(default="red", min_length=1)
     cve_refs: list[str] = Field(default_factory=list)
     cve_content_hash: str | None = None
+
+    @field_validator("spec")
+    @classmethod
+    def _validate_private_answer_verifier(cls, value: dict[str, Any]) -> dict[str, Any]:
+        """Validate private answer data at the authoring boundary only."""
+        typed = value.get("answer_verifier")
+        if typed is not None:
+            try:
+                parse_answer_spec(typed)
+            except AnswerSpecError as exc:
+                raise ValueError("invalid answer_verifier specification") from exc
+        return value
 
 
 class ChallengeVersionResponse(BaseModel):
@@ -128,10 +141,18 @@ def version_to_list_item(version: ChallengeVersion) -> dict[str, Any]:
     return _version_base(version)
 
 
+_PRIVATE_ANSWER_SPEC_KEYS = frozenset({"flag", "answer_verifier"})
+
+
+def _public_spec(spec: dict[str, Any] | Any) -> dict[str, Any]:
+    """Remove expected-answer material before any API version projection."""
+    return {key: value for key, value in dict(spec).items() if key not in _PRIVATE_ANSWER_SPEC_KEYS}
+
+
 def version_to_response(version: ChallengeVersion) -> dict[str, Any]:
-    """Full single-resource projection, including ``spec`` and ``cve_refs``."""
+    """Full public projection, excluding private verifier/expected-answer data."""
     body = _version_base(version)
     body["cve_refs"] = list(version.cve_refs)
     body["cve_content_hash"] = version.cve_content_hash
-    body["spec"] = dict(version.spec)
+    body["spec"] = _public_spec(version.spec)
     return body

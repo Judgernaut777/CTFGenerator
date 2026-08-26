@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import hmac
 
+from ctf_generator.domain.answers.models import AnswerSpecError, parse_answer_spec
 from ctf_generator.domain.authoring.models import ChallengeVersion
 from ctf_generator.domain.ledger.processing import (
     FlagRejectedError,
@@ -47,6 +48,18 @@ class SpecFlagVerifier:
     """
 
     def verify(self, version: ChallengeVersion, instance_seed: str | None, candidate: str) -> bool:
+        """Verify against private immutable published spec data.
+
+        ``flag`` is retained as the legacy exact, constant-time route. New
+        typed verifier data is private authoring data and is deliberately never
+        projected by contestant-facing schema mappers.
+        """
+        typed = version.spec.get("answer_verifier")
+        if typed is not None:
+            try:
+                return parse_answer_spec(typed).matches(candidate)
+            except AnswerSpecError as exc:
+                raise FlagUnavailableError("published answer verifier data is malformed") from exc
         expected = version.spec.get("flag")
         if not isinstance(expected, str) or not expected.strip():
             raise FlagUnavailableError(
