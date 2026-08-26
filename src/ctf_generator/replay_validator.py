@@ -51,8 +51,16 @@ def cross_replay(
     solver = solver_dir / "private" / "solver.py"
     started = False
     try:
-        _record(report, runner(["docker", "compose", "-p", project_name, "build"], target_dir, timeout_seconds))
-        _record(report, runner(["docker", "compose", "-p", project_name, "up", "-d"], target_dir, timeout_seconds))
+        _record(
+            report,
+            runner(["docker", "compose", "-p", project_name, "build"], target_dir, timeout_seconds),
+        )
+        _record(
+            report,
+            runner(
+                ["docker", "compose", "-p", project_name, "up", "-d"], target_dir, timeout_seconds
+            ),
+        )
         started = True
         _wait_for_health(target_dir, base_url, timeout_seconds, runner, report)
         _record(
@@ -78,7 +86,15 @@ def cross_replay(
                 _record(
                     report,
                     runner(
-                        ["docker", "compose", "-p", project_name, "down", "--volumes", "--remove-orphans"],
+                        [
+                            "docker",
+                            "compose",
+                            "-p",
+                            project_name,
+                            "down",
+                            "--volumes",
+                            "--remove-orphans",
+                        ],
                         target_dir,
                         timeout_seconds,
                     ),

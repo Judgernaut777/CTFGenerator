@@ -207,16 +207,16 @@ def _token_hex(rng: random.Random, byte_count: int) -> str:
     return rng.getrandbits(byte_count * 8).to_bytes(byte_count, "big").hex()
 
 
-def _select_cve(
-    rng: random.Random, cve_record: CveRecord | None
-) -> tuple[str, list[str], str]:
+def _select_cve(rng: random.Random, cve_record: CveRecord | None) -> tuple[str, list[str], str]:
     if cve_record is not None:
         return cve_record.cve_id, list(cve_record.cwe_ids), cve_record.description
     cve_id, cwe_ids, description = rng.choice(_FALLBACK_CVES)
     return cve_id, list(cwe_ids), description
 
 
-def _exploit_signature(cwe_ids: list[str], attacker_ip: str, dropped_filename: str) -> tuple[str, str]:
+def _exploit_signature(
+    cwe_ids: list[str], attacker_ip: str, dropped_filename: str
+) -> tuple[str, str]:
     """Return ``(request_path, marker)`` for the given CWE class.
 
     ``marker`` is a short human label used in log commentary; it plays no
@@ -311,7 +311,9 @@ def _bump(base_time: str, seconds: int) -> str:
 def _access_log(rng: random.Random, v: Variant) -> str:
     lines: list[str] = []
     decoy_ip_pool = [f"192.0.2.{rng.randrange(2, 254)}" for _ in range(3)]
-    for offset, (ip, path) in enumerate(zip(decoy_ip_pool, _DECOY_SCAN_PATHS, strict=False)):  # decoy pool intentionally shorter than path list; extras ignored by design
+    for offset, (ip, path) in enumerate(
+        zip(decoy_ip_pool, _DECOY_SCAN_PATHS, strict=False)
+    ):  # decoy pool intentionally shorter than path list; extras ignored by design
         ts = _bump(v.base_time, -600 + offset * 5)
         lines.append(
             f'{ip} - - [{ts}] "GET {path} HTTP/1.1" 404 154 "-" "Mozilla/5.0 (compatible; scanbot/2.1)"'
@@ -367,7 +369,7 @@ def _auth_log(rng: random.Random, v: Variant) -> str:
     net_ts = _bump(v.base_time, 7)
     lines.append(
         f"{net_ts} {v.victim_host} kernel: [audit] outbound connection pid=18430 "
-        f"comm=\"{v.process_name}\" dst={v.attacker_ip} dport=4444 proto=tcp ACCEPT"
+        f'comm="{v.process_name}" dst={v.attacker_ip} dport=4444 proto=tcp ACCEPT'
     )
     quiet_ts = _bump(v.base_time, 300)
     lines.append(
@@ -450,7 +452,7 @@ def _solution(v: Variant) -> str:
    `{v.cve_id}` as the real exploited CVE.
 4. `dropped_strings.txt` contains `BUILD_MANIFEST sha256:{v.dropped_hash}`
    for the payload named in the `auth.log` `EXECVE` events.
-5. Assemble: `ctf{{{v.cve_id.lower()}_{v.attacker_ip.rsplit('.', 1)[-1]}_{v.dropped_hash[:12]}}}`
+5. Assemble: `ctf{{{v.cve_id.lower()}_{v.attacker_ip.rsplit(".", 1)[-1]}_{v.dropped_hash[:12]}}}`
 
 Expected flag: `{v.flag}`
 
@@ -461,42 +463,45 @@ the string "CVE-".
 
 
 def _variant_json(spec: ChallengeSpec, v: Variant) -> str:
-    return json.dumps(
-        {
-            "meta": spec.meta_mapping(),
-            "family": FAMILY_NAME,
-            "artifacts": {
-                "access_log": "public/artifacts/access.log",
-                "auth_log": "public/artifacts/auth.log",
-                "dropped_strings": "public/artifacts/dropped_strings.txt",
+    return (
+        json.dumps(
+            {
+                "meta": spec.meta_mapping(),
+                "family": FAMILY_NAME,
+                "artifacts": {
+                    "access_log": "public/artifacts/access.log",
+                    "auth_log": "public/artifacts/auth.log",
+                    "dropped_strings": "public/artifacts/dropped_strings.txt",
+                },
+                "access": {
+                    "siem_login": f"{v.analyst_handle}@soc.local",
+                    "siem_case_id": v.incident_id,
+                },
+                "tokens": {
+                    "incident_id": v.incident_id,
+                    "analyst_handle": v.analyst_handle,
+                    "victim_host": v.victim_host,
+                    "attacker_ip": v.attacker_ip,
+                    "decoy_ip": v.decoy_ip,
+                    "campaign_tag": v.campaign_tag,
+                    "dropped_filename": v.dropped_filename,
+                    "dropped_hash": v.dropped_hash,
+                    "cve_id": v.cve_id,
+                    "decoy_cve_id": v.decoy_cve_id,
+                    "process_name": v.process_name,
+                    "parent_process": v.parent_process,
+                },
+                "flag": v.flag,
             },
-            "access": {
-                "siem_login": f"{v.analyst_handle}@soc.local",
-                "siem_case_id": v.incident_id,
-            },
-            "tokens": {
-                "incident_id": v.incident_id,
-                "analyst_handle": v.analyst_handle,
-                "victim_host": v.victim_host,
-                "attacker_ip": v.attacker_ip,
-                "decoy_ip": v.decoy_ip,
-                "campaign_tag": v.campaign_tag,
-                "dropped_filename": v.dropped_filename,
-                "dropped_hash": v.dropped_hash,
-                "cve_id": v.cve_id,
-                "decoy_cve_id": v.decoy_cve_id,
-                "process_name": v.process_name,
-                "parent_process": v.parent_process,
-            },
-            "flag": v.flag,
-        },
-        indent=2,
-        sort_keys=True,
-    ) + "\n"
+            indent=2,
+            sort_keys=True,
+        )
+        + "\n"
+    )
 
 
 def _solver() -> str:
-    return '''from __future__ import annotations
+    return """from __future__ import annotations
 
 import argparse
 import re
@@ -555,11 +560,11 @@ def main() -> int:
 
 if __name__ == "__main__":
     sys.exit(main())
-'''
+"""
 
 
 def _healthcheck() -> str:
-    return '''from __future__ import annotations
+    return """from __future__ import annotations
 
 import argparse
 import sys
@@ -591,4 +596,4 @@ def main() -> int:
 
 if __name__ == "__main__":
     sys.exit(main())
-'''
+"""

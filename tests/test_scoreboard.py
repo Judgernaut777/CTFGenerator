@@ -141,9 +141,7 @@ class RetroactiveDecayTests(unittest.TestCase):
     def test_dynamic_decay_value_is_shared_by_all_solvers(self):
         # linear decay: value drops from 500 to 100 over 4 solves.
         config = make_config()
-        challenges = {
-            "web-1": make_challenge(decay_function="linear", decay=4, minimum_value=100)
-        }
+        challenges = {"web-1": make_challenge(decay_function="linear", decay=4, minimum_value=100)}
         events = [
             solve("alpha", "web-1", START + timedelta(minutes=1), submission_id="s1"),
             solve("beta", "web-1", START + timedelta(minutes=2), submission_id="s2"),
@@ -163,9 +161,7 @@ class RetroactiveDecayTests(unittest.TestCase):
 
     def test_more_solves_lowers_previously_awarded_value(self):
         config = make_config()
-        challenges = {
-            "web-1": make_challenge(decay_function="linear", decay=4, minimum_value=100)
-        }
+        challenges = {"web-1": make_challenge(decay_function="linear", decay=4, minimum_value=100)}
         engine = DynamicDecayEngine()
         one_solve = [solve("alpha", "web-1", START + timedelta(minutes=1), submission_id="s1")]
         two_solves = one_solve + [
@@ -380,9 +376,7 @@ class AsOfFilteringTests(unittest.TestCase):
 
     def test_as_of_affects_retroactive_solve_count_used_for_decay(self):
         config = make_config()
-        challenges = {
-            "web-1": make_challenge(decay_function="linear", decay=4, minimum_value=100)
-        }
+        challenges = {"web-1": make_challenge(decay_function="linear", decay=4, minimum_value=100)}
         engine = DynamicDecayEngine()
         events = [
             solve("alpha", "web-1", START + timedelta(minutes=1), submission_id="s1"),
@@ -390,7 +384,11 @@ class AsOfFilteringTests(unittest.TestCase):
         ]
 
         early_snapshot = scoreboard.compute_scoreboard(
-            events, challenges, config, engine=engine, as_of=START + timedelta(minutes=1, seconds=30)
+            events,
+            challenges,
+            config,
+            engine=engine,
+            as_of=START + timedelta(minutes=1, seconds=30),
         )
         full_snapshot = scoreboard.compute_scoreboard(events, challenges, config, engine=engine)
 
@@ -420,7 +418,9 @@ class ChallengeValueSnapshotTests(unittest.TestCase):
         challenges: dict = {}
         events = [solve("alpha", "unknown-chal", START + timedelta(minutes=1), submission_id="s1")]
 
-        snap = scoreboard.compute_scoreboard(events, challenges, config, engine=StaticPointsEngine())
+        snap = scoreboard.compute_scoreboard(
+            events, challenges, config, engine=StaticPointsEngine()
+        )
 
         self.assertEqual(snap.entries[0].score, 200)
 
@@ -436,7 +436,13 @@ class LoaderTests(unittest.TestCase):
     def test_load_events_round_trips_to_mapping(self):
         events = [
             solve("alpha", "web-1", START + timedelta(minutes=1), submission_id="s1"),
-            solve("beta", "web-1", START + timedelta(minutes=2), submission_id="s2", instance_seed="seed-x"),
+            solve(
+                "beta",
+                "web-1",
+                START + timedelta(minutes=2),
+                submission_id="s2",
+                instance_seed="seed-x",
+            ),
         ]
         with tempfile.TemporaryDirectory() as tmp:
             path = Path(tmp) / "events.json"

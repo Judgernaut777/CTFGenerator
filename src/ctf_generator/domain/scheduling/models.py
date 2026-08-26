@@ -35,9 +35,7 @@ from typing import Protocol, runtime_checkable
 # The five quota scopes. ``platform`` is the global cap; a single sentinel key
 # stands in for its (otherwise absent) business key so every row shares one
 # ``(scope_type, scope_key, dimension)`` shape.
-VALID_QUOTA_SCOPES = frozenset(
-    {"platform", "competition", "team", "challenge", "worker"}
-)
+VALID_QUOTA_SCOPES = frozenset({"platform", "competition", "team", "challenge", "worker"})
 
 # The platform scope's sentinel business key (there is exactly one platform row
 # per dimension). Chosen so it cannot collide with a real slug/name.
@@ -107,14 +105,11 @@ def _require_tz_aware(value: datetime, field_name: str) -> None:
 def _require_scope(scope_type: str, scope_key: str, dimension: str) -> None:
     if scope_type not in VALID_QUOTA_SCOPES:
         raise ValueError(
-            f"scope_type must be one of {sorted(VALID_QUOTA_SCOPES)}, "
-            f"got {scope_type!r}"
+            f"scope_type must be one of {sorted(VALID_QUOTA_SCOPES)}, got {scope_type!r}"
         )
     _require_nonempty(scope_key, "scope_key")
     if dimension not in VALID_DIMENSIONS:
-        raise ValueError(
-            f"dimension must be one of {sorted(VALID_DIMENSIONS)}, got {dimension!r}"
-        )
+        raise ValueError(f"dimension must be one of {sorted(VALID_DIMENSIONS)}, got {dimension!r}")
 
 
 @dataclass(frozen=True)
@@ -128,8 +123,7 @@ class QuotaScope:
     def __post_init__(self) -> None:
         if self.scope_type not in VALID_QUOTA_SCOPES:
             raise ValueError(
-                f"scope_type must be one of {sorted(VALID_QUOTA_SCOPES)}, "
-                f"got {self.scope_type!r}"
+                f"scope_type must be one of {sorted(VALID_QUOTA_SCOPES)}, got {self.scope_type!r}"
             )
         _require_nonempty(self.scope_key, "scope_key")
 
@@ -149,13 +143,9 @@ class ResourceQuota:
     def __post_init__(self) -> None:
         _require_scope(self.scope_type, self.scope_key, self.dimension)
         if not isinstance(self.limit_value, int) or self.limit_value < 0:
-            raise ValueError(
-                f"limit_value must be an int >= 0, got {self.limit_value!r}"
-            )
+            raise ValueError(f"limit_value must be an int >= 0, got {self.limit_value!r}")
         if not isinstance(self.reserved_value, int) or self.reserved_value < 0:
-            raise ValueError(
-                f"reserved_value must be an int >= 0, got {self.reserved_value!r}"
-            )
+            raise ValueError(f"reserved_value must be an int >= 0, got {self.reserved_value!r}")
         if self.dimension in CEILING_DIMENSIONS and self.reserved_value != 0:
             raise ValueError(
                 f"ceiling dimension {self.dimension!r} must have reserved_value 0, "
@@ -204,13 +194,10 @@ class CeilingRequirement:
         _require_scope(self.scope_type, self.scope_key, self.dimension)
         if self.dimension not in CEILING_DIMENSIONS:
             raise ValueError(
-                f"ceiling requirements are ceiling dimensions only, "
-                f"got {self.dimension!r}"
+                f"ceiling requirements are ceiling dimensions only, got {self.dimension!r}"
             )
         if not isinstance(self.required_value, int) or self.required_value < 0:
-            raise ValueError(
-                f"required_value must be an int >= 0, got {self.required_value!r}"
-            )
+            raise ValueError(f"required_value must be an int >= 0, got {self.required_value!r}")
 
 
 @dataclass(frozen=True)
@@ -266,9 +253,7 @@ class ResourceDemand:
         """Items in a deterministic ``(scope_type, scope_key, dimension)`` order
         so every reserver locks the shared counter rows in the same sequence --
         this is what makes concurrent reserves deadlock-free."""
-        return tuple(
-            sorted(self.items, key=lambda i: (i.scope_type, i.scope_key, i.dimension))
-        )
+        return tuple(sorted(self.items, key=lambda i: (i.scope_type, i.scope_key, i.dimension)))
 
 
 @dataclass(frozen=True)
@@ -293,8 +278,7 @@ class QuotaReservation:
         _require_tz_aware(self.expires_at, "expires_at")
         if self.state not in VALID_RESERVATION_STATES:
             raise ValueError(
-                f"state must be one of {sorted(VALID_RESERVATION_STATES)}, "
-                f"got {self.state!r}"
+                f"state must be one of {sorted(VALID_RESERVATION_STATES)}, got {self.state!r}"
             )
         if (self.state == "released") != (self.released_at is not None):
             raise ValueError("released_at must be set iff state == 'released'")

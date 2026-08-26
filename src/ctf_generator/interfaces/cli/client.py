@@ -40,9 +40,7 @@ def build_http_client(api_url: str, *, timeout: float = DEFAULT_TIMEOUT) -> http
 
     Redirects are disabled so a 3xx never carries the bearer token to another
     origin. Tests bypass this and inject their own client (ASGI/MockTransport)."""
-    return httpx.Client(
-        base_url=api_url.rstrip("/"), timeout=timeout, follow_redirects=False
-    )
+    return httpx.Client(base_url=api_url.rstrip("/"), timeout=timeout, follow_redirects=False)
 
 
 class ApiClient:
@@ -174,8 +172,13 @@ class ApiClient:
         authed: bool,
     ) -> httpx.Response:
         response = self._raw_send(
-            method, path, json=json, params=params,
-            idempotency_key=idempotency_key, headers=headers, authed=authed,
+            method,
+            path,
+            json=json,
+            params=params,
+            idempotency_key=idempotency_key,
+            headers=headers,
+            authed=authed,
         )
         if response.status_code != 401 or not authed:
             return response
@@ -189,8 +192,13 @@ class ApiClient:
         # Exactly one retry with the rotated token. A second 401 is a genuine
         # authorization failure for this resource -- do NOT refresh again.
         retry = self._raw_send(
-            method, path, json=json, params=params,
-            idempotency_key=idempotency_key, headers=headers, authed=authed,
+            method,
+            path,
+            json=json,
+            params=params,
+            idempotency_key=idempotency_key,
+            headers=headers,
+            authed=authed,
         )
         if retry.status_code == 401:
             raise AuthRequired()
@@ -244,18 +252,14 @@ class ApiClient:
             send_headers["Idempotency-Key"] = idempotency_key
         url = f"{API_V1_PREFIX}{path}"
         try:
-            return self._http.request(
-                method, url, json=json, params=params, headers=send_headers
-            )
+            return self._http.request(method, url, json=json, params=params, headers=send_headers)
         except httpx.TransportError as exc:
             # httpx.TransportError is the base of ConnectError/ConnectTimeout AND
             # ReadTimeout/PoolTimeout (TimeoutException), NetworkError, and
             # RemoteProtocolError (a server dropping the connection mid-response) --
             # every low-level transport failure maps to a friendly ApiUnreachable,
             # never a raw traceback.
-            raise ApiUnreachable(
-                f"cannot reach the API at {self._api_url}"
-            ) from exc
+            raise ApiUnreachable(f"cannot reach the API at {self._api_url}") from exc
 
     def _raise_for_error(self, response: httpx.Response, *, authed: bool) -> None:
         if response.is_success:
@@ -265,9 +269,7 @@ class ApiClient:
             # An authed 401 that reached here already survived the refresh path
             # in _send_with_refresh (or came from a non-refreshable context).
             raise AuthRequired()
-        raise ApiError(
-            code, message, status_code=response.status_code, request_id=request_id
-        )
+        raise ApiError(code, message, status_code=response.status_code, request_id=request_id)
 
 
 def _json_or_none(response: httpx.Response) -> Any:

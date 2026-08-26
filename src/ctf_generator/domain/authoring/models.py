@@ -98,8 +98,7 @@ class ChallengeVersion:
             raise ValueError(f"version_no must be an int >= 1, got {self.version_no!r}")
         if self.state not in VALID_VERSION_STATES:
             raise ValueError(
-                f"state must be one of {sorted(VALID_VERSION_STATES)}, "
-                f"got {self.state!r}"
+                f"state must be one of {sorted(VALID_VERSION_STATES)}, got {self.state!r}"
             )
         _require_nonempty(self.family_version, "family_version")
         _require_nonempty(self.seed, "seed")

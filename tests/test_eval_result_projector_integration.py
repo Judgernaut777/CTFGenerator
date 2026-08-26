@@ -296,9 +296,7 @@ class EvalResultProjectorTests(unittest.TestCase):
             self.assertFalse(eval_runs.get(run.eval_run_id).solved)
 
             attached = PublicationService(db).attach(
-                ChallengePublication(
-                    competition_id="cup", definition_slug=_SLUG, version_no=1
-                )
+                ChallengePublication(competition_id="cup", definition_slug=_SLUG, version_no=1)
             )
             self.assertEqual(attached.definition_slug, _SLUG)
 

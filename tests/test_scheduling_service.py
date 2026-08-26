@@ -95,18 +95,14 @@ def _service(scheduler: _StubScheduler, ledger: _StubLedger) -> SchedulingServic
 
 
 def _requirements() -> WorkerRequirements:
-    return WorkerRequirements(
-        "x86_64", frozenset({"launch_instance", "isolation:container"})
-    )
+    return WorkerRequirements("x86_64", frozenset({"launch_instance", "isolation:container"}))
 
 
 def _reserve(svc: SchedulingService, rid: str):
     return svc.select_and_reserve(
         requirements=_requirements(),
         reservation_id=rid,
-        pooled_items=(
-            ReservationItem("platform", PLATFORM_SCOPE_KEY, "active_instances", 1),
-        ),
+        pooled_items=(ReservationItem("platform", PLATFORM_SCOPE_KEY, "active_instances", 1),),
         expires_at=_NOW + timedelta(hours=1),
         now=_NOW,
     )
@@ -115,9 +111,7 @@ def _reserve(svc: SchedulingService, rid: str):
 @unittest.skipUnless(_ENABLED, _SKIP_REASON)
 class SelectAndReserveBranchTests(unittest.TestCase):
     def test_worker_saturation_skips_to_next_candidate(self) -> None:
-        scheduler = _StubScheduler(
-            [WorkerCandidate("busy", 1, 0), WorkerCandidate("free", 1, 0)]
-        )
+        scheduler = _StubScheduler([WorkerCandidate("busy", 1, 0), WorkerCandidate("free", 1, 0)])
         placed = QuotaReservation("r1", "free", _NOW + timedelta(hours=1))
         ledger = _StubLedger(
             reserve_effects=[
@@ -140,9 +134,7 @@ class SelectAndReserveBranchTests(unittest.TestCase):
         self.assertEqual([d.worker_key for d in ledger.reserve_demands], ["busy", "free"])
 
     def test_shared_pool_overrun_propagates(self) -> None:
-        scheduler = _StubScheduler(
-            [WorkerCandidate("busy", 5, 0), WorkerCandidate("other", 5, 0)]
-        )
+        scheduler = _StubScheduler([WorkerCandidate("busy", 5, 0), WorkerCandidate("other", 5, 0)])
         ledger = _StubLedger(
             reserve_effects=[
                 QuotaExceededError(

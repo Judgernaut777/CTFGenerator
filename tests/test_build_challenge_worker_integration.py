@@ -101,7 +101,8 @@ class BuildChallengeWorkerIntegrationTests(unittest.TestCase):
         for ref in self._image_refs:
             subprocess.run(  # noqa: S603, S607 -- docker CLI cleanup of images this test built
                 ["docker", "image", "rm", "--force", ref],  # noqa: S607 -- docker resolved via PATH by design
-                capture_output=True, text=True,
+                capture_output=True,
+                text=True,
             )
 
     def test_build_challenge_job_builds_a_real_image(self) -> None:
@@ -148,7 +149,8 @@ class BuildChallengeWorkerIntegrationTests(unittest.TestCase):
         # The image REALLY exists on the host.
         rc = subprocess.run(  # noqa: S603, S607 -- docker CLI inspection of image this test built
             ["docker", "image", "inspect", image_ref],  # noqa: S607 -- docker resolved via PATH by design
-            capture_output=True, text=True,
+            capture_output=True,
+            text=True,
         ).returncode
         self.assertEqual(rc, 0)
 

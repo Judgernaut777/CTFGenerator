@@ -31,9 +31,7 @@ from datetime import datetime
 VALID_TRUST_STATES = frozenset({"pending", "trusted", "revoked"})
 
 # Container runtimes the execution plane supports (ADR-004: rootless only).
-VALID_RUNTIME_TYPES = frozenset(
-    {"docker-rootless", "podman-rootless", "buildkit-rootless"}
-)
+VALID_RUNTIME_TYPES = frozenset({"docker-rootless", "podman-rootless", "buildkit-rootless"})
 
 # Scopes a worker credential may carry. The vocabulary is intentionally small:
 # workers claim jobs, keep leases alive, report results, and pull artifacts --
@@ -114,17 +112,12 @@ class Worker:
         _require_nonempty(self.version, "version")
         if self.trust_state not in VALID_TRUST_STATES:
             raise ValueError(
-                f"trust_state must be one of {sorted(VALID_TRUST_STATES)}, "
-                f"got {self.trust_state!r}"
+                f"trust_state must be one of {sorted(VALID_TRUST_STATES)}, got {self.trust_state!r}"
             )
         if (self.trust_state == "revoked") != (self.revoked_at is not None):
-            raise ValueError(
-                "revoked_at must be set iff trust_state == 'revoked'"
-            )
+            raise ValueError("revoked_at must be set iff trust_state == 'revoked'")
         if (self.quarantined_at is None) != (self.quarantine_reason is None):
-            raise ValueError(
-                "quarantined_at and quarantine_reason must be set together"
-            )
+            raise ValueError("quarantined_at and quarantine_reason must be set together")
         if self.quarantine_reason is not None:
             _require_nonempty(self.quarantine_reason, "quarantine_reason")
 
@@ -164,8 +157,7 @@ class WorkerCredential:
         for scope in self.scopes:
             if scope not in VALID_CREDENTIAL_SCOPES:
                 raise ValueError(
-                    f"scopes entries must be in {sorted(VALID_CREDENTIAL_SCOPES)}, "
-                    f"got {scope!r}"
+                    f"scopes entries must be in {sorted(VALID_CREDENTIAL_SCOPES)}, got {scope!r}"
                 )
         _require_tz_aware(self.issued_at, "issued_at")
         _require_tz_aware(self.expires_at, "expires_at")

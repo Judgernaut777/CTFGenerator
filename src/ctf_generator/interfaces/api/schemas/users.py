@@ -30,9 +30,7 @@ class UserCreateRequest(BaseModel):
     @classmethod
     def _role_is_valid(cls, value: str) -> str:
         if value not in VALID_ROLES:
-            raise ValueError(
-                f"role must be one of {sorted(VALID_ROLES)}, got {value!r}"
-            )
+            raise ValueError(f"role must be one of {sorted(VALID_ROLES)}, got {value!r}")
         return value
 
     def to_domain(self) -> User:

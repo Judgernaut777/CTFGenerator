@@ -79,13 +79,12 @@ def snapshot_version_report(
         version_no=version_no,
     )
     record_audit(
-        request, principal,
+        request,
+        principal,
         action=f"report.{report_type.value}.snapshot",
         target=f"{definition_slug}:v{version_no}",
     )
-    return respond(
-        201, resource_envelope(REPORT_SNAPSHOT_SCHEMA, _snapshot_to_response(snap))
-    )
+    return respond(201, resource_envelope(REPORT_SNAPSHOT_SCHEMA, _snapshot_to_response(snap)))
 
 
 @router.get(
@@ -105,12 +104,8 @@ def latest_version_report(
     )
     snap = service.latest(report_type.value, subject)
     if snap is None:
-        raise LookupError(
-            f"no {report_type.value} report snapshot for {subject!r}"
-        )
-    return respond(
-        200, resource_envelope(REPORT_SNAPSHOT_SCHEMA, _snapshot_to_response(snap))
-    )
+        raise LookupError(f"no {report_type.value} report snapshot for {subject!r}")
+    return respond(200, resource_envelope(REPORT_SNAPSHOT_SCHEMA, _snapshot_to_response(snap)))
 
 
 @router.get(
@@ -132,9 +127,7 @@ def list_version_reports(
     items = [_snapshot_to_response(s) for s in snaps]
     return respond(
         200,
-        list_envelope(
-            REPORT_SNAPSHOT_LIST_SCHEMA, items, limit=len(items), next_cursor=None
-        ),
+        list_envelope(REPORT_SNAPSHOT_LIST_SCHEMA, items, limit=len(items), next_cursor=None),
     )
 
 
@@ -150,21 +143,17 @@ def list_version_reports(
 def snapshot_competition_run(
     request: Request,
     competition_id: str,
-    principal: Principal = Depends(
-        require_competition_permission(Permission.SCOREBOARD_READ)
-    ),
+    principal: Principal = Depends(require_competition_permission(Permission.SCOREBOARD_READ)),
     service=Depends(get_report_service),
 ):
-    snap = service.snapshot(
-        "competition_run", principal.subject, competition_id=competition_id
-    )
+    snap = service.snapshot("competition_run", principal.subject, competition_id=competition_id)
     record_audit(
-        request, principal, action="report.competition_run.snapshot",
+        request,
+        principal,
+        action="report.competition_run.snapshot",
         target=competition_id,
     )
-    return respond(
-        201, resource_envelope(REPORT_SNAPSHOT_SCHEMA, _snapshot_to_response(snap))
-    )
+    return respond(201, resource_envelope(REPORT_SNAPSHOT_SCHEMA, _snapshot_to_response(snap)))
 
 
 @router.get(
@@ -174,20 +163,14 @@ def snapshot_competition_run(
 )
 def latest_competition_run(
     competition_id: str,
-    principal: Principal = Depends(
-        require_competition_permission(Permission.SCOREBOARD_READ)
-    ),
+    principal: Principal = Depends(require_competition_permission(Permission.SCOREBOARD_READ)),
     service=Depends(get_report_service),
 ):
     subject = report_subject("competition_run", competition_id=competition_id)
     snap = service.latest("competition_run", subject)
     if snap is None:
-        raise LookupError(
-            f"no competition_run report snapshot for {competition_id!r}"
-        )
-    return respond(
-        200, resource_envelope(REPORT_SNAPSHOT_SCHEMA, _snapshot_to_response(snap))
-    )
+        raise LookupError(f"no competition_run report snapshot for {competition_id!r}")
+    return respond(200, resource_envelope(REPORT_SNAPSHOT_SCHEMA, _snapshot_to_response(snap)))
 
 
 @router.get(
@@ -197,9 +180,7 @@ def latest_competition_run(
 )
 def list_competition_runs(
     competition_id: str,
-    principal: Principal = Depends(
-        require_competition_permission(Permission.SCOREBOARD_READ)
-    ),
+    principal: Principal = Depends(require_competition_permission(Permission.SCOREBOARD_READ)),
     service=Depends(get_report_service),
 ):
     subject = report_subject("competition_run", competition_id=competition_id)
@@ -207,7 +188,5 @@ def list_competition_runs(
     items = [_snapshot_to_response(s) for s in snaps]
     return respond(
         200,
-        list_envelope(
-            REPORT_SNAPSHOT_LIST_SCHEMA, items, limit=len(items), next_cursor=None
-        ),
+        list_envelope(REPORT_SNAPSHOT_LIST_SCHEMA, items, limit=len(items), next_cursor=None),
     )

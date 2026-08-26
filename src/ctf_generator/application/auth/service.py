@@ -83,9 +83,7 @@ def validate_password_strength(password: str) -> None:
     if not isinstance(password, str) or password == "":
         raise ValueError("password must be a non-empty string")
     if len(password) < MIN_PASSWORD_LENGTH:
-        raise ValueError(
-            f"password must be at least {MIN_PASSWORD_LENGTH} characters"
-        )
+        raise ValueError(f"password must be at least {MIN_PASSWORD_LENGTH} characters")
 
 
 @dataclass(frozen=True)
@@ -157,9 +155,7 @@ class AuthService:
 
     # -- login / sessions ----------------------------------------------------
 
-    def authenticate(
-        self, email: str, password: str, now: datetime
-    ) -> IssuedSession:
+    def authenticate(self, email: str, password: str, now: datetime) -> IssuedSession:
         """Verify ``(email, password)`` and issue a fresh session. A wrong
         password OR an unknown email raises a single
         :class:`InvalidCredentialsError` -- and the unknown-email path still runs
@@ -188,9 +184,7 @@ class AuthService:
                 )
             return self._issue_session(session, credential.user_email, now)
 
-    def issue_federated_session(
-        self, email: str, now: datetime
-    ) -> IssuedSession:
+    def issue_federated_session(self, email: str, now: datetime) -> IssuedSession:
         """Issue a local session for an ALREADY externally-authenticated identity
         (OIDC federated login -- M10c) WITHOUT a password.
 
@@ -221,9 +215,7 @@ class AuthService:
             old = repo.get_by_token_hash(token_hash)
             if old is None or not old.is_live(now):
                 raise InvalidCredentialsError("invalid or expired session")
-            issued = self._issue_session(
-                session, old.user_email, now, rotated_from=old.session_id
-            )
+            issued = self._issue_session(session, old.user_email, now, rotated_from=old.session_id)
             repo.revoke(old.session_id, now)
             return issued
 
@@ -244,24 +236,16 @@ class AuthService:
         revoked token (never leaking which)."""
         token_hash = self._require_token_hash(token)
         with self._database.session_scope() as session:
-            current = SqlAlchemyAuthSessionRepository(session).get_by_token_hash(
-                token_hash
-            )
+            current = SqlAlchemyAuthSessionRepository(session).get_by_token_hash(token_hash)
             if current is None or not current.is_live(now):
                 raise InvalidCredentialsError("invalid or expired session")
             subject = current.user_email
-            system_roles = SqlAlchemySystemRoleRepository(session).list_for_user(
-                subject
-            )
-            memberships = SqlAlchemyMembershipRepository(session).list_for_user(
-                subject
-            )
+            system_roles = SqlAlchemySystemRoleRepository(session).list_for_user(subject)
+            memberships = SqlAlchemyMembershipRepository(session).list_for_user(subject)
         return ResolvedPrincipal(
             subject=subject,
             system_roles=frozenset(system_roles),
-            memberships=tuple(
-                (m.competition_id, m.role, m.team_name) for m in memberships
-            ),
+            memberships=tuple((m.competition_id, m.role, m.team_name) for m in memberships),
         )
 
     # -- system-role management ---------------------------------------------
@@ -281,9 +265,7 @@ class AuthService:
         with self._database.session_scope() as session:
             return SqlAlchemySystemRoleRepository(session).revoke(email, role)
 
-    def bootstrap_admin(
-        self, email: str, display_name: str, password: str, now: datetime
-    ) -> bool:
+    def bootstrap_admin(self, email: str, display_name: str, password: str, now: datetime) -> bool:
         """Idempotently seed the first admin. In ONE transaction: ensure the
         user exists, set a password credential IF none exists (never clobber an
         existing one), and grant the ``admin`` system role. Returns ``True`` iff

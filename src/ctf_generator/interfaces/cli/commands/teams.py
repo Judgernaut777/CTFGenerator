@@ -26,9 +26,7 @@ _COLUMNS = ["competition_id", "name"]
 def _create(args: argparse.Namespace) -> int:
     body = {"competition_id": args.competition_id, "name": args.name}
     with open_client(args) as client:
-        created = client.request(
-            "POST", "/teams", json=body, idempotency_key=idempotency_key(args)
-        )
+        created = client.request("POST", "/teams", json=body, idempotency_key=idempotency_key(args))
     output.print_resource(created, as_json=args.json)
     return 0
 

@@ -33,6 +33,7 @@ class RenderedFileContractTests(unittest.TestCase):
 
     def test_rendered_file_preserves_exact_bytes(self) -> None:
         """A renderer returning bytes writes those exact bytes to disk."""
+
         # This test will fail until RenderedFile/normalizer is implemented
         def render(spec, rng, cve_record=None):
             binary_payload = b"\x00\x01\x02\x03\xff\xfe\xfd\xfc" + b"text"
@@ -45,14 +46,19 @@ class RenderedFileContractTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             out = Path(tmp) / "chal"
             generator.create_challenge(
-                output_dir=out, seed=spec.seed, title=spec.title,
-                difficulty=spec.difficulty, family=spec.family, spec=spec
+                output_dir=out,
+                seed=spec.seed,
+                title=spec.title,
+                difficulty=spec.difficulty,
+                family=spec.family,
+                spec=spec,
             )
             data = (out / "public/evidence/sample.bin").read_bytes()
             self.assertEqual(data, b"\x00\x01\x02\x03\xff\xfe\xfd\xfc" + b"text")
 
     def test_rendered_file_utf8_string_roundtrip(self) -> None:
         """A renderer returning str encodes as UTF-8 and writes exact bytes."""
+
         def render(spec, rng, cve_record=None):
             return {"public/description.md": "hello \u00e9 \u2665\n"}
 
@@ -63,14 +69,19 @@ class RenderedFileContractTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             out = Path(tmp) / "chal"
             generator.create_challenge(
-                output_dir=out, seed=spec.seed, title=spec.title,
-                difficulty=spec.difficulty, family=spec.family, spec=spec
+                output_dir=out,
+                seed=spec.seed,
+                title=spec.title,
+                difficulty=spec.difficulty,
+                family=spec.family,
+                spec=spec,
             )
             data = (out / "public/description.md").read_bytes()
             self.assertEqual(data, "hello \u00e9 \u2665\n".encode("utf-8"))
 
     def test_rendered_file_mixed_str_and_bytes(self) -> None:
         """A renderer can return both str and bytes in the same bundle."""
+
         def render(spec, rng, cve_record=None):
             return {
                 "public/text.txt": "plain text\n",
@@ -84,14 +95,19 @@ class RenderedFileContractTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             out = Path(tmp) / "chal"
             generator.create_challenge(
-                output_dir=out, seed=spec.seed, title=spec.title,
-                difficulty=spec.difficulty, family=spec.family, spec=spec
+                output_dir=out,
+                seed=spec.seed,
+                title=spec.title,
+                difficulty=spec.difficulty,
+                family=spec.family,
+                spec=spec,
             )
             self.assertEqual((out / "public/text.txt").read_bytes(), b"plain text\n")
             self.assertEqual((out / "public/binary.bin").read_bytes(), b"\xde\xad\xbe\xef")
 
     def test_rendered_file_empty_bytes(self) -> None:
         """Empty bytes payload is preserved as zero-length file."""
+
         def render(spec, rng, cve_record=None):
             return {"public/empty.bin": b""}
 
@@ -102,34 +118,48 @@ class RenderedFileContractTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             out = Path(tmp) / "chal"
             generator.create_challenge(
-                output_dir=out, seed=spec.seed, title=spec.title,
-                difficulty=spec.difficulty, family=spec.family, spec=spec
+                output_dir=out,
+                seed=spec.seed,
+                title=spec.title,
+                difficulty=spec.difficulty,
+                family=spec.family,
+                spec=spec,
             )
             self.assertEqual((out / "public/empty.bin").read_bytes(), b"")
 
     def test_rendered_file_non_utf8_sequences(self) -> None:
         """Arbitrary byte sequences including invalid UTF-8 are preserved."""
+
         def render(spec, rng, cve_record=None):
             # Valid UTF-8, invalid UTF-8, lone surrogates encoded as bytes
             return {"public/evidence/corrupt.bin": b"\x80\x81\xc0\xc1\xff\xfe"}
 
         fam = self._make_family("probe_nonutf8", render)
         families.register(fam)
-        spec = default_spec(seed="bin-seed-5", title="NonUTF8", difficulty="medium", family=fam.name)
+        spec = default_spec(
+            seed="bin-seed-5", title="NonUTF8", difficulty="medium", family=fam.name
+        )
 
         with tempfile.TemporaryDirectory() as tmp:
             out = Path(tmp) / "chal"
             generator.create_challenge(
-                output_dir=out, seed=spec.seed, title=spec.title,
-                difficulty=spec.difficulty, family=spec.family, spec=spec
+                output_dir=out,
+                seed=spec.seed,
+                title=spec.title,
+                difficulty=spec.difficulty,
+                family=spec.family,
+                spec=spec,
             )
             data = (out / "public/evidence/corrupt.bin").read_bytes()
             self.assertEqual(data, b"\x80\x81\xc0\xc1\xff\xfe")
 
     def _make_family(self, name: str, render):
         return sdk.Family(
-            name=name, category="web", modes=("red",),
-            render=render, required_files=("challenge.yaml", "public/description.md")
+            name=name,
+            category="web",
+            modes=("red",),
+            render=render,
+            required_files=("challenge.yaml", "public/description.md"),
         )
 
 
@@ -158,8 +188,9 @@ class StrictTypeRejectionTests(unittest.TestCase):
                 normalize_renderer_output({"public/x.bin": bad})  # type: ignore[dict-item]
 
     def test_write_build_rejects_bad_value_kinds(self) -> None:
-        spec = default_spec(seed="bin-seed-9", title="Reject", difficulty="medium",
-                            family="tenant_export")
+        spec = default_spec(
+            seed="bin-seed-9", title="Reject", difficulty="medium", family="tenant_export"
+        )
         for bad in (bytearray(b"x"), memoryview(b"x"), 7, None):
             with tempfile.TemporaryDirectory() as tmp:
                 with self.assertRaises(TypeError):
@@ -171,8 +202,11 @@ class StrictTypeRejectionTests(unittest.TestCase):
 
     def _make_family(self, name: str, render):
         return sdk.Family(
-            name=name, category="web", modes=("red",),
-            render=render, required_files=("challenge.yaml", "public/description.md")
+            name=name,
+            category="web",
+            modes=("red",),
+            render=render,
+            required_files=("challenge.yaml", "public/description.md"),
         )
 
 
@@ -198,13 +232,16 @@ class BinaryFlagTokenLeakTests(unittest.TestCase):
             }
 
         fam = sdk.Family(
-            name="probe_binary_token_leak", category="web", modes=("red",),
+            name="probe_binary_token_leak",
+            category="web",
+            modes=("red",),
             render=render,
             required_files=("challenge.yaml", "public/evidence/token.bin"),
         )
         families.register(fam)
-        spec = default_spec(seed="bin-seed-10", title="TokenLeak",
-                            difficulty="medium", family=fam.name)
+        spec = default_spec(
+            seed="bin-seed-10", title="TokenLeak", difficulty="medium", family=fam.name
+        )
         findings = lint.lint_family(fam, sample_seed=spec.seed)
         codes = {getattr(f, "code", str(f)) for f in findings}
         self.assertTrue(
@@ -214,8 +251,11 @@ class BinaryFlagTokenLeakTests(unittest.TestCase):
 
     def _make_family(self, name: str, render):
         return sdk.Family(
-            name=name, category="web", modes=("red",),
-            render=render, required_files=("challenge.yaml", "public/description.md")
+            name=name,
+            category="web",
+            modes=("red",),
+            render=render,
+            required_files=("challenge.yaml", "public/description.md"),
         )
 
 
@@ -231,6 +271,7 @@ class ManifestBinaryIntegrityTests(unittest.TestCase):
 
     def test_private_manifest_hashes_binary_bytes(self) -> None:
         """Private manifest SHA-256 matches exact on-disk binary bytes."""
+
         def render(spec, rng, cve_record=None):
             return {
                 "public/description.md": "public\n",
@@ -239,13 +280,19 @@ class ManifestBinaryIntegrityTests(unittest.TestCase):
 
         fam = self._make_family("probe_manifest_bin", render)
         families.register(fam)
-        spec = default_spec(seed="man-seed-1", title="Manifest", difficulty="medium", family=fam.name)
+        spec = default_spec(
+            seed="man-seed-1", title="Manifest", difficulty="medium", family=fam.name
+        )
 
         with tempfile.TemporaryDirectory() as tmp:
             out = Path(tmp) / "chal"
             generator.create_challenge(
-                output_dir=out, seed=spec.seed, title=spec.title,
-                difficulty=spec.difficulty, family=spec.family, spec=spec
+                output_dir=out,
+                seed=spec.seed,
+                title=spec.title,
+                difficulty=spec.difficulty,
+                family=spec.family,
+                spec=spec,
             )
             manifest = json.loads((out / "private/manifest.json").read_text())
             file_entry = manifest["files"]["private/secret.bin"]
@@ -255,6 +302,7 @@ class ManifestBinaryIntegrityTests(unittest.TestCase):
 
     def test_public_manifest_hashes_binary_bytes(self) -> None:
         """Public manifest SHA-256 matches exact on-disk binary bytes."""
+
         def render(spec, rng, cve_record=None):
             return {
                 "public/description.md": "public\n",
@@ -268,8 +316,12 @@ class ManifestBinaryIntegrityTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             out = Path(tmp) / "chal"
             generator.create_challenge(
-                output_dir=out, seed=spec.seed, title=spec.title,
-                difficulty=spec.difficulty, family=spec.family, spec=spec
+                output_dir=out,
+                seed=spec.seed,
+                title=spec.title,
+                difficulty=spec.difficulty,
+                family=spec.family,
+                spec=spec,
             )
             manifest = json.loads((out / "public/manifest.json").read_text())
             file_entry = manifest["files"]["public/evidence/sample.bin"]
@@ -279,6 +331,7 @@ class ManifestBinaryIntegrityTests(unittest.TestCase):
 
     def test_manifest_size_is_byte_count_not_char_count(self) -> None:
         """Manifest size field is byte count, not character count."""
+
         def render(spec, rng, cve_record=None):
             # 4 chars but 6 bytes in UTF-8
             return {"public/description.md": "caf\u00e9\n"}
@@ -290,8 +343,12 @@ class ManifestBinaryIntegrityTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             out = Path(tmp) / "chal"
             generator.create_challenge(
-                output_dir=out, seed=spec.seed, title=spec.title,
-                difficulty=spec.difficulty, family=spec.family, spec=spec
+                output_dir=out,
+                seed=spec.seed,
+                title=spec.title,
+                difficulty=spec.difficulty,
+                family=spec.family,
+                spec=spec,
             )
             manifest = json.loads((out / "private/manifest.json").read_text())
             # "café\n" = 5 chars = 6 bytes in UTF-8
@@ -299,8 +356,11 @@ class ManifestBinaryIntegrityTests(unittest.TestCase):
 
     def _make_family(self, name: str, render):
         return sdk.Family(
-            name=name, category="web", modes=("red",),
-            render=render, required_files=("challenge.yaml", "public/description.md")
+            name=name,
+            category="web",
+            modes=("red",),
+            render=render,
+            required_files=("challenge.yaml", "public/description.md"),
         )
 
 
@@ -316,6 +376,7 @@ class DeterministicRebuildTests(unittest.TestCase):
 
     def test_same_seed_produces_byte_identical_binary_files(self) -> None:
         """Two builds with same seed produce byte-identical binary outputs."""
+
         def render(spec, rng, cve_record=None):
             # Deterministic but binary
             token = rng.getrandbits(32).to_bytes(4, "big")
@@ -335,10 +396,20 @@ class DeterministicRebuildTests(unittest.TestCase):
             spec = default_spec(seed=seed, title="Det", difficulty="medium", family=fam.name)
 
             generator.create_challenge(
-                output_dir=out1, seed=seed, title="Det", difficulty="medium", family=fam.name, spec=spec
+                output_dir=out1,
+                seed=seed,
+                title="Det",
+                difficulty="medium",
+                family=fam.name,
+                spec=spec,
             )
             generator.create_challenge(
-                output_dir=out2, seed=seed, title="Det", difficulty="medium", family=fam.name, spec=spec
+                output_dir=out2,
+                seed=seed,
+                title="Det",
+                difficulty="medium",
+                family=fam.name,
+                spec=spec,
             )
 
             # Every file must be byte-identical
@@ -348,12 +419,12 @@ class DeterministicRebuildTests(unittest.TestCase):
                     other = out2 / rel
                     self.assertTrue(other.exists(), f"missing in rebuild: {rel}")
                     self.assertEqual(
-                        path.read_bytes(), other.read_bytes(),
-                        f"byte mismatch in {rel}"
+                        path.read_bytes(), other.read_bytes(), f"byte mismatch in {rel}"
                     )
 
     def test_different_seeds_produce_different_binary_files(self) -> None:
         """Different seeds produce different binary outputs."""
+
         def render(spec, rng, cve_record=None):
             token = rng.getrandbits(32).to_bytes(4, "big")
             return {
@@ -371,10 +442,20 @@ class DeterministicRebuildTests(unittest.TestCase):
             spec2 = default_spec(seed="seed-b", title="B", difficulty="medium", family=fam.name)
 
             generator.create_challenge(
-                output_dir=out1, seed="seed-a", title="A", difficulty="medium", family=fam.name, spec=spec1
+                output_dir=out1,
+                seed="seed-a",
+                title="A",
+                difficulty="medium",
+                family=fam.name,
+                spec=spec1,
             )
             generator.create_challenge(
-                output_dir=out2, seed="seed-b", title="B", difficulty="medium", family=fam.name, spec=spec2
+                output_dir=out2,
+                seed="seed-b",
+                title="B",
+                difficulty="medium",
+                family=fam.name,
+                spec=spec2,
             )
 
             bin1 = (out1 / "public/evidence/artifact.bin").read_bytes()
@@ -393,10 +474,20 @@ class DeterministicRebuildTests(unittest.TestCase):
             spec = default_spec(seed=seed, title="Text", difficulty="medium", family=fam.name)
 
             generator.create_challenge(
-                output_dir=out1, seed=seed, title="Text", difficulty="medium", family=fam.name, spec=spec
+                output_dir=out1,
+                seed=seed,
+                title="Text",
+                difficulty="medium",
+                family=fam.name,
+                spec=spec,
             )
             generator.create_challenge(
-                output_dir=out2, seed=seed, title="Text", difficulty="medium", family=fam.name, spec=spec
+                output_dir=out2,
+                seed=seed,
+                title="Text",
+                difficulty="medium",
+                family=fam.name,
+                spec=spec,
             )
 
             for path in out1.rglob("*"):
@@ -405,14 +496,16 @@ class DeterministicRebuildTests(unittest.TestCase):
                     other = out2 / rel
                     self.assertTrue(other.exists(), f"missing in rebuild: {rel}")
                     self.assertEqual(
-                        path.read_bytes(), other.read_bytes(),
-                        f"text family byte mismatch in {rel}"
+                        path.read_bytes(), other.read_bytes(), f"text family byte mismatch in {rel}"
                     )
 
     def _make_family(self, name: str, render):
         return sdk.Family(
-            name=name, category="web", modes=("red",),
-            render=render, required_files=("challenge.yaml", "public/description.md")
+            name=name,
+            category="web",
+            modes=("red",),
+            render=render,
+            required_files=("challenge.yaml", "public/description.md"),
         )
 
 
@@ -428,6 +521,7 @@ class PrivateLeakDetectionTests(unittest.TestCase):
 
     def test_byte_identical_private_public_binary_detected(self) -> None:
         """Identical binary content in private/ and public/ is flagged."""
+
         def render(spec, rng, cve_record=None):
             shared = b"\xde\xad\xbe\xef" * 100
             return {
@@ -442,6 +536,7 @@ class PrivateLeakDetectionTests(unittest.TestCase):
 
     def test_flag_token_in_binary_private_leaks_to_text_public(self) -> None:
         """Flag token in binary private file detected when leaked to text public."""
+
         def render(spec, rng, cve_record=None):
             flag = b"ctf{binary_leak_123456}"
             return {
@@ -456,6 +551,7 @@ class PrivateLeakDetectionTests(unittest.TestCase):
 
     def test_binary_flag_token_not_in_public_binary(self) -> None:
         """Flag token in binary private file not present in public binary."""
+
         def render(spec, rng, cve_record=None):
             flag = b"ctf{secret_flag_abcdef}"
             return {
@@ -470,6 +566,7 @@ class PrivateLeakDetectionTests(unittest.TestCase):
 
     def test_lint_private_leak_uses_real_rendered_bytes(self) -> None:
         """Lint renders through same path as build, so binary bytes are compared."""
+
         def render(spec, rng, cve_record=None):
             # This would pass text comparison but fail byte comparison
             # if the normalizer did something different
@@ -485,8 +582,11 @@ class PrivateLeakDetectionTests(unittest.TestCase):
 
     def _make_family(self, name: str, render):
         return sdk.Family(
-            name=name, category="web", modes=("red",),
-            render=render, required_files=("challenge.yaml", "public/description.md")
+            name=name,
+            category="web",
+            modes=("red",),
+            render=render,
+            required_files=("challenge.yaml", "public/description.md"),
         )
 
 
@@ -502,6 +602,7 @@ class FileLimitTests(unittest.TestCase):
 
     def test_file_count_limit_includes_binary_files(self) -> None:
         """File count limit counts binary files same as text files."""
+
         def render(spec, rng, cve_record=None):
             files = {f"public/f{i}.bin": b"x" for i in range(10)}
             files["public/description.md"] = b"desc\n"
@@ -516,12 +617,17 @@ class FileLimitTests(unittest.TestCase):
             with mock.patch.object(build, "MAX_FILE_COUNT", 5):
                 with self.assertRaises(build.BuildLimitError):
                     generator.create_challenge(
-                        output_dir=out, seed=spec.seed, title=spec.title,
-                        difficulty=spec.difficulty, family=spec.family, spec=spec
+                        output_dir=out,
+                        seed=spec.seed,
+                        title=spec.title,
+                        difficulty=spec.difficulty,
+                        family=spec.family,
+                        spec=spec,
                     )
 
     def test_total_size_limit_counts_binary_bytes(self) -> None:
         """Total byte limit counts actual binary bytes."""
+
         def render(spec, rng, cve_record=None):
             return {
                 "public/description.md": b"x",
@@ -530,21 +636,30 @@ class FileLimitTests(unittest.TestCase):
 
         fam = self._make_family("probe_size_limit", render)
         families.register(fam)
-        spec = default_spec(seed="limit-seed-2", title="SizeLim", difficulty="medium", family=fam.name)
+        spec = default_spec(
+            seed="limit-seed-2", title="SizeLim", difficulty="medium", family=fam.name
+        )
 
         with tempfile.TemporaryDirectory() as tmp:
             out = Path(tmp) / "chal"
             with mock.patch.object(build, "MAX_TOTAL_BYTES", 1000):
                 with self.assertRaises(build.BuildLimitError):
                     generator.create_challenge(
-                        output_dir=out, seed=spec.seed, title=spec.title,
-                        difficulty=spec.difficulty, family=spec.family, spec=spec
+                        output_dir=out,
+                        seed=spec.seed,
+                        title=spec.title,
+                        difficulty=spec.difficulty,
+                        family=spec.family,
+                        spec=spec,
                     )
 
     def _make_family(self, name: str, render):
         return sdk.Family(
-            name=name, category="web", modes=("red",),
-            render=render, required_files=("challenge.yaml", "public/description.md")
+            name=name,
+            category="web",
+            modes=("red",),
+            render=render,
+            required_files=("challenge.yaml", "public/description.md"),
         )
 
 
@@ -556,17 +671,26 @@ class TextFamilyCompatibilityTests(unittest.TestCase):
         for name in families.family_names():
             with self.subTest(family=name):
                 families.get(name)  # existence + retrieval check
-                spec = default_spec(seed=f"compat-{name}", title="Compat", difficulty="medium", family=name)
+                spec = default_spec(
+                    seed=f"compat-{name}", title="Compat", difficulty="medium", family=name
+                )
                 with tempfile.TemporaryDirectory() as tmp:
                     out = Path(tmp) / "chal"
                     generator.create_challenge(
-                        output_dir=out, seed=spec.seed, title=spec.title,
-                        difficulty=spec.difficulty, family=spec.family, spec=spec
+                        output_dir=out,
+                        seed=spec.seed,
+                        title=spec.title,
+                        difficulty=spec.difficulty,
+                        family=spec.family,
+                        spec=spec,
                     )
                     # validator.validate_challenge accepts it
                     from ctf_generator import validator
+
                     report = validator.validate_challenge(out)
-                    self.assertEqual(report.errors, [], f"{name} validation failed: {report.errors}")
+                    self.assertEqual(
+                        report.errors, [], f"{name} validation failed: {report.errors}"
+                    )
 
     def test_builtin_family_outputs_byte_identical_across_runs(self) -> None:
         """Each built-in family produces byte-identical output for same seed."""
@@ -580,10 +704,20 @@ class TextFamilyCompatibilityTests(unittest.TestCase):
                     out1 = Path(tmp1) / "chal"
                     out2 = Path(tmp2) / "chal"
                     generator.create_challenge(
-                        output_dir=out1, seed=seed, title="Compat", difficulty="medium", family=name, spec=spec
+                        output_dir=out1,
+                        seed=seed,
+                        title="Compat",
+                        difficulty="medium",
+                        family=name,
+                        spec=spec,
                     )
                     generator.create_challenge(
-                        output_dir=out2, seed=seed, title="Compat", difficulty="medium", family=name, spec=spec
+                        output_dir=out2,
+                        seed=seed,
+                        title="Compat",
+                        difficulty="medium",
+                        family=name,
+                        spec=spec,
                     )
 
                     for path in out1.rglob("*"):
@@ -592,8 +726,9 @@ class TextFamilyCompatibilityTests(unittest.TestCase):
                             other = out2 / rel
                             self.assertTrue(other.exists(), f"{name}: missing {rel} in rebuild")
                             self.assertEqual(
-                                path.read_bytes(), other.read_bytes(),
-                                f"{name}: byte mismatch in {rel}"
+                                path.read_bytes(),
+                                other.read_bytes(),
+                                f"{name}: byte mismatch in {rel}",
                             )
 
     def test_sdk_lint_passes_for_all_builtins(self) -> None:
@@ -608,6 +743,7 @@ class TextFamilyCompatibilityTests(unittest.TestCase):
     def test_testing_facade_works_for_builtins(self) -> None:
         """ctf_generator.testing helpers work for all builtins."""
         from ctf_generator import testing
+
         for name in families.family_names():
             with self.subTest(family=name):
                 fam = families.get(name)
@@ -693,6 +829,7 @@ class BinaryRendererModuleTests(unittest.TestCase):
 
     def test_external_module_rendering_binary_works(self) -> None:
         """A renderer module returning binary bytes adapts and builds."""
+
         # Use a proper class with the required attributes instead of ModuleType
         class ExternalBinaryModule:
             FAMILY_NAME = "external_binary"
@@ -717,6 +854,7 @@ class BinaryRendererModuleTests(unittest.TestCase):
 
         # Adapter should work
         from ctf_generator.sdk.adapter import family_from_module
+
         fam = family_from_module(ExternalBinaryModule)
         self.assertEqual(fam.name, "external_binary")
 
@@ -727,12 +865,18 @@ class BinaryRendererModuleTests(unittest.TestCase):
         families.register(fam)
         try:
             # Generation should work
-            spec = default_spec(seed="ext-bin-seed", title="ExtBin", difficulty="medium", family=fam.name)
+            spec = default_spec(
+                seed="ext-bin-seed", title="ExtBin", difficulty="medium", family=fam.name
+            )
             with tempfile.TemporaryDirectory() as tmp:
                 out = Path(tmp) / "chal"
                 generator.create_challenge(
-                    output_dir=out, seed=spec.seed, title=spec.title,
-                    difficulty=spec.difficulty, family=spec.family, spec=spec
+                    output_dir=out,
+                    seed=spec.seed,
+                    title=spec.title,
+                    difficulty=spec.difficulty,
+                    family=spec.family,
+                    spec=spec,
                 )
                 self.assertTrue((out / "public/data.bin").is_file())
                 self.assertEqual(len((out / "public/data.bin").read_bytes()), 32)
@@ -754,8 +898,16 @@ class BinaryRendererModuleTests(unittest.TestCase):
             }
 
         fam = sdk.Family(
-            name="probe_testing_bin", category="web", modes=("red",),
-            render=render, required_files=("challenge.yaml", "public/description.md", "private/solution.md", "private/variant.json")
+            name="probe_testing_bin",
+            category="web",
+            modes=("red",),
+            render=render,
+            required_files=(
+                "challenge.yaml",
+                "public/description.md",
+                "private/solution.md",
+                "private/variant.json",
+            ),
         )
 
         testing.assert_family_ok(fam)
@@ -765,7 +917,7 @@ class BinaryRendererModuleTests(unittest.TestCase):
             out = testing.build_family_in(fam, Path(tmp) / "chal", seed="test-bin")
             self.assertTrue((out / "public/evidence.bin").is_file())
         testing.assert_rebuild_is_byte_identical(fam, seed="test-bin-rebuild")
-        
+
         # Clean up test family from registry
         families._REGISTRY.pop("probe_testing_bin", None)
 

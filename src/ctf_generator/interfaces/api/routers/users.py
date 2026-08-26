@@ -59,9 +59,7 @@ def register_user(
     envelope = resource_envelope(USER_SCHEMA, user_to_response(user))
     etag = compute_etag(user_concurrency_payload(user))
     record_audit(request, principal, action="user.register", target=user.email)
-    remember(
-        request, scope, body_json, status_code=201, envelope=envelope, etag=etag
-    )
+    remember(request, scope, body_json, status_code=201, envelope=envelope, etag=etag)
     return respond(201, envelope, etag=etag)
 
 

@@ -133,27 +133,27 @@ class ChallengeBuildImageRepositoryTests(unittest.TestCase):
                     _SLUG, 1, _IMG_A, _DIGEST_A, _BUNDLE, _NOW
                 )
             with db.session_scope() as s:
-                got = SqlAlchemyChallengeBuildImageRepository(
-                    s
-                ).latest_image_ref_for_version(_SLUG, 1)
+                got = SqlAlchemyChallengeBuildImageRepository(s).latest_image_ref_for_version(
+                    _SLUG, 1
+                )
         self.assertEqual(got, _IMG_A)
 
     def test_latest_is_none_for_version_without_a_build(self) -> None:
         with _migrated_database() as db:
             _seed_version(db)
             with db.session_scope() as s:
-                got = SqlAlchemyChallengeBuildImageRepository(
-                    s
-                ).latest_image_ref_for_version(_SLUG, 1)
+                got = SqlAlchemyChallengeBuildImageRepository(s).latest_image_ref_for_version(
+                    _SLUG, 1
+                )
         self.assertIsNone(got)
 
     def test_latest_is_none_for_unknown_version(self) -> None:
         with _migrated_database() as db:
             _seed_version(db)
             with db.session_scope() as s:
-                got = SqlAlchemyChallengeBuildImageRepository(
-                    s
-                ).latest_image_ref_for_version("no-such-slug", 99)
+                got = SqlAlchemyChallengeBuildImageRepository(s).latest_image_ref_for_version(
+                    "no-such-slug", 99
+                )
         self.assertIsNone(got)
 
     def test_add_is_idempotent_on_same_version_and_image_ref(self) -> None:
@@ -167,9 +167,7 @@ class ChallengeBuildImageRepositoryTests(unittest.TestCase):
                         _SLUG, 1, _IMG_A, _DIGEST_A, _BUNDLE, _NOW
                     )
             with db.session_scope() as s:
-                count = s.scalar(
-                    sa.select(sa.func.count()).select_from(ChallengeBuildImageRow)
-                )
+                count = s.scalar(sa.select(sa.func.count()).select_from(ChallengeBuildImageRow))
         self.assertEqual(count, 1)
 
     def test_same_image_ref_different_digest_collapses(self) -> None:
@@ -188,9 +186,7 @@ class ChallengeBuildImageRepositoryTests(unittest.TestCase):
                     _SLUG, 1, _IMG_A, _DIGEST_B, _BUNDLE, _LATER
                 )
             with db.session_scope() as s:
-                count = s.scalar(
-                    sa.select(sa.func.count()).select_from(ChallengeBuildImageRow)
-                )
+                count = s.scalar(sa.select(sa.func.count()).select_from(ChallengeBuildImageRow))
         self.assertEqual(count, 1)
 
     def test_latest_returns_newest_by_created_at(self) -> None:
@@ -207,9 +203,9 @@ class ChallengeBuildImageRepositoryTests(unittest.TestCase):
                     _SLUG, 1, _IMG_B, _DIGEST_B, _BUNDLE, _LATER
                 )
             with db.session_scope() as s:
-                got = SqlAlchemyChallengeBuildImageRepository(
-                    s
-                ).latest_image_ref_for_version(_SLUG, 1)
+                got = SqlAlchemyChallengeBuildImageRepository(s).latest_image_ref_for_version(
+                    _SLUG, 1
+                )
         self.assertEqual(got, _IMG_B)
 
     def test_digest_for_version_image_resolves_the_exact_image(self) -> None:
@@ -256,9 +252,7 @@ class ChallengeBuildImageRepositoryTests(unittest.TestCase):
             # The shared reject_mutation() trigger raises on UPDATE.
             with self.assertRaises(ProgrammingError):
                 with db.session_scope() as s:
-                    s.execute(
-                        sa.update(ChallengeBuildImageRow).values(image_ref="tampered")
-                    )
+                    s.execute(sa.update(ChallengeBuildImageRow).values(image_ref="tampered"))
 
     def test_row_is_append_only_delete_is_rejected(self) -> None:
         with _migrated_database() as db:

@@ -158,9 +158,7 @@ def play_landing(
     return renderer.render(request, "play_landing.html", context, principal=principal)
 
 
-@contestant_router.get(
-    "/competitions/{competition_id}/play", name="web_competition_play"
-)
+@contestant_router.get("/competitions/{competition_id}/play", name="web_competition_play")
 def competition_play_view(
     competition_id: str,
     request: Request,
@@ -168,12 +166,8 @@ def competition_play_view(
     renderer: TemplateRenderer = Depends(get_renderer),
     service: CompetitionService = Depends(get_web_competition_service),
     pub_service: PublicationService = Depends(get_web_publication_service),
-    def_service: ChallengeDefinitionService = Depends(
-        get_web_challenge_definition_service
-    ),
-    ver_service: ChallengeVersionService = Depends(
-        get_web_challenge_version_service
-    ),
+    def_service: ChallengeDefinitionService = Depends(get_web_challenge_definition_service),
+    ver_service: ChallengeVersionService = Depends(get_web_challenge_version_service),
 ) -> Response:
     """The per-competition contestant landing: window + published catalog + the
     caller's own-team context + links to roster / scoreboard. Existence-hiding 404
@@ -197,9 +191,7 @@ def competition_play_view(
         "unrestricted": scope.unrestricted,
         "team_name": None if scope.unrestricted else scope.team,
     }
-    return renderer.render(
-        request, "competition_play.html", context, principal=principal
-    )
+    return renderer.render(request, "competition_play.html", context, principal=principal)
 
 
 @contestant_router.get(
@@ -211,12 +203,8 @@ def challenges_view(
     principal: Principal = Depends(get_web_principal),
     renderer: TemplateRenderer = Depends(get_renderer),
     pub_service: PublicationService = Depends(get_web_publication_service),
-    def_service: ChallengeDefinitionService = Depends(
-        get_web_challenge_definition_service
-    ),
-    ver_service: ChallengeVersionService = Depends(
-        get_web_challenge_version_service
-    ),
+    def_service: ChallengeDefinitionService = Depends(get_web_challenge_definition_service),
+    ver_service: ChallengeVersionService = Depends(get_web_challenge_version_service),
 ) -> Response:
     """The published challenge catalog as a standalone page (same public metadata
     as the play view). Existence-hiding 404 for an unreadable competition."""
@@ -230,9 +218,7 @@ def challenges_view(
     return renderer.render(request, "challenges.html", context, principal=principal)
 
 
-@contestant_router.get(
-    "/competitions/{competition_id}/roster", name="web_competition_roster"
-)
+@contestant_router.get("/competitions/{competition_id}/roster", name="web_competition_roster")
 def roster_view(
     competition_id: str,
     request: Request,
@@ -264,17 +250,13 @@ def roster_view(
         # Fail closed: do not even read the roster; render the friendly page.
         confined: list = []
     else:
-        memberships = identity_service.list_memberships_for_competition(
-            competition_id
-        )
+        memberships = identity_service.list_memberships_for_competition(competition_id)
         if scope.unrestricted:
             confined = list(memberships)
         else:
             # Team-scoped: ONLY the caller's own team's members.
             confined = [m for m in memberships if m.team_name == scope.team]
-    members = [
-        roster_member(m) for m in sorted(confined, key=lambda m: m.user_email)
-    ]
+    members = [roster_member(m) for m in sorted(confined, key=lambda m: m.user_email)]
     context = {
         "competition_id": competition_id,
         "unrestricted": scope.unrestricted,
@@ -295,9 +277,7 @@ def roster_view(
 # for contestants; unrestricted staff submit via the JSON API / organizer tools).
 # ===========================================================================
 
-_SUBMIT_ROUTE = (
-    "/competitions/{competition_id}/challenges/{definition_slug}/{version_no}/submit"
-)
+_SUBMIT_ROUTE = "/competitions/{competition_id}/challenges/{definition_slug}/{version_no}/submit"
 
 
 def _contestant_team(principal: Principal, competition_id: str) -> str | None:
@@ -313,9 +293,7 @@ def _contestant_team(principal: Principal, competition_id: str) -> str | None:
     return scope.team
 
 
-def _resolve_title(
-    definition_slug: str, def_service: ChallengeDefinitionService
-) -> str:
+def _resolve_title(definition_slug: str, def_service: ChallengeDefinitionService) -> str:
     """The public display title for a slug (falls back to the slug; never a 500)."""
     definition = def_service.get(definition_slug)
     return definition.title if definition is not None else definition_slug
@@ -367,8 +345,11 @@ def _render_submit(
         "error": error,
     }
     return renderer.render(
-        request, "challenge_submit.html", context,
-        principal=principal, status_code=status_code,
+        request,
+        "challenge_submit.html",
+        context,
+        principal=principal,
+        status_code=status_code,
     )
 
 
@@ -396,9 +377,7 @@ def challenge_submit_form(
     principal: Principal = Depends(get_web_principal),
     renderer: TemplateRenderer = Depends(get_renderer),
     pub_service: PublicationService = Depends(get_web_publication_service),
-    def_service: ChallengeDefinitionService = Depends(
-        get_web_challenge_definition_service
-    ),
+    def_service: ChallengeDefinitionService = Depends(get_web_challenge_definition_service),
 ) -> Response:
     """The flag submit form for one PUBLISHED challenge. Existence-hiding 404 for a
     competition the caller cannot submit in, or a challenge not published here. A
@@ -406,11 +385,11 @@ def challenge_submit_form(
     assert_competition_permission_or_404(
         principal, competition_id, Permission.SUBMISSION_CREATE, not_found=_NOT_FOUND
     )
-    _require_published_or_404(
-        pub_service, competition_id, definition_slug, version_no
-    )
+    _require_published_or_404(pub_service, competition_id, definition_slug, version_no)
     return _render_submit(
-        request, renderer, principal,
+        request,
+        renderer,
+        principal,
         competition_id=competition_id,
         definition_slug=definition_slug,
         version_no=version_no,
@@ -436,12 +415,8 @@ async def challenge_submit(
     principal: Principal = Depends(get_web_principal),
     renderer: TemplateRenderer = Depends(get_renderer),
     pub_service: PublicationService = Depends(get_web_publication_service),
-    def_service: ChallengeDefinitionService = Depends(
-        get_web_challenge_definition_service
-    ),
-    proc_service: SubmissionProcessingService = Depends(
-        get_web_submission_processing_service
-    ),
+    def_service: ChallengeDefinitionService = Depends(get_web_challenge_definition_service),
+    proc_service: SubmissionProcessingService = Depends(get_web_submission_processing_service),
     _csrf: None = Depends(require_csrf),
 ) -> Response:
     """Record one flag attempt. Existence-hiding 404 for an unreadable competition
@@ -450,18 +425,21 @@ async def challenge_submit(
     assert_competition_permission_or_404(
         principal, competition_id, Permission.SUBMISSION_CREATE, not_found=_NOT_FOUND
     )
-    _require_published_or_404(
-        pub_service, competition_id, definition_slug, version_no
-    )
+    _require_published_or_404(pub_service, competition_id, definition_slug, version_no)
     title = _resolve_title(definition_slug, def_service)
     # The team is derived from MEMBERSHIP only -- never from the form / path.
     team = _contestant_team(principal, competition_id)
     if team is None:
         # Fail closed: no submitting identity here. Never a 500, never another team.
         return _render_submit(
-            request, renderer, principal,
-            competition_id=competition_id, definition_slug=definition_slug,
-            version_no=version_no, title=title, team_name=None,
+            request,
+            renderer,
+            principal,
+            competition_id=competition_id,
+            definition_slug=definition_slug,
+            version_no=version_no,
+            title=title,
+            team_name=None,
             idempotency_nonce=_fresh_nonce(),
         )
 
@@ -470,11 +448,17 @@ async def challenge_submit(
     nonce = form.get("idempotency_nonce", "").strip()
     if not answer:
         return _render_submit(
-            request, renderer, principal,
-            competition_id=competition_id, definition_slug=definition_slug,
-            version_no=version_no, title=title, team_name=team,
+            request,
+            renderer,
+            principal,
+            competition_id=competition_id,
+            definition_slug=definition_slug,
+            version_no=version_no,
+            title=title,
+            team_name=team,
             idempotency_nonce=nonce or _fresh_nonce(),
-            error="Enter an answer to submit.", status_code=400,
+            error="Enter an answer to submit.",
+            status_code=400,
         )
 
     # Deterministic (principal + competition + nonce)-scoped submission_id: a
@@ -491,10 +475,17 @@ async def challenge_submit(
         # Re-render with a friendly banner, a FRESH nonce (a retry is a new attempt),
         # and the answer NEVER echoed back.
         return _render_submit(
-            request, renderer, principal,
-            competition_id=competition_id, definition_slug=definition_slug,
-            version_no=version_no, title=title, team_name=team,
-            idempotency_nonce=_fresh_nonce(), error=message, status_code=status_code,
+            request,
+            renderer,
+            principal,
+            competition_id=competition_id,
+            definition_slug=definition_slug,
+            version_no=version_no,
+            title=title,
+            team_name=team,
+            idempotency_nonce=_fresh_nonce(),
+            error=message,
+            status_code=status_code,
         )
 
     try:
@@ -516,9 +507,7 @@ async def challenge_submit(
     except FlagRejectedError:
         return _fail("That answer's format is invalid.", 400)
     except FlagUnavailableError:
-        return _fail(
-            "This challenge is misconfigured. Please contact an organizer.", 400
-        )
+        return _fail("This challenge is misconfigured. Please contact an organizer.", 400)
     except IdempotencyConflictError:
         return _fail("That looks like a duplicate request. Please try again.", 409)
     except (ChallengeNotAttachedError, LookupError):
@@ -536,27 +525,28 @@ async def challenge_submit(
     else:
         result, correct = "Incorrect. Try again.", False
     return _render_submit(
-        request, renderer, principal,
-        competition_id=competition_id, definition_slug=definition_slug,
-        version_no=version_no, title=title, team_name=team,
-        idempotency_nonce=_fresh_nonce(), result=result, result_correct=correct,
+        request,
+        renderer,
+        principal,
+        competition_id=competition_id,
+        definition_slug=definition_slug,
+        version_no=version_no,
+        title=title,
+        team_name=team,
+        idempotency_nonce=_fresh_nonce(),
+        result=result,
+        result_correct=correct,
     )
 
 
-@contestant_router.get(
-    "/competitions/{competition_id}/submissions", name="web_my_submissions"
-)
+@contestant_router.get("/competitions/{competition_id}/submissions", name="web_my_submissions")
 def my_submissions_view(
     competition_id: str,
     request: Request,
     principal: Principal = Depends(get_web_principal),
     renderer: TemplateRenderer = Depends(get_renderer),
-    query_service: SubmissionQueryService = Depends(
-        get_web_submission_query_service
-    ),
-    def_service: ChallengeDefinitionService = Depends(
-        get_web_challenge_definition_service
-    ),
+    query_service: SubmissionQueryService = Depends(get_web_submission_query_service),
+    def_service: ChallengeDefinitionService = Depends(get_web_challenge_definition_service),
 ) -> Response:
     """The caller's OWN-team submission history (newest first).
 
@@ -580,21 +570,16 @@ def my_submissions_view(
             reverse=True,
         )
         titles = {
-            s.definition_slug: _resolve_title(s.definition_slug, def_service)
-            for s in submissions
+            s.definition_slug: _resolve_title(s.definition_slug, def_service) for s in submissions
         }
-        rows = [
-            submission_history_row(s, titles[s.definition_slug]) for s in submissions
-        ]
+        rows = [submission_history_row(s, titles[s.definition_slug]) for s in submissions]
     context = {
         "competition_id": competition_id,
         "team_name": team,
         "teamless": team is None,
         "submissions": rows,
     }
-    return renderer.render(
-        request, "my_submissions.html", context, principal=principal
-    )
+    return renderer.render(request, "my_submissions.html", context, principal=principal)
 
 
 # ===========================================================================
@@ -624,9 +609,7 @@ def challenge_download(
     principal: Principal = Depends(get_web_principal),
     renderer: TemplateRenderer = Depends(get_renderer),
     pub_service: PublicationService = Depends(get_web_publication_service),
-    download_service: ArtifactDownloadService = Depends(
-        get_web_artifact_download_service
-    ),
+    download_service: ArtifactDownloadService = Depends(get_web_artifact_download_service),
 ) -> Response:
     """Download the PUBLIC artifact bundle for one PUBLISHED challenge.
 
@@ -638,9 +621,7 @@ def challenge_download(
     assert_competition_permission_or_404(
         principal, competition_id, Permission.COMPETITION_READ, not_found=_NOT_FOUND
     )
-    _require_published_or_404(
-        pub_service, competition_id, definition_slug, version_no
-    )
+    _require_published_or_404(pub_service, competition_id, definition_slug, version_no)
     artifact = download_service.resolve_public_artifact(definition_slug, version_no)
     if artifact is None:
         # Friendly 404 (never a 500): the challenge is published here but its public
@@ -658,9 +639,7 @@ def challenge_download(
     )
 
 
-def _error_page_404(
-    request: Request, renderer: TemplateRenderer, principal: Principal
-) -> Response:
+def _error_page_404(request: Request, renderer: TemplateRenderer, principal: Principal) -> Response:
     """Render the shared friendly error page as a 404 (artifact not available). A
     404 body -- not an exception -- so no traceback and no 500 can occur."""
     return renderer.render(

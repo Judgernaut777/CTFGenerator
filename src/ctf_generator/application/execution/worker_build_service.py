@@ -97,7 +97,9 @@ class WorkerBuildService:
     ) -> None:
         self._database = database
         self._enrollment = enrollment
-        self._full_bundles = full_bundles if full_bundles is not None else FullBundleService(database)
+        self._full_bundles = (
+            full_bundles if full_bundles is not None else FullBundleService(database)
+        )
         self._queue_factory = queue_factory
 
     def fetch_build_bundle(

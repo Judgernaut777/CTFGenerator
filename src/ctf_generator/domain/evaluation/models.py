@@ -118,15 +118,13 @@ class EvalRun:
             raise ValueError(f"version_no must be an int >= 1, got {self.version_no!r}")
         if self.profile not in VALID_EVAL_PROFILES:
             raise ValueError(
-                f"profile must be one of {sorted(VALID_EVAL_PROFILES)}, "
-                f"got {self.profile!r}"
+                f"profile must be one of {sorted(VALID_EVAL_PROFILES)}, got {self.profile!r}"
             )
         if not isinstance(self.adversarial, bool):
             raise ValueError("adversarial must be a bool")
         if self.status not in VALID_EVAL_RUN_STATUSES:
             raise ValueError(
-                f"status must be one of {sorted(VALID_EVAL_RUN_STATUSES)}, "
-                f"got {self.status!r}"
+                f"status must be one of {sorted(VALID_EVAL_RUN_STATUSES)}, got {self.status!r}"
             )
         _require_tz_aware(self.requested_at, "requested_at")
 
@@ -164,9 +162,7 @@ class EvalRun:
             raise ValueError("success_dropped must be a bool or None")
         if self.step_delta is not None and not isinstance(self.step_delta, int):
             raise ValueError("step_delta must be an int or None")
-        if self.blended_score is not None and not isinstance(
-            self.blended_score, (int, float)
-        ):
+        if self.blended_score is not None and not isinstance(self.blended_score, (int, float)):
             raise ValueError("blended_score must be a number or None")
 
         if not isinstance(self.notes, tuple):
@@ -179,9 +175,7 @@ class EvalRun:
         if self.status == "failed":
             _require_nonempty(self.error, "error")
         elif self.error is not None:
-            raise ValueError(
-                f"error is only set on a 'failed' run; status={self.status!r}"
-            )
+            raise ValueError(f"error is only set on a 'failed' run; status={self.status!r}")
 
     @property
     def is_terminal(self) -> bool:

@@ -74,8 +74,9 @@ class _FakeBackend:
         )
 
     def launch_stack(self, request, *, command=None):
-        self.calls.append(("launch_stack", request.instance_id,
-                           tuple(c.service_name for c in request.containers)))
+        self.calls.append(
+            ("launch_stack", request.instance_id, tuple(c.service_name for c in request.containers))
+        )
         obs = RuntimeObservation(request.instance_id, self.container_id, self.launch_phase)
         return LaunchResult(
             observation=obs,
@@ -267,8 +268,10 @@ class LaunchDispatchTests(unittest.TestCase):
         # A healthy observation reported.
         self.assertTrue(client.health[0].healthy)
         # Observed lifecycle driven queued->starting->healthy.
-        self.assertEqual(client.transitions, [("starting", "container started"),
-                                              ("healthy", "health check passed")])
+        self.assertEqual(
+            client.transitions,
+            [("starting", "container started"), ("healthy", "health check passed")],
+        )
         # Job completed, not failed.
         self.assertEqual(len(client.completed), 1)
         self.assertEqual(client.failed, [])
@@ -289,9 +292,7 @@ class LaunchDispatchTests(unittest.TestCase):
         # instance it does not own (a report/transition would be ownership-rejected
         # and leak a live container). It fails the job RETRYABLE (a later re-place
         # may assign it here) and never calls backend.launch.
-        client = _FakeClient(
-            instance=_instance(assigned=None), replace_to_worker="other-worker"
-        )
+        client = _FakeClient(instance=_instance(assigned=None), replace_to_worker="other-worker")
         client.claim_lease = _lease(
             "launch_instance", {"instance_id": "inst-1", "generation": 1, "action": "launch"}
         )
@@ -334,9 +335,7 @@ class LaunchDispatchTests(unittest.TestCase):
         self.assertEqual(client.failed, [])
 
     def test_digest_pinning_refuses_a_mismatched_image(self) -> None:
-        client = _FakeClient(
-            instance=_instance(), expected_digest="sha256:" + "ab" * 32
-        )
+        client = _FakeClient(instance=_instance(), expected_digest="sha256:" + "ab" * 32)
         client.claim_lease = _lease(
             "launch_instance", {"instance_id": "inst-1", "generation": 1, "action": "launch"}
         )
@@ -351,9 +350,7 @@ class LaunchDispatchTests(unittest.TestCase):
         self.assertEqual(client.completed, [])
 
     def test_digest_pinning_refuses_a_missing_local_image(self) -> None:
-        client = _FakeClient(
-            instance=_instance(), expected_digest="sha256:" + "ab" * 32
-        )
+        client = _FakeClient(instance=_instance(), expected_digest="sha256:" + "ab" * 32)
         client.claim_lease = _lease(
             "launch_instance", {"instance_id": "inst-1", "generation": 1, "action": "launch"}
         )
@@ -368,13 +365,18 @@ class LaunchDispatchTests(unittest.TestCase):
 
         stack = (
             StackServiceImage(
-                service_name="edge", image_ref="ir-edge",
-                image_digest="sha256:" + "ee" * 32, depends_on=("internal",),
-                expose=("8080",), is_primary=True,
+                service_name="edge",
+                image_ref="ir-edge",
+                image_digest="sha256:" + "ee" * 32,
+                depends_on=("internal",),
+                expose=("8080",),
+                is_primary=True,
             ),
             StackServiceImage(
-                service_name="internal", image_ref="ir-internal",
-                image_digest="sha256:" + "11" * 32, expose=("9443",),
+                service_name="internal",
+                image_ref="ir-internal",
+                image_digest="sha256:" + "11" * 32,
+                expose=("9443",),
             ),
         )
         client = _FakeClient(instance=_instance(), stack=stack)
@@ -385,8 +387,9 @@ class LaunchDispatchTests(unittest.TestCase):
         # image_local_id is a single value; make it match by returning the expected
         # per call is not possible with this fake, so record digests match via a
         # backend that echoes the ref->digest. Use a custom backend.
-        backend = _StackBackend({"ir-edge": "sha256:" + "ee" * 32,
-                                 "ir-internal": "sha256:" + "11" * 32})
+        backend = _StackBackend(
+            {"ir-edge": "sha256:" + "ee" * 32, "ir-internal": "sha256:" + "11" * 32}
+        )
         _worker(client, backend).run_once()
         # launch_stack was called with BOTH services, dependency-ordered
         # (internal before edge).
@@ -401,8 +404,10 @@ class LaunchDispatchTests(unittest.TestCase):
 
         stack = (
             StackServiceImage(
-                service_name="edge", image_ref="ir-edge",
-                image_digest="sha256:" + "ee" * 32, is_primary=True,
+                service_name="edge",
+                image_ref="ir-edge",
+                image_digest="sha256:" + "ee" * 32,
+                is_primary=True,
             ),
         )
         client = _FakeClient(instance=_instance(), stack=stack)
@@ -430,7 +435,6 @@ class LaunchDispatchTests(unittest.TestCase):
         self.assertEqual(len(client.completed), 1)
         self.assertNotIn(("image_id", "alpine:latest"), backend.calls)
 
-
     def test_stack_endpoints_are_service_qualified_and_do_not_collide(self) -> None:
         from ctf_generator.domain.execution.runtime import RuntimeEndpoint
         from ctf_generator.infrastructure.runtime.docker_backend import (
@@ -446,11 +450,15 @@ class LaunchDispatchTests(unittest.TestCase):
             runtime_resources=(RuntimeResourceRef("container", "cid1234567890"),),
             endpoints=(
                 RuntimeEndpoint(
-                    container_port=8080, host="10.0.0.2", host_port=8080,
+                    container_port=8080,
+                    host="10.0.0.2",
+                    host_port=8080,
                     service="edge",
                 ),
                 RuntimeEndpoint(
-                    container_port=8080, host="10.0.0.3", host_port=8080,
+                    container_port=8080,
+                    host="10.0.0.3",
+                    host_port=8080,
                     service="internal",
                 ),
             ),
@@ -470,9 +478,7 @@ class LaunchDispatchTests(unittest.TestCase):
         launched = LaunchResult(
             observation=RuntimeObservation("inst-1", "cid1234567890", "running"),
             runtime_resources=(RuntimeResourceRef("container", "cid1234567890"),),
-            endpoints=(
-                RuntimeEndpoint(container_port=8080, host="10.0.0.2", host_port=8080),
-            ),
+            endpoints=(RuntimeEndpoint(container_port=8080, host="10.0.0.2", host_port=8080),),
         )
         worker._report_launched_facts(client.instance, launched, _NOW)
         self.assertEqual([e.name for e in client.endpoints], ["port-8080"])
@@ -488,8 +494,9 @@ class OtherDispatchTests(unittest.TestCase):
         _worker(client, backend).run_once()
         self.assertIn(("stop", "inst-1"), backend.calls)
         self.assertIn(("remove", "inst-1"), backend.calls)
-        self.assertEqual(client.transitions, [("stopping", "stop requested"),
-                                              ("stopped", "container removed")])
+        self.assertEqual(
+            client.transitions, [("stopping", "stop requested"), ("stopped", "container removed")]
+        )
 
     def test_delete_runtime_resources_removes(self) -> None:
         client = _FakeClient(instance=_instance())
@@ -506,9 +513,7 @@ class OtherDispatchTests(unittest.TestCase):
         # Two service containers; one has exited. A stack is healthy ONLY when
         # EVERY service is running, so the crashed sibling must not be invisible.
         client = _FakeClient(instance=_instance(state="healthy"))
-        client.claim_lease = _lease(
-            "run_health_check", {"instance_id": "inst-1", "generation": 1}
-        )
+        client.claim_lease = _lease("run_health_check", {"instance_id": "inst-1", "generation": 1})
         backend = _FakeBackend(
             containers=(("c-edge", "edge"), ("c-internal", "internal")),
             phase_by_cid={"c-edge": "running", "c-internal": "exited"},
@@ -520,9 +525,7 @@ class OtherDispatchTests(unittest.TestCase):
 
     def test_health_of_a_stack_is_healthy_when_all_services_run(self) -> None:
         client = _FakeClient(instance=_instance(state="healthy"))
-        client.claim_lease = _lease(
-            "run_health_check", {"instance_id": "inst-1", "generation": 1}
-        )
+        client.claim_lease = _lease("run_health_check", {"instance_id": "inst-1", "generation": 1})
         backend = _FakeBackend(
             containers=(("c-edge", "edge"), ("c-internal", "internal")),
         )
@@ -535,19 +538,20 @@ class OtherDispatchTests(unittest.TestCase):
 
         stack = (
             StackServiceImage(
-                service_name="edge", image_ref="ir-edge",
-                image_digest="sha256:" + "ee" * 32, depends_on=("internal",),
+                service_name="edge",
+                image_ref="ir-edge",
+                image_digest="sha256:" + "ee" * 32,
+                depends_on=("internal",),
                 is_primary=True,
             ),
             StackServiceImage(
-                service_name="internal", image_ref="ir-internal",
+                service_name="internal",
+                image_ref="ir-internal",
                 image_digest="sha256:" + "11" * 32,
             ),
         )
         client = _FakeClient(instance=_instance(state="healthy"), stack=stack)
-        client.claim_lease = _lease(
-            "restart_instance", {"instance_id": "inst-1", "generation": 1}
-        )
+        client.claim_lease = _lease("restart_instance", {"instance_id": "inst-1", "generation": 1})
         # docker lists newest-first (edge, then internal); dependency order is
         # internal BEFORE edge -- restart must follow the manifest, not the listing.
         backend = _FakeBackend(
@@ -555,16 +559,12 @@ class OtherDispatchTests(unittest.TestCase):
         )
         _worker(client, backend).run_once()
         restarts = [c for c in backend.calls if c[0] == "restart"]
-        self.assertEqual(
-            [c[2] for c in restarts], ["c-internal", "c-edge"]
-        )
+        self.assertEqual([c[2] for c in restarts], ["c-internal", "c-edge"])
         self.assertTrue(client.health[-1].healthy)
 
     def test_logs_are_collected_from_every_service(self) -> None:
         client = _FakeClient(instance=_instance(state="healthy"))
-        client.claim_lease = _lease(
-            "collect_logs", {"instance_id": "inst-1", "generation": 1}
-        )
+        client.claim_lease = _lease("collect_logs", {"instance_id": "inst-1", "generation": 1})
         backend = _FakeBackend(
             containers=(("c-edge", "edge"), ("c-internal", "internal")),
         )
@@ -585,9 +585,7 @@ class OtherDispatchTests(unittest.TestCase):
 
     def test_draining_worker_stops_claiming(self) -> None:
         client = _FakeClient(instance=_instance())
-        client.claim_lease = _lease(
-            "launch_instance", {"instance_id": "inst-1"}
-        )
+        client.claim_lease = _lease("launch_instance", {"instance_id": "inst-1"})
         worker = _worker(client, _FakeBackend())
         worker.request_drain()
         self.assertFalse(worker.run_once())  # no claim while draining

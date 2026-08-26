@@ -56,9 +56,7 @@ def _inspect(container_id: str, fmt: str) -> str:
 @unittest.skipUnless(_DOCKER, _SKIP)
 class DockerBackendIntegrationTests(unittest.TestCase):
     def setUp(self) -> None:
-        self._backend = DockerRuntimeBackend(
-            require_rootless=False, acknowledged_gaps=_ACKED
-        )
+        self._backend = DockerRuntimeBackend(require_rootless=False, acknowledged_gaps=_ACKED)
         self._instance_ids: list[str] = []
 
     def tearDown(self) -> None:
@@ -82,22 +80,29 @@ class DockerBackendIntegrationTests(unittest.TestCase):
     def _assert_clean(self, iid: str) -> None:
         ps = subprocess.run(
             ["docker", "ps", "-aq", "--filter", f"label=ctfgen.instance={iid}"],
-            capture_output=True, text=True,
+            capture_output=True,
+            text=True,
         ).stdout.strip()
         self.assertEqual(ps, "", f"leftover container for {iid}")
         nets = subprocess.run(
-            ["docker", "network", "ls", "--filter",
-             f"label=ctfgen.instance={iid}", "--format", "{{.Name}}"],
-            capture_output=True, text=True,
+            [
+                "docker",
+                "network",
+                "ls",
+                "--filter",
+                f"label=ctfgen.instance={iid}",
+                "--format",
+                "{{.Name}}",
+            ],
+            capture_output=True,
+            text=True,
         ).stdout.strip()
         self.assertEqual(nets, "", f"leftover network for {iid}")
 
     # -- the strict-policy hardening proof -------------------------------------
 
     def test_strict_policy_hardening_takes_effect(self) -> None:
-        policy = ContainerPolicy(
-            memory_mb=64, cpu_millis=500, pids_limit=64, tmpfs_mb=16
-        )
+        policy = ContainerPolicy(memory_mb=64, cpu_millis=500, pids_limit=64, tmpfs_mb=16)
         iid, cid = self._launch(policy)
         self.assertTrue(cid)
 
@@ -134,14 +139,22 @@ class DockerBackendIntegrationTests(unittest.TestCase):
         # The rootfs is read-only: a write outside /tmp fails.
         ro = subprocess.run(
             ["docker", "exec", cid, "sh", "-c", "echo x > /root_probe 2>&1 || echo READONLY"],
-            capture_output=True, text=True,
+            capture_output=True,
+            text=True,
         ).stdout
         self.assertIn("READONLY", ro)
         # /tmp is writable but mounted noexec: an executable there cannot run.
         noexec = subprocess.run(
-            ["docker", "exec", cid, "sh", "-c",
-             "cp /bin/busybox /tmp/x && chmod +x /tmp/x && /tmp/x true 2>&1 || echo NOEXEC"],
-            capture_output=True, text=True,
+            [
+                "docker",
+                "exec",
+                cid,
+                "sh",
+                "-c",
+                "cp /bin/busybox /tmp/x && chmod +x /tmp/x && /tmp/x true 2>&1 || echo NOEXEC",
+            ],
+            capture_output=True,
+            text=True,
         ).stdout
         self.assertIn("NOEXEC", noexec)
 
@@ -151,9 +164,9 @@ class DockerBackendIntegrationTests(unittest.TestCase):
         iid, cid = self._launch(ContainerPolicy(memory_mb=64, cpu_millis=250, tmpfs_mb=8))
         self.assertEqual(_dx(cid, "id", "-u"), "65534")
         wrote = subprocess.run(
-            ["docker", "exec", cid, "sh", "-c",
-             "echo hello > /tmp/probe && cat /tmp/probe"],
-            capture_output=True, text=True,
+            ["docker", "exec", cid, "sh", "-c", "echo hello > /tmp/probe && cat /tmp/probe"],
+            capture_output=True,
+            text=True,
         )
         self.assertEqual(wrote.returncode, 0, wrote.stderr)
         self.assertIn("hello", wrote.stdout)
@@ -167,7 +180,9 @@ class DockerBackendIntegrationTests(unittest.TestCase):
         iid = f"it-{uuid.uuid4().hex[:12]}"
         self._instance_ids.append(iid)
         req = ContainerRequest(
-            instance_id=iid, team_key="red", image_ref=_BENIGN_IMAGE,
+            instance_id=iid,
+            team_key="red",
+            image_ref=_BENIGN_IMAGE,
             policy=ContainerPolicy(memory_mb=64, cpu_millis=250),
         )
         worker_a.launch(req, command=_SLEEP)
@@ -179,7 +194,8 @@ class DockerBackendIntegrationTests(unittest.TestCase):
         self.assertEqual(reaped_by_b, 0, "worker B reaped a container it does not own")
         still_there = subprocess.run(
             ["docker", "ps", "-q", "--filter", f"label=ctfgen.instance={iid}"],
-            capture_output=True, text=True,
+            capture_output=True,
+            text=True,
         ).stdout.strip()
         self.assertTrue(still_there, "worker B's reap wrongly removed worker A's container")
         # Worker A's own reap DOES remove it.
@@ -209,7 +225,9 @@ class DockerBackendIntegrationTests(unittest.TestCase):
         secure = DockerRuntimeBackend()  # require_rootless=True, no acked gaps
         iid = f"it-{uuid.uuid4().hex[:12]}"
         req = ContainerRequest(
-            instance_id=iid, team_key="red", image_ref=_BENIGN_IMAGE,
+            instance_id=iid,
+            team_key="red",
+            image_ref=_BENIGN_IMAGE,
             policy=ContainerPolicy(memory_mb=64, cpu_millis=250),
         )
         with self.assertRaises(UnsupportedRuntimeError):
@@ -228,16 +246,14 @@ class DockerBackendIntegrationTests(unittest.TestCase):
             def firewall_available(self) -> bool:  # noqa: D401 - test override
                 return False
 
-        backend = _NoFirewallBackend(
-            require_rootless=False, acknowledged_gaps=_ACKED
-        )
+        backend = _NoFirewallBackend(require_rootless=False, acknowledged_gaps=_ACKED)
         iid = f"it-{uuid.uuid4().hex[:12]}"
         self._instance_ids.append(iid)  # tearDown double-checks cleanliness
         req = ContainerRequest(
-            instance_id=iid, team_key="red", image_ref=_BENIGN_IMAGE,
-            policy=ContainerPolicy(
-                memory_mb=64, cpu_millis=250, network_mode="isolated"
-            ),
+            instance_id=iid,
+            team_key="red",
+            image_ref=_BENIGN_IMAGE,
+            policy=ContainerPolicy(memory_mb=64, cpu_millis=250, network_mode="isolated"),
         )
         with self.assertRaises(UnsupportedRuntimeError):
             backend.launch(req, command=_SLEEP)
@@ -254,7 +270,9 @@ class DockerBackendIntegrationTests(unittest.TestCase):
         )
         iid = f"it-{uuid.uuid4().hex[:12]}"
         req = ContainerRequest(
-            instance_id=iid, team_key="red", image_ref=_BENIGN_IMAGE,
+            instance_id=iid,
+            team_key="red",
+            image_ref=_BENIGN_IMAGE,
             policy=ContainerPolicy(memory_mb=64, cpu_millis=250),
         )
         with self.assertRaises(UnsupportedRuntimeError):

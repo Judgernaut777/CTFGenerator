@@ -93,9 +93,7 @@ class TokenStore:
         # through a wider mode; then chmod to enforce 0600 even if the file
         # pre-existed with looser bits (open() does not shrink an existing file's
         # mode).
-        fd = os.open(
-            self._path, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, _FILE_MODE
-        )
+        fd = os.open(self._path, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, _FILE_MODE)
         try:
             with os.fdopen(fd, "w", encoding="utf-8") as handle:
                 handle.write(data)
@@ -117,8 +115,7 @@ class TokenStore:
             return None
         if info.st_mode & (stat.S_IRWXG | stat.S_IRWXO):
             _logger.warning(
-                "ignoring credentials file %s: it is group/world accessible "
-                "(run: chmod 600 %s)",
+                "ignoring credentials file %s: it is group/world accessible (run: chmod 600 %s)",
                 self._path,
                 self._path,
             )

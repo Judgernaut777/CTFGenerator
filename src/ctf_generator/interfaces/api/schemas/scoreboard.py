@@ -56,8 +56,6 @@ def lag_to_response(lag: ProjectionLag) -> dict[str, Any]:
         "max_as_of_seq": lag.max_as_of_seq,
         "failed_count": lag.failed_count,
         "oldest_pending_created_at": (
-            lag.oldest_pending_created_at.isoformat()
-            if lag.oldest_pending_created_at
-            else None
+            lag.oldest_pending_created_at.isoformat() if lag.oldest_pending_created_at else None
         ),
     }

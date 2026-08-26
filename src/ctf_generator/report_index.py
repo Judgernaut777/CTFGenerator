@@ -207,9 +207,7 @@ def render_html(index: ReportIndex) -> str:
         parts.append("</tbody></table>")
 
     if index.skipped:
-        parts.append(
-            f'<p class="note">{len(index.skipped)} file(s) skipped: could not parse.</p>'
-        )
+        parts.append(f'<p class="note">{len(index.skipped)} file(s) skipped: could not parse.</p>')
 
     parts.append("</body>")
     parts.append("</html>")

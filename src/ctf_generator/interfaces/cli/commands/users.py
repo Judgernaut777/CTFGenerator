@@ -28,9 +28,7 @@ def _create(args: argparse.Namespace) -> int:
         "role": args.role,
     }
     with open_client(args) as client:
-        created = client.request(
-            "POST", "/users", json=body, idempotency_key=idempotency_key(args)
-        )
+        created = client.request("POST", "/users", json=body, idempotency_key=idempotency_key(args))
     output.print_resource(created, as_json=args.json)
     return 0
 

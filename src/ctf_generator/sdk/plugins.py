@@ -171,9 +171,7 @@ def load_entry_point_families(*, on_error: str = "skip") -> list[str]:
                 family.name,
             )
             if on_error == "raise":
-                raise PluginResolutionError(
-                    f"family name {family.name!r} is already registered"
-                )
+                raise PluginResolutionError(f"family name {family.name!r} is already registered")
             continue
         _LOADED_EP_KEYS.add(key)
         register(family)

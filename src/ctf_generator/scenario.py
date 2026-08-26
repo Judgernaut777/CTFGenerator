@@ -200,7 +200,9 @@ class NullEnvironmentController:
         self.recorded.append((action, target, dict(params)))
         # tick=0 is a placeholder; run_scenario always re-stamps it with the
         # actual current tick before publishing.
-        return SimEvent(tick=0, source="environment", kind=action, target=target, payload=dict(params))
+        return SimEvent(
+            tick=0, source="environment", kind=action, target=target, payload=dict(params)
+        )
 
 
 # --- Scripted event source -------------------------------------------------------
@@ -250,16 +252,12 @@ class ScriptedAttacker:
     def __init__(self, moves: list[AttackerMove]) -> None:
         self._moves = sorted(moves, key=lambda move: move.tick)
 
-    def decide(
-        self, tick: int, events: list[SimEvent], state: ScenarioState
-    ) -> list[ResponseSpec]:
+    def decide(self, tick: int, events: list[SimEvent], state: ScenarioState) -> list[ResponseSpec]:
         decisions: list[ResponseSpec] = []
         for move in self._moves:
             if move.tick != tick:
                 continue
-            if move.precondition and not evaluate_condition(
-                move.precondition, tick, events, state
-            ):
+            if move.precondition and not evaluate_condition(move.precondition, tick, events, state):
                 # Deliberately do NOT copy the intended response's full
                 # payload: "checkpoint"/"sets" describe effects of the move
                 # actually happening, and a blocked move must not apply them.
@@ -302,9 +300,7 @@ class ScriptedDefender:
             trigger_id: list(responses) for trigger_id, responses in trigger_responses.items()
         }
 
-    def decide(
-        self, tick: int, events: list[SimEvent], state: ScenarioState
-    ) -> list[ResponseSpec]:
+    def decide(self, tick: int, events: list[SimEvent], state: ScenarioState) -> list[ResponseSpec]:
         decisions: list[ResponseSpec] = []
         for trigger in self._triggers:
             if trigger.trigger_id in state.fired_triggers:
@@ -337,14 +333,10 @@ def evaluate_condition(
     condition = condition.strip()
     if not condition:
         return True
-    return all(
-        _evaluate_clause(clause, tick, events, state) for clause in condition.split("&&")
-    )
+    return all(_evaluate_clause(clause, tick, events, state) for clause in condition.split("&&"))
 
 
-def _evaluate_clause(
-    clause: str, tick: int, events: list[SimEvent], state: ScenarioState
-) -> bool:
+def _evaluate_clause(clause: str, tick: int, events: list[SimEvent], state: ScenarioState) -> bool:
     clause = clause.strip()
     if not clause:
         return True
@@ -564,7 +556,9 @@ def _default_defender_from_spec(spec: ScenarioSpec) -> Agent | None:
         return None
     mapping: dict[str, list[ResponseSpec]] = {
         trigger.trigger_id: [response]
-        for trigger, response in zip(spec.triggers, spec.responses, strict=True)  # lengths checked equal above
+        for trigger, response in zip(
+            spec.triggers, spec.responses, strict=True
+        )  # lengths checked equal above
     }
     return ScriptedDefender(spec.triggers, mapping)
 

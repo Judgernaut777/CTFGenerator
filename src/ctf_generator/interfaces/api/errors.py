@@ -129,9 +129,8 @@ def _emit_denied_audit(request: Request, outcome: str) -> None:
             outcome=outcome,
         )
     except Exception:  # pragma: no cover - audit must never mask the real error
-        _logger.warning(
-            "failed to record denial audit request_id=%s", _request_id(request)
-        )
+        _logger.warning("failed to record denial audit request_id=%s", _request_id(request))
+
 
 # Framework HTTPException status -> canonical error.code. Anything unlisted maps
 # to the generic ``invalid_request``.
@@ -159,15 +158,11 @@ def _response(
     headers: dict[str, str] | None = None,
 ) -> JSONResponse:
     request_id = _request_id(request)
-    body = error_envelope(
-        code=code, message=message, request_id=request_id, detail=detail
-    )
+    body = error_envelope(code=code, message=message, request_id=request_id, detail=detail)
     response_headers = {"X-Request-ID": request_id}
     if headers:
         response_headers.update(headers)
-    return JSONResponse(
-        status_code=status_code, content=body, headers=response_headers
-    )
+    return JSONResponse(status_code=status_code, content=body, headers=response_headers)
 
 
 async def _handle_api_error(request: Request, exc: ApiError) -> JSONResponse:
@@ -181,14 +176,16 @@ async def _handle_api_error(request: Request, exc: ApiError) -> JSONResponse:
     elif isinstance(exc, AuthenticationError):
         _emit_denied_audit(request, "denied")
     return _response(
-        request, exc.status_code, exc.code, exc.message, detail=exc.detail,
+        request,
+        exc.status_code,
+        exc.code,
+        exc.message,
+        detail=exc.detail,
         headers=headers,
     )
 
 
-async def _handle_permission_error(
-    request: Request, exc: PermissionError
-) -> JSONResponse:
+async def _handle_permission_error(request: Request, exc: PermissionError) -> JSONResponse:
     # Generic PermissionError (incl. domain ScopeError) -> 403. Typed API authz
     # failures are handled by _handle_api_error above. The worker-credential
     # PermissionError subclasses (auth / draining / stale / ownership) get their
@@ -197,54 +194,37 @@ async def _handle_permission_error(
     return _response(request, 403, AuthorizationError.code, "permission denied")
 
 
-async def _handle_worker_auth_error(
-    request: Request, exc: PermissionError
-) -> JSONResponse:
+async def _handle_worker_auth_error(request: Request, exc: PermissionError) -> JSONResponse:
     # A rejected worker credential (missing / malformed / invalid / expired /
     # revoked / non-trusted / quarantined). Deliberately undifferentiated -- the
     # caller learns nothing about which check failed, and the token is never echoed.
     return _response(request, 401, "unauthorized", "worker credential rejected")
 
 
-async def _handle_worker_draining(
-    request: Request, exc: WorkerDrainingError
-) -> JSONResponse:
+async def _handle_worker_draining(request: Request, exc: WorkerDrainingError) -> JSONResponse:
     # A draining worker may finish in-flight leases but may not claim new work.
-    return _response(
-        request, 409, "worker_draining", "worker is draining; cannot claim new work"
-    )
+    return _response(request, 409, "worker_draining", "worker is draining; cannot claim new work")
 
 
-async def _handle_worker_stale(
-    request: Request, exc: WorkerStaleError
-) -> JSONResponse:
+async def _handle_worker_stale(request: Request, exc: WorkerStaleError) -> JSONResponse:
     # The worker's liveness heartbeat is stale; it must re-ping before claiming.
     # A conflict with the worker's current liveness state (409), not an auth
     # failure (the credential is valid).
-    return _response(
-        request, 409, "worker_stale", "worker liveness heartbeat is stale"
-    )
+    return _response(request, 409, "worker_stale", "worker liveness heartbeat is stale")
 
 
-async def _handle_instance_ownership(
-    request: Request, exc: InstanceOwnershipError
-) -> JSONResponse:
+async def _handle_instance_ownership(request: Request, exc: InstanceOwnershipError) -> JSONResponse:
     # The authenticated worker is not the instance's assigned worker. Generic
     # message (never another worker's data / a secret).
-    return _response(
-        request, 403, "forbidden_ownership", "worker does not own this instance"
-    )
+    return _response(request, 403, "forbidden_ownership", "worker does not own this instance")
 
 
-async def _handle_validation_error(
-    request: Request, exc: RequestValidationError
-) -> JSONResponse:
+async def _handle_validation_error(request: Request, exc: RequestValidationError) -> JSONResponse:
     errors = exc.errors()
     # A body that is not valid JSON at all (wrong content-type / malformed) is an
     # unsupported media type, not a field-level validation failure.
     if any(
-        err.get("type") == "json_invalid"
-        or "JSON decode" in str(err.get("msg", ""))
+        err.get("type") == "json_invalid" or "JSON decode" in str(err.get("msg", ""))
         for err in errors
     ):
         return _response(
@@ -256,11 +236,12 @@ async def _handle_validation_error(
     detail: list[dict[str, str]] = []
     for err in errors:
         location = [str(p) for p in err.get("loc", []) if p != "body"]
-        detail.append(
-            {"field": ".".join(location) or "body", "issue": err.get("msg", "invalid")}
-        )
+        detail.append({"field": ".".join(location) or "body", "issue": err.get("msg", "invalid")})
     return _response(
-        request, 422, "validation_failed", "request body failed validation",
+        request,
+        422,
+        "validation_failed",
+        "request body failed validation",
         detail=detail,
     )
 
@@ -292,26 +273,18 @@ async def _handle_lookup_error(request: Request, exc: LookupError) -> JSONRespon
     return _response(request, 404, "not_found", str(exc) or "resource not found")
 
 
-async def _handle_integrity_error(
-    request: Request, exc: IntegrityError
-) -> JSONResponse:
+async def _handle_integrity_error(request: Request, exc: IntegrityError) -> JSONResponse:
     # A uniqueness / FK / CHECK violation -> 409. The DB driver message can
     # embed connection/constraint internals, so it is NOT surfaced to the client.
     _logger.info("integrity conflict request_id=%s", _request_id(request))
-    return _response(
-        request, 409, "conflict", "the request conflicts with existing state"
-    )
+    return _response(request, 409, "conflict", "the request conflicts with existing state")
 
 
-async def _handle_quota_exceeded(
-    request: Request, exc: QuotaExceededError
-) -> JSONResponse:
+async def _handle_quota_exceeded(request: Request, exc: QuotaExceededError) -> JSONResponse:
     return _response(request, 409, "conflict", "resource quota exceeded")
 
 
-async def _handle_no_eligible_worker(
-    request: Request, exc: NoEligibleWorkerError
-) -> JSONResponse:
+async def _handle_no_eligible_worker(request: Request, exc: NoEligibleWorkerError) -> JSONResponse:
     # A routine capacity/placement condition (no dispatch-eligible worker with a
     # capability match + free capacity), the sibling of QuotaExceededError -- both
     # are "the reservation cannot be satisfied", so both map to 409. The message
@@ -332,9 +305,7 @@ async def _handle_illegal_instance_transition(
     # transition graph. Caught in the application layer before the store's plpgsql
     # guard, so it is a clean 409 rather than a raw ProgrammingError -> 500. The
     # message is generic (never echoes the from/to internals to the client).
-    return _response(
-        request, 409, "conflict", "illegal instance state transition"
-    )
+    return _response(request, 409, "conflict", "illegal instance state transition")
 
 
 async def _handle_domain_idempotency_conflict(
@@ -353,31 +324,21 @@ async def _handle_eval_version_not_published(
     )
 
 
-async def _handle_eval_run_conflict(
-    request: Request, exc: EvalRunConflictError
-) -> JSONResponse:
+async def _handle_eval_run_conflict(request: Request, exc: EvalRunConflictError) -> JSONResponse:
     return _response(request, 409, "conflict", str(exc) or "eval run already recorded")
 
 
-async def _handle_flag_rejected(
-    request: Request, exc: FlagRejectedError
-) -> JSONResponse:
+async def _handle_flag_rejected(request: Request, exc: FlagRejectedError) -> JSONResponse:
     # A malformed candidate answer (empty / control chars / over-long). The
     # reason only -- the exception never carries the candidate.
-    return _response(
-        request, 422, "validation_failed", str(exc) or "invalid answer"
-    )
+    return _response(request, 422, "validation_failed", str(exc) or "invalid answer")
 
 
-async def _handle_flag_unavailable(
-    request: Request, exc: FlagUnavailableError
-) -> JSONResponse:
+async def _handle_flag_unavailable(request: Request, exc: FlagUnavailableError) -> JSONResponse:
     # The published version carries no expected flag: an organizer-side
     # configuration defect, surfaced as a conflict with a generic message (never
     # the spec internals).
-    return _response(
-        request, 409, "conflict", "challenge is not configured for submissions"
-    )
+    return _response(request, 409, "conflict", "challenge is not configured for submissions")
 
 
 async def _handle_submission_processing_error(
@@ -387,18 +348,14 @@ async def _handle_submission_processing_error(
     # draft version is not submittable). ``ChallengeNotAttachedError`` (404) and
     # ``IdempotencyConflictError`` (409) are more-derived and keep their own
     # handlers via MRO precedence; the message here is domain-authored, no secret.
-    return _response(
-        request, 422, "validation_failed", str(exc) or "submission not processable"
-    )
+    return _response(request, 422, "validation_failed", str(exc) or "submission not processable")
 
 
 async def _handle_value_error(request: Request, exc: ValueError) -> JSONResponse:
     return _response(request, 400, "invalid_request", str(exc) or "invalid request")
 
 
-async def _handle_http_exception(
-    request: Request, exc: StarletteHTTPException
-) -> JSONResponse:
+async def _handle_http_exception(request: Request, exc: StarletteHTTPException) -> JSONResponse:
     # Framework-raised HTTPExceptions (unknown-route 404, wrong-method 405,
     # unsupported-media 415, ...) must still be the ctfgen.error envelope. The
     # status code is preserved; the detail text is framework-generated (never a
@@ -412,9 +369,7 @@ async def _handle_http_exception(
 async def _handle_unexpected(request: Request, exc: Exception) -> JSONResponse:
     # Log the full exception WITH the request id for correlation; return an
     # opaque body. No stack/detail/secret ever reaches the client.
-    _logger.exception(
-        "unhandled API exception request_id=%s", _request_id(request)
-    )
+    _logger.exception("unhandled API exception request_id=%s", _request_id(request))
     return _response(request, 500, "internal", "an internal error occurred")
 
 
@@ -428,15 +383,9 @@ def register_exception_handlers(app: FastAPI) -> None:
     app.add_exception_handler(IntegrityError, _handle_integrity_error)
     app.add_exception_handler(QuotaExceededError, _handle_quota_exceeded)
     app.add_exception_handler(NoEligibleWorkerError, _handle_no_eligible_worker)
-    app.add_exception_handler(
-        DomainIdempotencyConflictError, _handle_domain_idempotency_conflict
-    )
-    app.add_exception_handler(
-        IllegalInstanceTransitionError, _handle_illegal_instance_transition
-    )
-    app.add_exception_handler(
-        EvalVersionNotPublishedError, _handle_eval_version_not_published
-    )
+    app.add_exception_handler(DomainIdempotencyConflictError, _handle_domain_idempotency_conflict)
+    app.add_exception_handler(IllegalInstanceTransitionError, _handle_illegal_instance_transition)
+    app.add_exception_handler(EvalVersionNotPublishedError, _handle_eval_version_not_published)
     app.add_exception_handler(EvalRunConflictError, _handle_eval_run_conflict)
     # Submission-processing errors. ChallengeNotAttachedError is registered
     # explicitly so it stays a 404 (its own MRO entry wins over the
@@ -446,17 +395,13 @@ def register_exception_handlers(app: FastAPI) -> None:
     app.add_exception_handler(ChallengeNotAttachedError, _handle_lookup_error)
     app.add_exception_handler(FlagRejectedError, _handle_flag_rejected)
     app.add_exception_handler(FlagUnavailableError, _handle_flag_unavailable)
-    app.add_exception_handler(
-        SubmissionProcessingError, _handle_submission_processing_error
-    )
+    app.add_exception_handler(SubmissionProcessingError, _handle_submission_processing_error)
     app.add_exception_handler(LookupError, _handle_lookup_error)
     # Worker-credential PermissionError subclasses map more specifically than the
     # generic 403 (Starlette dispatches by the most-specific registered class in
     # the MRO). ScopeError has no specific handler -> falls through to 403.
     app.add_exception_handler(JobWorkerAuthenticationError, _handle_worker_auth_error)
-    app.add_exception_handler(
-        InstanceWorkerAuthenticationError, _handle_worker_auth_error
-    )
+    app.add_exception_handler(InstanceWorkerAuthenticationError, _handle_worker_auth_error)
     app.add_exception_handler(WorkerDrainingError, _handle_worker_draining)
     app.add_exception_handler(WorkerStaleError, _handle_worker_stale)
     app.add_exception_handler(InstanceOwnershipError, _handle_instance_ownership)

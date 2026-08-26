@@ -43,9 +43,7 @@ class SqlAlchemyWorkerRegistry:
         self._session = session
 
     def _row(self, name: str) -> WorkerRow:
-        row = self._session.scalars(
-            select(WorkerRow).where(WorkerRow.name == name)
-        ).one_or_none()
+        row = self._session.scalars(select(WorkerRow).where(WorkerRow.name == name)).one_or_none()
         if row is None:
             raise LookupError(f"worker not found: {name!r}")
         return row
@@ -56,15 +54,11 @@ class SqlAlchemyWorkerRegistry:
         self._session.flush()
 
     def get(self, name: str) -> Worker | None:
-        row = self._session.scalars(
-            select(WorkerRow).where(WorkerRow.name == name)
-        ).one_or_none()
+        row = self._session.scalars(select(WorkerRow).where(WorkerRow.name == name)).one_or_none()
         return worker_from_orm(row) if row is not None else None
 
     def list(self) -> list[Worker]:
-        rows = self._session.scalars(
-            select(WorkerRow).order_by(WorkerRow.name)
-        ).all()
+        rows = self._session.scalars(select(WorkerRow).order_by(WorkerRow.name)).all()
         return [worker_from_orm(row) for row in rows]
 
     def update_profile(self, worker: Worker) -> None:
@@ -180,9 +174,7 @@ class SqlAlchemyWorkerCredentialRepository:
         except (ValueError, AttributeError, TypeError):
             raise LookupError(f"credential not found: {credential_id!r}") from None
         row = self._session.scalars(
-            select(WorkerCredentialRow)
-            .where(WorkerCredentialRow.id == key)
-            .with_for_update()
+            select(WorkerCredentialRow).where(WorkerCredentialRow.id == key).with_for_update()
         ).one_or_none()
         if row is None:
             raise LookupError(f"credential not found: {credential_id!r}")

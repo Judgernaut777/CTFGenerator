@@ -108,15 +108,11 @@ def _harness(
             auth = AuthService(db, hasher=Pbkdf2Sha256Hasher(iterations=1000))
             if seed_local:
                 with db.session_scope() as s:
-                    SqlAlchemyUserRepository(s).add(
-                        User(email=_LOCAL_EMAIL, display_name="Local")
-                    )
+                    SqlAlchemyUserRepository(s).add(User(email=_LOCAL_EMAIL, display_name="Local"))
                 auth.set_password(_LOCAL_EMAIL, _LOCAL_PASSWORD, datetime.now(UTC))
             if seed_oidc_email:
                 with db.session_scope() as s:
-                    SqlAlchemyUserRepository(s).add(
-                        User(email=seed_oidc_email, display_name="Fed")
-                    )
+                    SqlAlchemyUserRepository(s).add(User(email=seed_oidc_email, display_name="Fed"))
                 if seed_oidc_admin:
                     auth.grant_system_role(seed_oidc_email, "admin")
             if enable_oidc:
@@ -125,15 +121,11 @@ def _harness(
                     issuer=fake.issuer,
                     client_id=fake.client_id,
                     client_secret=fake.client_secret,
-                    redirect_uri=(
-                        "https://ctfgen.example.test/api/v1/auth/oidc/callback"
-                    ),
+                    redirect_uri=("https://ctfgen.example.test/api/v1/auth/oidc/callback"),
                     auto_provision=auto_provision,
                     allowed_domains=allowed_domains,
                 )
-                oidc_service = OidcService(
-                    config, db, auth, http_client=fake.client()
-                )
+                oidc_service = OidcService(config, db, auth, http_client=fake.client())
             app = create_app(
                 ApiSettings(),
                 database=db,
@@ -188,9 +180,7 @@ class OidcFlowIntegrationTests(unittest.TestCase):
 
             with _db.session_scope() as s:
                 row = s.query(OidcTxnRow).one()
-            self.assertEqual(
-                pkce.code_challenge_s256(row.code_verifier), params["code_challenge"]
-            )
+            self.assertEqual(pkce.code_challenge_s256(row.code_verifier), params["code_challenge"])
             self.assertEqual(pkce.hash_state(params["state"]), row.state_hash)
 
     def test_full_callback_issues_local_session_authenticating_me(self) -> None:
@@ -208,17 +198,17 @@ class OidcFlowIntegrationTests(unittest.TestCase):
             self.assertTrue(token)
             self.assertIn("expires_at", cb.json())
             # The federated login yielded a NORMAL local session bearer.
-            me = client.get(
-                "/api/v1/auth/me", headers={"Authorization": f"Bearer {token}"}
-            )
+            me = client.get("/api/v1/auth/me", headers={"Authorization": f"Bearer {token}"})
             self.assertEqual(me.status_code, 200, me.text)
             self.assertEqual(me.json()["subject"], DEFAULT_EMAIL)
 
     def test_session_authenticates_protected_route(self) -> None:
         fake = FakeIdp()
-        with _harness(
-            fake, seed_oidc_email=DEFAULT_EMAIL, seed_oidc_admin=True
-        ) as (client, _svc, _db):
+        with _harness(fake, seed_oidc_email=DEFAULT_EMAIL, seed_oidc_admin=True) as (
+            client,
+            _svc,
+            _db,
+        ):
             r = client.get("/api/v1/auth/oidc/login", follow_redirects=False)
             code = fake.authorize(r.headers["location"])
             state = fake.parse_auth(r.headers["location"])["state"]
@@ -226,9 +216,7 @@ class OidcFlowIntegrationTests(unittest.TestCase):
                 "/api/v1/auth/oidc/callback", params={"code": code, "state": state}
             ).json()["token"]
             # A system-admin-scoped protected route accepts the federated session.
-            protected = client.get(
-                "/api/v1/users", headers={"Authorization": f"Bearer {token}"}
-            )
+            protected = client.get("/api/v1/users", headers={"Authorization": f"Bearer {token}"})
             self.assertEqual(protected.status_code, 200, protected.text)
 
     def test_auto_provision_creates_the_user(self) -> None:
@@ -238,9 +226,7 @@ class OidcFlowIntegrationTests(unittest.TestCase):
             r = client.get("/api/v1/auth/oidc/login", follow_redirects=False)
             code = fake.authorize(r.headers["location"])
             state = fake.parse_auth(r.headers["location"])["state"]
-            cb = client.get(
-                "/api/v1/auth/oidc/callback", params={"code": code, "state": state}
-            )
+            cb = client.get("/api/v1/auth/oidc/callback", params={"code": code, "state": state})
             self.assertEqual(cb.status_code, 200, cb.text)
             with db.session_scope() as s:
                 self.assertIsNotNone(SqlAlchemyUserRepository(s).get(DEFAULT_EMAIL))
@@ -257,9 +243,7 @@ class OidcFlowIntegrationTests(unittest.TestCase):
             # The client carries the binding cookie back to the callback -> 200.
             code = fake.authorize(r.headers["location"])
             state = fake.parse_auth(r.headers["location"])["state"]
-            cb = client.get(
-                "/api/v1/auth/oidc/callback", params={"code": code, "state": state}
-            )
+            cb = client.get("/api/v1/auth/oidc/callback", params={"code": code, "state": state})
             self.assertEqual(cb.status_code, 200, cb.text)
             self.assertTrue(cb.json()["token"])
 
@@ -272,9 +256,7 @@ class OidcFlowIntegrationTests(unittest.TestCase):
             # Drop the browser-binding cookie -> a valid (state, code) alone must
             # NOT complete the login (login-CSRF / fixation).
             client.cookies.clear()
-            cb = client.get(
-                "/api/v1/auth/oidc/callback", params={"code": code, "state": state}
-            )
+            cb = client.get("/api/v1/auth/oidc/callback", params={"code": code, "state": state})
             self.assertEqual(cb.status_code, 401, cb.text)
             self.assertEqual(cb.json()["error"]["code"], "unauthorized")
 
@@ -287,9 +269,7 @@ class OidcFlowIntegrationTests(unittest.TestCase):
             # Attacker-supplied binding value -> rejected.
             client.cookies.clear()
             client.cookies.set("ctfgen_oidc_txn", "attacker-supplied-value")
-            cb = client.get(
-                "/api/v1/auth/oidc/callback", params={"code": code, "state": state}
-            )
+            cb = client.get("/api/v1/auth/oidc/callback", params={"code": code, "state": state})
             self.assertEqual(cb.status_code, 401, cb.text)
             self.assertEqual(cb.json()["error"]["code"], "unauthorized")
 
@@ -299,9 +279,7 @@ class OidcFlowIntegrationTests(unittest.TestCase):
             r = client.get("/api/v1/auth/oidc/login", follow_redirects=False)
             code = fake.authorize(r.headers["location"])
             state = fake.parse_auth(r.headers["location"])["state"]
-            cb = client.get(
-                "/api/v1/auth/oidc/callback", params={"code": code, "state": state}
-            )
+            cb = client.get("/api/v1/auth/oidc/callback", params={"code": code, "state": state})
             self.assertEqual(cb.status_code, 401, cb.text)
             self.assertEqual(cb.json()["error"]["code"], "unauthorized")
             with db.session_scope() as s:
@@ -344,9 +322,7 @@ class OidcSecurityTests(unittest.TestCase):
             now = self._now()
             red = svc.build_authorization_url(now)
             ctx = fake.parse_auth(red.url)
-            code = fake.register_code(
-                ctx, id_token=fake.none_token(nonce=ctx["nonce"])
-            )
+            code = fake.register_code(ctx, id_token=fake.none_token(nonce=ctx["nonce"]))
             with self.assertRaises(OidcAuthError):
                 svc.handle_callback(code, red.state, red.binding_secret, now)
 
@@ -355,9 +331,7 @@ class OidcSecurityTests(unittest.TestCase):
             now = self._now()
             red = svc.build_authorization_url(now)
             ctx = fake.parse_auth(red.url)
-            code = fake.register_code(
-                ctx, id_token=fake.hs256_confusion_token(nonce=ctx["nonce"])
-            )
+            code = fake.register_code(ctx, id_token=fake.hs256_confusion_token(nonce=ctx["nonce"]))
             with self.assertRaises(OidcAuthError):
                 svc.handle_callback(code, red.state, red.binding_secret, now)
 
@@ -380,9 +354,7 @@ class OidcSecurityTests(unittest.TestCase):
             ctx = fake.parse_auth(red.url)
             code = fake.register_code(
                 ctx,
-                id_token=fake.mint_id_token(
-                    nonce=ctx["nonce"], iss="https://evil.example.test"
-                ),
+                id_token=fake.mint_id_token(nonce=ctx["nonce"], iss="https://evil.example.test"),
             )
             with self.assertRaises(OidcAuthError):
                 svc.handle_callback(code, red.state, red.binding_secret, now)
@@ -395,9 +367,7 @@ class OidcSecurityTests(unittest.TestCase):
             past = int(now.timestamp()) - 3600
             code = fake.register_code(
                 ctx,
-                id_token=fake.mint_id_token(
-                    nonce=ctx["nonce"], iat=past, exp=past + 60
-                ),
+                id_token=fake.mint_id_token(nonce=ctx["nonce"], iat=past, exp=past + 60),
             )
             with self.assertRaises(OidcAuthError):
                 svc.handle_callback(code, red.state, red.binding_secret, now)
@@ -407,9 +377,7 @@ class OidcSecurityTests(unittest.TestCase):
             now = self._now()
             red = svc.build_authorization_url(now)
             ctx = fake.parse_auth(red.url)
-            code = fake.register_code(
-                ctx, id_token=fake.mint_id_token(omit=("nonce",))
-            )
+            code = fake.register_code(ctx, id_token=fake.mint_id_token(omit=("nonce",)))
             with self.assertRaises(OidcAuthError):
                 svc.handle_callback(code, red.state, red.binding_secret, now)
 
@@ -429,9 +397,7 @@ class OidcSecurityTests(unittest.TestCase):
             # No transaction exists for this state, so the state lookup rejects
             # before the binding is ever checked (the binding value is moot here).
             with self.assertRaises(OidcAuthError):
-                svc.handle_callback(
-                    "some-code", "never-issued-state", "no-binding", self._now()
-                )
+                svc.handle_callback("some-code", "never-issued-state", "no-binding", self._now())
 
     def test_expired_state_rejected(self) -> None:
         with self._svc() as (svc, fake, _db):
@@ -467,9 +433,7 @@ class OidcSecurityTests(unittest.TestCase):
                         {OidcTxnRow.code_verifier: _secrets.token_urlsafe(64)}
                     )
 
-            code, state, binding = _drive(
-                svc, fake, now, mutate_txn=_corrupt_verifier
-            )
+            code, state, binding = _drive(svc, fake, now, mutate_txn=_corrupt_verifier)
             with self.assertRaises(OidcAuthError):
                 svc.handle_callback(code, state, binding, now)
 
@@ -479,9 +443,7 @@ class OidcSecurityTests(unittest.TestCase):
             red = svc.build_authorization_url(now)
             ctx = fake.parse_auth(red.url)
             # DEFAULT_EMAIL is @example.com, outside the allow-list.
-            code = fake.register_code(
-                ctx, id_token=fake.mint_id_token(nonce=ctx["nonce"])
-            )
+            code = fake.register_code(ctx, id_token=fake.mint_id_token(nonce=ctx["nonce"]))
             with self.assertRaises(OidcAuthError):
                 svc.handle_callback(code, red.state, red.binding_secret, now)
 
@@ -506,9 +468,7 @@ class OidcSecurityTests(unittest.TestCase):
             ctx = fake.parse_auth(red.url)
             code = fake.register_code(
                 ctx,
-                id_token=fake.mint_id_token(
-                    nonce=ctx["nonce"], omit=("email_verified",)
-                ),
+                id_token=fake.mint_id_token(nonce=ctx["nonce"], omit=("email_verified",)),
             )
             with self.assertRaises(OidcAuthError):
                 svc.handle_callback(code, red.state, red.binding_secret, now)
@@ -635,9 +595,7 @@ class OidcDisabledTests(unittest.TestCase):
             login = client.get("/api/v1/auth/oidc/login", follow_redirects=False)
             self.assertEqual(login.status_code, 404, login.text)
             self.assertEqual(login.json()["error"]["code"], "not_found")
-            cb = client.get(
-                "/api/v1/auth/oidc/callback", params={"code": "x", "state": "y"}
-            )
+            cb = client.get("/api/v1/auth/oidc/callback", params={"code": "x", "state": "y"})
             self.assertEqual(cb.status_code, 404, cb.text)
             # Local auth is entirely unaffected.
             r = client.post(

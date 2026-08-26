@@ -66,21 +66,13 @@ TERMINAL_INSTANCE_STATES = frozenset({"archived"})
 # state and freezes terminal (``archived``) rows entirely.
 LEGAL_INSTANCE_TRANSITIONS: Mapping[str, frozenset[str]] = {
     "requested": frozenset({"queued", "failed", "quarantined", "stopping"}),
-    "queued": frozenset(
-        {"building", "starting", "failed", "quarantined", "stopping"}
-    ),
+    "queued": frozenset({"building", "starting", "failed", "quarantined", "stopping"}),
     "building": frozenset({"ready", "failed", "quarantined", "stopping"}),
     "ready": frozenset({"starting", "failed", "quarantined", "stopping"}),
     "starting": frozenset({"healthy", "failed", "quarantined", "stopping"}),
-    "healthy": frozenset(
-        {"active", "degraded", "stopping", "expired", "quarantined", "failed"}
-    ),
-    "active": frozenset(
-        {"degraded", "stopping", "expired", "quarantined", "failed"}
-    ),
-    "degraded": frozenset(
-        {"healthy", "active", "stopping", "expired", "quarantined", "failed"}
-    ),
+    "healthy": frozenset({"active", "degraded", "stopping", "expired", "quarantined", "failed"}),
+    "active": frozenset({"degraded", "stopping", "expired", "quarantined", "failed"}),
+    "degraded": frozenset({"healthy", "active", "stopping", "expired", "quarantined", "failed"}),
     "stopping": frozenset({"stopped", "failed", "quarantined"}),
     "stopped": frozenset({"starting", "archived", "quarantined"}),
     "expired": frozenset({"stopping", "archived"}),
@@ -135,9 +127,7 @@ class IllegalInstanceTransitionError(Exception):
     def __init__(self, from_state: str, to_state: str) -> None:
         self.from_state = from_state
         self.to_state = to_state
-        super().__init__(
-            f"illegal instance transition {from_state!r} -> {to_state!r}"
-        )
+        super().__init__(f"illegal instance transition {from_state!r} -> {to_state!r}")
 
 
 def is_legal_instance_transition(from_state: str, to_state: str) -> bool:
@@ -193,8 +183,7 @@ class Instance:
         _require_nonempty(self.definition_slug, "definition_slug")
         if self.state not in VALID_INSTANCE_STATES:
             raise ValueError(
-                f"state must be one of {sorted(VALID_INSTANCE_STATES)}, "
-                f"got {self.state!r}"
+                f"state must be one of {sorted(VALID_INSTANCE_STATES)}, got {self.state!r}"
             )
         if self.desired_state not in VALID_DESIRED_STATES:
             raise ValueError(
@@ -270,13 +259,11 @@ class RuntimeResource:
         _require_nonempty(self.worker, "worker")
         if self.kind not in VALID_RUNTIME_RESOURCE_KINDS:
             raise ValueError(
-                f"kind must be one of {sorted(VALID_RUNTIME_RESOURCE_KINDS)}, "
-                f"got {self.kind!r}"
+                f"kind must be one of {sorted(VALID_RUNTIME_RESOURCE_KINDS)}, got {self.kind!r}"
             )
         if self.state not in VALID_RESOURCE_STATES:
             raise ValueError(
-                f"state must be one of {sorted(VALID_RESOURCE_STATES)}, "
-                f"got {self.state!r}"
+                f"state must be one of {sorted(VALID_RESOURCE_STATES)}, got {self.state!r}"
             )
         _require_positive(self.generation, "generation")
 
@@ -377,13 +364,11 @@ class InstanceEvent:
             )
         if self.to_state not in VALID_INSTANCE_STATES:
             raise ValueError(
-                f"to_state must be one of {sorted(VALID_INSTANCE_STATES)}, "
-                f"got {self.to_state!r}"
+                f"to_state must be one of {sorted(VALID_INSTANCE_STATES)}, got {self.to_state!r}"
             )
         if self.actor not in VALID_EVENT_ACTORS:
             raise ValueError(
-                f"actor must be one of {sorted(VALID_EVENT_ACTORS)}, "
-                f"got {self.actor!r}"
+                f"actor must be one of {sorted(VALID_EVENT_ACTORS)}, got {self.actor!r}"
             )
         _require_positive(self.generation, "generation")
         _require_tz_aware(self.occurred_at, "occurred_at")

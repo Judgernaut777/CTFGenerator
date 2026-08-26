@@ -147,9 +147,7 @@ def _seed_parents(db) -> None:
         SqlAlchemyChallengeVersionRepository(s).publish("sql", 1, _NOW)
     with db.session_scope() as s:
         reg = SqlAlchemyWorkerRegistry(s)
-        reg.add(
-            Worker("w1", "docker-rootless", ("x86_64",), ("launch_instance",), 4, "1")
-        )
+        reg.add(Worker("w1", "docker-rootless", ("x86_64",), ("launch_instance",), 4, "1"))
         reg.approve("w1")
         reg.heartbeat("w1", _NOW)
 
@@ -222,9 +220,7 @@ class RoundTripTests(unittest.TestCase):
             _seed_parents(db)
             with self.assertRaises(LookupError):
                 with db.session_scope() as s:
-                    SqlAlchemyInstanceRepository(s).add(
-                        _new_instance(team_name="Ghost"), _NOW
-                    )
+                    SqlAlchemyInstanceRepository(s).add(_new_instance(team_name="Ghost"), _NOW)
 
     def test_endpoint_resource_credential_round_trip(self) -> None:
         with _migrated_database() as db:
@@ -280,24 +276,16 @@ class RoundTripTests(unittest.TestCase):
             with db.session_scope() as s:
                 repo = SqlAlchemyInstanceRepository(s)
                 repo.add(inst, _NOW)
-                repo.record_endpoint(
-                    InstanceEndpoint(iid, "web", "h", 80, "http", "http://h")
-                )
-                repo.record_endpoint(
-                    InstanceEndpoint(iid, "web", "h2", 81, "http", "http://h2")
-                )
+                repo.record_endpoint(InstanceEndpoint(iid, "web", "h", 80, "http", "http://h"))
+                repo.record_endpoint(InstanceEndpoint(iid, "web", "h2", 81, "http", "http://h2"))
             with db.session_scope() as s:
                 eps = SqlAlchemyInstanceRepository(s).list_endpoints(iid)
             self.assertEqual(len(eps), 1)
             self.assertEqual(eps[0].host, "h2")
             with db.session_scope() as s:
-                self.assertTrue(
-                    SqlAlchemyInstanceRepository(s).delete_endpoint(iid, "web")
-                )
+                self.assertTrue(SqlAlchemyInstanceRepository(s).delete_endpoint(iid, "web"))
             with db.session_scope() as s:
-                self.assertEqual(
-                    SqlAlchemyInstanceRepository(s).list_endpoints(iid), []
-                )
+                self.assertEqual(SqlAlchemyInstanceRepository(s).list_endpoints(iid), [])
 
     def test_credential_scopes_round_trip_verbatim(self) -> None:
         # Scopes must round-trip verbatim (order + duplicates preserved): the
@@ -331,9 +319,7 @@ class RoundTripTests(unittest.TestCase):
             with db.session_scope() as s:
                 repo = SqlAlchemyInstanceRepository(s)
                 repo.add(inst, _NOW)
-                repo.append_observation(
-                    HealthObservation(iid, "starting", False, "w1", 1, _NOW)
-                )
+                repo.append_observation(HealthObservation(iid, "starting", False, "w1", 1, _NOW))
                 repo.append_observation(
                     HealthObservation(
                         iid,
@@ -437,9 +423,7 @@ class TransitionMatrixTests(unittest.TestCase):
                             got = SqlAlchemyInstanceRepository(s).transition(
                                 inst.instance_id, dst, reason="m", actor="system", now=_NOW
                             )
-                        self.assertEqual(
-                            got.state, dst, f"{src}->{dst} should be accepted"
-                        )
+                        self.assertEqual(got.state, dst, f"{src}->{dst} should be accepted")
                     else:
                         with self.assertRaises(
                             ProgrammingError, msg=f"{src}->{dst} should be rejected"
@@ -479,9 +463,7 @@ class AppendOnlyTests(unittest.TestCase):
             self._seed_one(db)
             with self.assertRaises(ProgrammingError):
                 with db.session_scope() as s:
-                    s.execute(
-                        sa.text("UPDATE health_observations SET healthy = false")
-                    )
+                    s.execute(sa.text("UPDATE health_observations SET healthy = false"))
             with self.assertRaises(ProgrammingError):
                 with db.session_scope() as s:
                     s.execute(sa.text("DELETE FROM health_observations"))
@@ -523,9 +505,7 @@ class CheckConstraintBodyTests(unittest.TestCase):
                 ),
                 {"iid": inst.instance_id},
             ).one()
-            worker_id = s.execute(
-                sa.text("SELECT id FROM workers WHERE name = 'w1'")
-            ).scalar_one()
+            worker_id = s.execute(sa.text("SELECT id FROM workers WHERE name = 'w1'")).scalar_one()
         return inst.instance_id, refs, worker_id
 
     def _reject(self, db, sql, params):
@@ -543,8 +523,7 @@ class CheckConstraintBodyTests(unittest.TestCase):
                 "challenge_version_id, state, desired_state, generation, "
                 "created_at, updated_at) "
                 "VALUES (:id, :c, :t, :v, 'bogus', 'active', 1, :n, :n)",
-                {"id": str(uuid.uuid4()), "c": refs[0], "t": refs[1],
-                 "v": refs[2], "n": _NOW},
+                {"id": str(uuid.uuid4()), "c": refs[0], "t": refs[1], "v": refs[2], "n": _NOW},
             )
 
     def test_instances_desired_state_check(self) -> None:
@@ -557,8 +536,7 @@ class CheckConstraintBodyTests(unittest.TestCase):
                 "challenge_version_id, state, desired_state, generation, "
                 "created_at, updated_at) "
                 "VALUES (:id, :c, :t, :v, 'requested', 'running', 1, :n, :n)",
-                {"id": str(uuid.uuid4()), "c": refs[0], "t": refs[1],
-                 "v": refs[2], "n": _NOW},
+                {"id": str(uuid.uuid4()), "c": refs[0], "t": refs[1], "v": refs[2], "n": _NOW},
             )
 
     def test_health_observations_observed_state_check(self) -> None:

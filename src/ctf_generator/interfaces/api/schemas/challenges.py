@@ -104,9 +104,7 @@ def version_concurrency_payload(version: ChallengeVersion) -> dict[str, Any]:
         "version_no": version.version_no,
         "state": version.state,
         "spec_sha256": version.spec_sha256,
-        "published_at": (
-            version.published_at.isoformat() if version.published_at else None
-        ),
+        "published_at": (version.published_at.isoformat() if version.published_at else None),
     }
 
 
@@ -120,9 +118,7 @@ def _version_base(version: ChallengeVersion) -> dict[str, Any]:
         "spec_sha256": version.spec_sha256,
         "spec_version": version.spec_version,
         "mode": version.mode,
-        "published_at": (
-            version.published_at.isoformat() if version.published_at else None
-        ),
+        "published_at": (version.published_at.isoformat() if version.published_at else None),
         "immutable": version.state != "draft",
     }
 

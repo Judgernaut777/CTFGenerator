@@ -60,9 +60,7 @@ def create_definition(
         return replayed
 
     definition = service.create(body.to_domain())
-    envelope = resource_envelope(
-        CHALLENGE_DEFINITION_SCHEMA, definition_to_response(definition)
-    )
+    envelope = resource_envelope(CHALLENGE_DEFINITION_SCHEMA, definition_to_response(definition))
     etag = compute_etag(definition_concurrency_payload(definition))
     record_audit(
         request,
@@ -70,9 +68,7 @@ def create_definition(
         action="challenge_definition.create",
         target=definition.slug,
     )
-    remember(
-        request, scope, body_json, status_code=201, envelope=envelope, etag=etag
-    )
+    remember(request, scope, body_json, status_code=201, envelope=envelope, etag=etag)
     return respond(201, envelope, etag=etag)
 
 
@@ -115,9 +111,7 @@ def get_definition(
     definition = service.get(slug)
     if definition is None:
         raise LookupError(f"challenge definition not found: {slug!r}")
-    envelope = resource_envelope(
-        CHALLENGE_DEFINITION_SCHEMA, definition_to_response(definition)
-    )
+    envelope = resource_envelope(CHALLENGE_DEFINITION_SCHEMA, definition_to_response(definition))
     etag = compute_etag(definition_concurrency_payload(definition))
     return respond(200, envelope, etag=etag)
 
@@ -149,19 +143,11 @@ def patch_definition(
     merged = dataclasses.replace(current, **changes)
 
     def guard(fresh) -> None:
-        if not etags_match(
-            if_match, compute_etag(definition_concurrency_payload(fresh))
-        ):
-            raise PreconditionFailedError(
-                "If-Match does not match the current resource version"
-            )
+        if not etags_match(if_match, compute_etag(definition_concurrency_payload(fresh))):
+            raise PreconditionFailedError("If-Match does not match the current resource version")
 
     updated = service.update(merged, guard=guard)
-    envelope = resource_envelope(
-        CHALLENGE_DEFINITION_SCHEMA, definition_to_response(updated)
-    )
+    envelope = resource_envelope(CHALLENGE_DEFINITION_SCHEMA, definition_to_response(updated))
     etag = compute_etag(definition_concurrency_payload(updated))
-    record_audit(
-        request, principal, action="challenge_definition.update", target=slug
-    )
+    record_audit(request, principal, action="challenge_definition.update", target=slug)
     return respond(200, envelope, etag=etag)

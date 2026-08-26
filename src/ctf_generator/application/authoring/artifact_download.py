@@ -82,9 +82,7 @@ class ArtifactDownloadService:
     resolve then cleanly returns ``None`` rather than raising.
     """
 
-    def __init__(
-        self, database: Database, artifact_store: ArtifactStore | None
-    ) -> None:
+    def __init__(self, database: Database, artifact_store: ArtifactStore | None) -> None:
         self._artifact_store = artifact_store
         # BuildService owns the read UoW; the JobService collaborator is only used
         # by its trigger path (never reached here -- this service only reads).

@@ -140,9 +140,7 @@ class EvalRunRepositoryTests(unittest.TestCase):
         # code-head guard lives in test_migration_head_constant.py.)
         cfg = _alembic_config(_TEST_URL)
         sd = ScriptDirectory.from_config(cfg)
-        self.assertEqual(
-            sd.get_revision("0013_eval_runs").revision, "0013_eval_runs"
-        )
+        self.assertEqual(sd.get_revision("0013_eval_runs").revision, "0013_eval_runs")
 
     def test_add_get_round_trip_returns_domain(self) -> None:
         with _migrated_database() as (db, _url):

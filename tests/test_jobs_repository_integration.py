@@ -176,12 +176,8 @@ class JobEnqueueTests(unittest.TestCase):
     def test_enqueue_idempotent_service_returns_original(self) -> None:
         with _migrated_database() as (db, _url):
             service = JobService(db)
-            first, created1 = service.enqueue_idempotent(
-                _job(idempotency_key="dup-2")
-            )
-            second, created2 = service.enqueue_idempotent(
-                _job(idempotency_key="dup-2")
-            )
+            first, created1 = service.enqueue_idempotent(_job(idempotency_key="dup-2"))
+            second, created2 = service.enqueue_idempotent(_job(idempotency_key="dup-2"))
         self.assertTrue(created1)
         self.assertFalse(created2)
         self.assertEqual(second.job_id, first.job_id)
@@ -203,9 +199,7 @@ class JobEnqueueTests(unittest.TestCase):
     def test_enqueue_idempotent_conflicting_payload_raises(self) -> None:
         with _migrated_database() as (db, _url):
             service = JobService(db)
-            service.enqueue_idempotent(
-                _job(idempotency_key="idk", payload={"build_sha256": "aa"})
-            )
+            service.enqueue_idempotent(_job(idempotency_key="idk", payload={"build_sha256": "aa"}))
             with self.assertRaises(JobIdempotencyConflictError):
                 service.enqueue_idempotent(
                     _job(idempotency_key="idk", payload={"build_sha256": "bb"})
@@ -214,13 +208,9 @@ class JobEnqueueTests(unittest.TestCase):
     def test_enqueue_idempotent_conflicting_job_type_raises(self) -> None:
         with _migrated_database() as (db, _url):
             service = JobService(db)
-            service.enqueue_idempotent(
-                _job(idempotency_key="idk2", job_type="build_challenge")
-            )
+            service.enqueue_idempotent(_job(idempotency_key="idk2", job_type="build_challenge"))
             with self.assertRaises(JobIdempotencyConflictError):
-                service.enqueue_idempotent(
-                    _job(idempotency_key="idk2", job_type="collect_logs")
-                )
+                service.enqueue_idempotent(_job(idempotency_key="idk2", job_type="collect_logs"))
 
     def test_enqueue_idempotent_identical_request_collapses(self) -> None:
         with _migrated_database() as (db, _url):
@@ -262,9 +252,7 @@ class JobClaimTests(unittest.TestCase):
                 queue.enqueue(low)
                 queue.enqueue(high)
             with db.session_scope() as s:
-                lease = SqlAlchemyJobQueue(s).claim(
-                    "w1", frozenset(), 60, _NOW
-                )
+                lease = SqlAlchemyJobQueue(s).claim("w1", frozenset(), 60, _NOW)
         self.assertIsNotNone(lease)
         self.assertEqual(lease.job.job_id, high.job_id)
         self.assertEqual(lease.job.status, "claimed")
@@ -274,18 +262,12 @@ class JobClaimTests(unittest.TestCase):
     def test_future_available_at_is_not_claimable(self) -> None:
         with _migrated_database() as (db, _url):
             with db.session_scope() as s:
-                SqlAlchemyJobQueue(s).enqueue(
-                    _job(available_at=_NOW + timedelta(hours=1))
-                )
+                SqlAlchemyJobQueue(s).enqueue(_job(available_at=_NOW + timedelta(hours=1)))
             with db.session_scope() as s:
-                self.assertIsNone(
-                    SqlAlchemyJobQueue(s).claim("w1", frozenset(), 60, _NOW)
-                )
+                self.assertIsNone(SqlAlchemyJobQueue(s).claim("w1", frozenset(), 60, _NOW))
             with db.session_scope() as s:
                 self.assertIsNotNone(
-                    SqlAlchemyJobQueue(s).claim(
-                        "w1", frozenset(), 60, _NOW + timedelta(hours=2)
-                    )
+                    SqlAlchemyJobQueue(s).claim("w1", frozenset(), 60, _NOW + timedelta(hours=2))
                 )
 
     def test_capability_filtering(self) -> None:
@@ -296,15 +278,11 @@ class JobClaimTests(unittest.TestCase):
             # A worker lacking a required capability claims nothing.
             with db.session_scope() as s:
                 self.assertIsNone(
-                    SqlAlchemyJobQueue(s).claim(
-                        "weak", frozenset({"docker"}), 60, _NOW
-                    )
+                    SqlAlchemyJobQueue(s).claim("weak", frozenset({"docker"}), 60, _NOW)
                 )
             # A capability-free worker (empty array binding!) claims nothing.
             with db.session_scope() as s:
-                self.assertIsNone(
-                    SqlAlchemyJobQueue(s).claim("bare", frozenset(), 60, _NOW)
-                )
+                self.assertIsNone(SqlAlchemyJobQueue(s).claim("bare", frozenset(), 60, _NOW))
             # A superset worker claims it.
             with db.session_scope() as s:
                 lease = SqlAlchemyJobQueue(s).claim(
@@ -348,9 +326,7 @@ class JobClaimTests(unittest.TestCase):
                 except BaseException as exc:  # noqa: BLE001 - re-raised below
                     errors.append(exc)
 
-            threads = [
-                threading.Thread(target=drain, args=(i,)) for i in range(8)
-            ]
+            threads = [threading.Thread(target=drain, args=(i,)) for i in range(8)]
             for t in threads:
                 t.start()
             for t in threads:
@@ -541,9 +517,7 @@ class LeaseExpiryTests(unittest.TestCase):
             self.assertEqual(reaped[0].status, "queued")
             self.assertEqual(reaped[0].attempt_count, 1)
             self.assertEqual(reaped[0].error_class, "lease_expired")
-            self.assertEqual(
-                reaped[0].available_at, reap_at + timedelta(seconds=30)
-            )
+            self.assertEqual(reaped[0].available_at, reap_at + timedelta(seconds=30))
 
             # Another worker claims it after the backoff.
             claim_at = reap_at + timedelta(minutes=5)
@@ -582,9 +556,7 @@ class LeaseExpiryTests(unittest.TestCase):
             with db.session_scope() as s:
                 SqlAlchemyJobQueue(s).claim("w1", frozenset(), 3600, _NOW)
             with db.session_scope() as s:
-                reaped = SqlAlchemyJobQueue(s).reap_expired(
-                    _NOW + timedelta(minutes=5)
-                )
+                reaped = SqlAlchemyJobQueue(s).reap_expired(_NOW + timedelta(minutes=5))
         self.assertEqual(reaped, [])
 
     def test_duplicate_delivery_one_succeeded_row_with_second_result(self) -> None:
@@ -683,9 +655,7 @@ class AuditRefBatchTests(unittest.TestCase):
             versions.append((slug, 1))
         return competition_id, versions
 
-    def _dead_letter_job(
-        self, db, competition_id: str, slug: str, version_no: int
-    ) -> str:
+    def _dead_letter_job(self, db, competition_id: str, slug: str, version_no: int) -> str:
         """Enqueue, claim, start, and fail-to-exhaustion a single job carrying
         the given audit linkage, returning its job_id."""
         job = _job(
@@ -846,9 +816,7 @@ class CancellationTests(unittest.TestCase):
             with db.session_scope() as s:
                 SqlAlchemyJobQueue(s).start(job.job_id, lease.lease_token, _NOW)
             with db.session_scope() as s:
-                still_running = SqlAlchemyJobQueue(s).request_cancel(
-                    job.job_id, _NOW
-                )
+                still_running = SqlAlchemyJobQueue(s).request_cancel(job.job_id, _NOW)
             self.assertEqual(still_running.status, "running")
             # The worker learns of the request from its next heartbeat...
             with db.session_scope() as s:
@@ -892,9 +860,7 @@ class CancellationTests(unittest.TestCase):
                 still = SqlAlchemyJobQueue(s).request_cancel(job.job_id, _NOW)
             self.assertEqual(still.status, "claimed")  # cooperative stamp only
             with db.session_scope() as s:
-                reaped = SqlAlchemyJobQueue(s).reap_expired(
-                    _NOW + timedelta(minutes=5)
-                )
+                reaped = SqlAlchemyJobQueue(s).reap_expired(_NOW + timedelta(minutes=5))
             self.assertEqual([j.status for j in reaped], ["cancelled"])
             with db.session_scope() as s:
                 got = SqlAlchemyJobQueue(s).get(job.job_id)
@@ -965,9 +931,7 @@ class CancellationTests(unittest.TestCase):
             self.assertIsNotNone(lease)
             self.assertEqual(lease.job.job_id, str(dead_id))
             with db.session_scope() as s:
-                cancel = SqlAlchemyJobQueue(s).heartbeat(
-                    str(dead_id), lease.lease_token, 60, _NOW
-                )
+                cancel = SqlAlchemyJobQueue(s).heartbeat(str(dead_id), lease.lease_token, 60, _NOW)
         self.assertFalse(cancel)  # the cancel signal was cleared on requeue
 
 

@@ -147,9 +147,11 @@ class CliEndToEndTests(unittest.TestCase):
 
         env = {"CTFGEN_CONFIG": str(self.config_path), "CTFGEN_API_URL": _BASE_URL}
         # Patch BOTH build sites: platform's (auth) and the resource commands'.
-        with mock.patch.object(platform, "build_http_client", _fake_build), \
-                mock.patch.object(_common, "build_http_client", _fake_build), \
-                mock.patch.dict(os.environ, env):
+        with (
+            mock.patch.object(platform, "build_http_client", _fake_build),
+            mock.patch.object(_common, "build_http_client", _fake_build),
+            mock.patch.dict(os.environ, env),
+        ):
             yield
 
     def _cli(self, argv: list[str]) -> tuple[int, str]:
@@ -169,10 +171,19 @@ class CliEndToEndTests(unittest.TestCase):
                 # -- operator (admin) --------------------------------------
                 self.assertEqual(self._login(_ADMIN_EMAIL, _ADMIN_PW), 0)
 
-                code, _ = self._cli([
-                    "competition", "create", _CID, "--name", "Spring CTF 2026",
-                    "--start-time", _START, "--end-time", _END,
-                ])
+                code, _ = self._cli(
+                    [
+                        "competition",
+                        "create",
+                        _CID,
+                        "--name",
+                        "Spring CTF 2026",
+                        "--start-time",
+                        _START,
+                        "--end-time",
+                        _END,
+                    ]
+                )
                 self.assertEqual(code, 0)
                 # Persisted effect visible in the next read.
                 code, out = self._cli(["competition", "list"])
@@ -188,32 +199,56 @@ class CliEndToEndTests(unittest.TestCase):
                 self.assertIn(_TEAM, out)
 
                 self.assertEqual(
-                    self._cli([
-                        "challenge-def", "create", "--family", "web",
-                        "--slug", _SLUG, "--title", "SQLi One",
-                    ])[0],
+                    self._cli(
+                        [
+                            "challenge-def",
+                            "create",
+                            "--family",
+                            "web",
+                            "--slug",
+                            _SLUG,
+                            "--title",
+                            "SQLi One",
+                        ]
+                    )[0],
                     0,
                 )
                 self.assertEqual(
-                    self._cli([
-                        "challenge-version", "create", "--definition-slug", _SLUG,
-                        "--seed", "seed-1", "--family-version", "1.0.0", "--spec", _SPEC,
-                    ])[0],
+                    self._cli(
+                        [
+                            "challenge-version",
+                            "create",
+                            "--definition-slug",
+                            _SLUG,
+                            "--seed",
+                            "seed-1",
+                            "--family-version",
+                            "1.0.0",
+                            "--spec",
+                            _SPEC,
+                        ]
+                    )[0],
                     0,
                 )
-                self.assertEqual(
-                    self._cli(["challenge-version", "publish", _SLUG, "1"])[0], 0
-                )
+                self.assertEqual(self._cli(["challenge-version", "publish", _SLUG, "1"])[0], 0)
                 # The published version is visible with state != draft.
                 code, out = self._cli(["challenge-version", "list", "--definition-slug", _SLUG])
                 self.assertEqual(code, 0)
                 self.assertIn(_SLUG, out)
 
                 self.assertEqual(
-                    self._cli([
-                        "publication", "attach", "--competition-id", _CID,
-                        "--definition-slug", _SLUG, "--version-no", "1",
-                    ])[0],
+                    self._cli(
+                        [
+                            "publication",
+                            "attach",
+                            "--competition-id",
+                            _CID,
+                            "--definition-slug",
+                            _SLUG,
+                            "--version-no",
+                            "1",
+                        ]
+                    )[0],
                     0,
                 )
                 code, out = self._cli(["publication", "list", "--competition-id", _CID])
@@ -222,10 +257,18 @@ class CliEndToEndTests(unittest.TestCase):
 
                 # Register the contestant profile through the CLI.
                 self.assertEqual(
-                    self._cli([
-                        "user", "create", "--email", _PLAYER_EMAIL,
-                        "--display-name", "Red One", "--role", "player",
-                    ])[0],
+                    self._cli(
+                        [
+                            "user",
+                            "create",
+                            "--email",
+                            _PLAYER_EMAIL,
+                            "--display-name",
+                            "Red One",
+                            "--role",
+                            "player",
+                        ]
+                    )[0],
                     0,
                 )
 
@@ -255,10 +298,22 @@ class CliEndToEndTests(unittest.TestCase):
                 self.assertIn(_PLAYER_EMAIL, out)
 
                 # Submit the correct flag as the contestant.
-                code, out = self._cli([
-                    "submission", "submit", "--competition-id", _CID, "--team", _TEAM,
-                    "--definition-slug", _SLUG, "--version-no", "1", "--answer", _FLAG,
-                ])
+                code, out = self._cli(
+                    [
+                        "submission",
+                        "submit",
+                        "--competition-id",
+                        _CID,
+                        "--team",
+                        _TEAM,
+                        "--definition-slug",
+                        _SLUG,
+                        "--version-no",
+                        "1",
+                        "--answer",
+                        _FLAG,
+                    ]
+                )
                 self.assertEqual(code, 0)
                 # The candidate flag is inbound only -- it must not be echoed back.
                 self.assertNotIn(_FLAG, out)

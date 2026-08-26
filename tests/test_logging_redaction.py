@@ -200,6 +200,7 @@ class NeverRaisesTests(unittest.TestCase):
     def test_filter_never_raises_on_pathological_records(self) -> None:
         buf = io.StringIO()
         log = _sink_logger(buf, "ctfgen.test.weird")
+
         # bytes message, None / non-str / container extras, a bad-__str__ object.
         class _Bad:
             def __str__(self) -> str:  # noqa: D401

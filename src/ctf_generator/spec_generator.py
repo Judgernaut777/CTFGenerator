@@ -67,9 +67,7 @@ FAMILIES = _FamilyNames()
 class SpecBackend(Protocol):
     """Produces a structured ``ChallengeSpec`` before any code is rendered."""
 
-    def generate(
-        self, family: str, difficulty: str, seed: str, title: str
-    ) -> ChallengeSpec: ...
+    def generate(self, family: str, difficulty: str, seed: str, title: str) -> ChallengeSpec: ...
 
 
 # --- Deterministic backend (default, offline, no dependencies) ----------------
@@ -148,9 +146,7 @@ def default_spec_for_family(seed: str, title: str, difficulty: str, family: str)
 
 
 class DeterministicSpecBackend:
-    def generate(
-        self, family: str, difficulty: str, seed: str, title: str
-    ) -> ChallengeSpec:
+    def generate(self, family: str, difficulty: str, seed: str, title: str) -> ChallengeSpec:
         return default_spec(seed=seed, title=title, difficulty=difficulty, family=family)
 
 
@@ -280,15 +276,11 @@ class AnthropicSpecBackend:
     logic can be unit-tested without network access or credentials.
     """
 
-    def __init__(
-        self, model: str = ANTHROPIC_DEFAULT_MODEL, client: object | None = None
-    ) -> None:
+    def __init__(self, model: str = ANTHROPIC_DEFAULT_MODEL, client: object | None = None) -> None:
         self._model = model
         self._client = client
 
-    def generate(
-        self, family: str, difficulty: str, seed: str, title: str
-    ) -> ChallengeSpec:
+    def generate(self, family: str, difficulty: str, seed: str, title: str) -> ChallengeSpec:
         client = self._client or _make_anthropic_client()
         system, user = build_prompt(family, difficulty)
         response = client.messages.create(
@@ -312,15 +304,11 @@ class OpenAISpecBackend:
     injectable so the prompt/parse logic is unit-tested without network access.
     """
 
-    def __init__(
-        self, model: str = OPENAI_DEFAULT_MODEL, client: object | None = None
-    ) -> None:
+    def __init__(self, model: str = OPENAI_DEFAULT_MODEL, client: object | None = None) -> None:
         self._model = model
         self._client = client
 
-    def generate(
-        self, family: str, difficulty: str, seed: str, title: str
-    ) -> ChallengeSpec:
+    def generate(self, family: str, difficulty: str, seed: str, title: str) -> ChallengeSpec:
         client = self._client or _make_openai_client()
         system, user = build_prompt(family, difficulty)
         response = client.chat.completions.create(
@@ -384,9 +372,7 @@ def validate_spec(spec: ChallengeSpec) -> list[str]:
     # Only check mode-against-family once the family itself is known; an
     # unknown family is already flagged above and has no ``modes`` to check.
     if family_known and spec.mode not in families.get(spec.family).modes:
-        errors.append(
-            f"mode {spec.mode!r} is not valid for family {spec.family!r}"
-        )
+        errors.append(f"mode {spec.mode!r} is not valid for family {spec.family!r}")
     return errors
 
 
@@ -474,7 +460,9 @@ def spec_from_dict(data: dict) -> ChallengeSpec:
 
 def write_spec(path: Path, spec: ChallengeSpec) -> Path:
     path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(json.dumps(spec_to_dict(spec), indent=2, sort_keys=True) + "\n", encoding="utf-8")
+    path.write_text(
+        json.dumps(spec_to_dict(spec), indent=2, sort_keys=True) + "\n", encoding="utf-8"
+    )
     return path
 
 

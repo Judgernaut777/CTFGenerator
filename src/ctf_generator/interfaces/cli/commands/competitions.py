@@ -94,9 +94,7 @@ def _update(args: argparse.Namespace) -> int:
 
 def _scoreboard(args: argparse.Namespace) -> int:
     with open_client(args) as client:
-        rows = client.list(
-            f"/competitions/{args.competition_id}/scoreboard", limit=args.limit
-        )
+        rows = client.list(f"/competitions/{args.competition_id}/scoreboard", limit=args.limit)
     output.print_rows(rows, _SCOREBOARD_COLUMNS, as_json=args.json)
     return 0
 

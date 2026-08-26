@@ -18,10 +18,26 @@ _SRC = Path(__file__).resolve().parent.parent / "src" / "ctf_generator"
 # Third-party / stdlib modules that imply framework, network, or process I/O.
 # The domain layer must not touch any of these.
 _FORBIDDEN_TOP_LEVEL = {
-    "http", "socket", "subprocess", "urllib", "asyncio", "selectors",
-    "fastapi", "starlette", "uvicorn", "flask", "werkzeug", "requests",
-    "sqlalchemy", "alembic", "psycopg", "psycopg2",
-    "anthropic", "openai", "mcp", "docker",
+    "http",
+    "socket",
+    "subprocess",
+    "urllib",
+    "asyncio",
+    "selectors",
+    "fastapi",
+    "starlette",
+    "uvicorn",
+    "flask",
+    "werkzeug",
+    "requests",
+    "sqlalchemy",
+    "alembic",
+    "psycopg",
+    "psycopg2",
+    "anthropic",
+    "openai",
+    "mcp",
+    "docker",
 }
 
 # Effectful / infrastructure / interface modules inside the package that the
@@ -102,7 +118,8 @@ class DomainBoundaryTests(unittest.TestCase):
                 top = name.split(".")[0]
                 with self.subTest(module=_module_dotted_name(path), imports=name):
                     self.assertNotIn(
-                        top, _FORBIDDEN_TOP_LEVEL,
+                        top,
+                        _FORBIDDEN_TOP_LEVEL,
                         f"{path.name} imports framework/IO module {name!r}",
                     )
                     for forbidden in _FORBIDDEN_INTERNAL:

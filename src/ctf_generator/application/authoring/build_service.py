@@ -42,9 +42,7 @@ class BuildService:
 
     # -- reads ---------------------------------------------------------------
 
-    def list_for_version(
-        self, definition_slug: str, version_no: int
-    ) -> list[ChallengeBuild]:
+    def list_for_version(self, definition_slug: str, version_no: int) -> list[ChallengeBuild]:
         with self._database.session_scope() as session:
             return SqlAlchemyChallengeBuildRepository(session).list_for_version(
                 definition_slug, version_no
@@ -65,19 +63,13 @@ class BuildService:
         already enqueued the job (idempotent collapse). The build itself runs on a
         worker, never here."""
         with self._database.session_scope() as session:
-            version = SqlAlchemyChallengeVersionRepository(session).get(
-                definition_slug, version_no
-            )
+            version = SqlAlchemyChallengeVersionRepository(session).get(definition_slug, version_no)
         if version is None:
-            raise LookupError(
-                f"challenge version not found: {definition_slug!r} v{version_no}"
-            )
+            raise LookupError(f"challenge version not found: {definition_slug!r} v{version_no}")
         job = Job(
             job_id=str(uuid.uuid4()),
             job_type=_BUILD_JOB_TYPE,
-            idempotency_key=(
-                f"build:{definition_slug}:v{version_no}:{version.spec_sha256}"
-            ),
+            idempotency_key=(f"build:{definition_slug}:v{version_no}:{version.spec_sha256}"),
             available_at=now,
             required_capabilities=(_BUILD_JOB_TYPE,),
             # References + a content hash only -- never the seed or a secret.

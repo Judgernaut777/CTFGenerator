@@ -44,9 +44,7 @@ def spec_content_hash(spec: Mapping[str, object]) -> str:
     """Deterministic sha256 over the canonical JSON of a spec mapping. This is
     the authoritative content identity for a version (the store's
     ``(definition, spec_sha256)`` UNIQUE dedups byte-equivalent regenerations)."""
-    canonical = json.dumps(
-        spec, sort_keys=True, separators=(",", ":"), default=str
-    )
+    canonical = json.dumps(spec, sort_keys=True, separators=(",", ":"), default=str)
     return hashlib.sha256(canonical.encode("utf-8")).hexdigest()
 
 
@@ -89,9 +87,7 @@ class ChallengeDefinitionService:
                 else repo.get(definition.slug)
             )
             if current is None:
-                raise LookupError(
-                    f"challenge definition not found: {definition.slug!r}"
-                )
+                raise LookupError(f"challenge definition not found: {definition.slug!r}")
             if guard is not None:
                 guard(current)
             repo.update(definition)
@@ -154,15 +150,13 @@ class ChallengeVersionService:
 
     def get(self, definition_slug: str, version_no: int) -> ChallengeVersion | None:
         with self._database.session_scope() as session:
-            return SqlAlchemyChallengeVersionRepository(session).get(
-                definition_slug, version_no
-            )
+            return SqlAlchemyChallengeVersionRepository(session).get(definition_slug, version_no)
 
     def list_for_definition(self, definition_slug: str) -> list[ChallengeVersion]:
         with self._database.session_scope() as session:
-            return SqlAlchemyChallengeVersionRepository(
-                session
-            ).list_for_definition(definition_slug)
+            return SqlAlchemyChallengeVersionRepository(session).list_for_definition(
+                definition_slug
+            )
 
     def publish(
         self,
@@ -180,9 +174,7 @@ class ChallengeVersionService:
             repo = SqlAlchemyChallengeVersionRepository(session)
             current = repo.get(definition_slug, version_no)
             if current is None:
-                raise LookupError(
-                    f"challenge version not found: {definition_slug!r} v{version_no}"
-                )
+                raise LookupError(f"challenge version not found: {definition_slug!r} v{version_no}")
             if guard is not None:
                 guard(current)
             repo.publish(definition_slug, version_no, now)

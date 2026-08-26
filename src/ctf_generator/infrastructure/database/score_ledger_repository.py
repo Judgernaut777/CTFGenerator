@@ -81,22 +81,16 @@ class SqlAlchemyScoreLedger:
         try:
             parsed_ts = datetime.fromisoformat(event.ts)
         except (ValueError, TypeError) as exc:
-            raise ValueError(
-                "ScoreEvent.ts must be an ISO-8601 timestamp"
-            ) from exc
+            raise ValueError("ScoreEvent.ts must be an ISO-8601 timestamp") from exc
         if parsed_ts.tzinfo is None:
             raise ValueError(
                 "ScoreEvent.ts must carry a timezone offset (got a naive "
                 "instant); the fold requires an unambiguous UTC instant"
             )
         if competition_uuid is None:
-            competition_uuid = _resolve.competition_uuid(
-                self._session, event.competition_id
-            )
+            competition_uuid = _resolve.competition_uuid(self._session, event.competition_id)
         if team_uuid is None:
-            team_uuid = _resolve.team_uuid(
-                self._session, competition_uuid, event.team_name
-            )
+            team_uuid = _resolve.team_uuid(self._session, competition_uuid, event.team_name)
         if version_uuid is None:
             version_uuid = _resolve.version_uuid(
                 self._session, event.definition_slug, event.version_no
@@ -132,8 +126,6 @@ class SqlAlchemyScoreLedger:
 
     def list_for_competition(self, competition_id: str) -> list[ScoreEvent]:
         rows = self._session.execute(
-            _hydrate_query()
-            .where(Competition.slug == competition_id)
-            .order_by(ScoreEventRow.seq)
+            _hydrate_query().where(Competition.slug == competition_id).order_by(ScoreEventRow.seq)
         ).all()
         return [self._map(row) for row in rows]

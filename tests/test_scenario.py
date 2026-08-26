@@ -57,7 +57,13 @@ class SimEventBusTests(unittest.TestCase):
         event = SimEvent(tick=2, source="attacker", kind="steal", target="api", payload={"a": "b"})
         self.assertEqual(
             event.to_mapping(),
-            {"tick": 2, "source": "attacker", "kind": "steal", "target": "api", "payload": {"a": "b"}},
+            {
+                "tick": 2,
+                "source": "attacker",
+                "kind": "steal",
+                "target": "api",
+                "payload": {"a": "b"},
+            },
         )
 
 
@@ -99,18 +105,12 @@ class ConditionDslTests(unittest.TestCase):
 
     def test_state_equality(self) -> None:
         self.state.flags["cred:api-token"] = "stolen"
-        self.assertTrue(
-            evaluate_condition("state:cred:api-token=stolen", 0, [], self.state)
-        )
-        self.assertFalse(
-            evaluate_condition("state:cred:api-token=rotated", 0, [], self.state)
-        )
+        self.assertTrue(evaluate_condition("state:cred:api-token=stolen", 0, [], self.state))
+        self.assertFalse(evaluate_condition("state:cred:api-token=rotated", 0, [], self.state))
 
     def test_state_inequality(self) -> None:
         self.state.flags["cred:api-token"] = "rotated"
-        self.assertTrue(
-            evaluate_condition("state:cred:api-token!=stolen", 0, [], self.state)
-        )
+        self.assertTrue(evaluate_condition("state:cred:api-token!=stolen", 0, [], self.state))
 
     def test_count(self) -> None:
         events = [
@@ -142,7 +142,9 @@ class NullEnvironmentControllerTests(unittest.TestCase):
         self.assertEqual(event.source, "environment")
         self.assertEqual(event.kind, "rotate_credential")
         self.assertEqual(event.target, "api-token")
-        self.assertEqual(controller.recorded, [("rotate_credential", "api-token", {"reason": "theft"})])
+        self.assertEqual(
+            controller.recorded, [("rotate_credential", "api-token", {"reason": "theft"})]
+        )
 
     def test_all_four_actions(self) -> None:
         controller = NullEnvironmentController()
@@ -259,7 +261,14 @@ class RunScenarioIntegrationTests(unittest.TestCase):
     def test_defender_rotated_the_credential(self) -> None:
         report, environment = _build_scripted_run()
         self.assertEqual(
-            environment.recorded, [("rotate_credential", "api-token", {"target": "api-token", "trigger_id": "detect-theft"})]
+            environment.recorded,
+            [
+                (
+                    "rotate_credential",
+                    "api-token",
+                    {"target": "api-token", "trigger_id": "detect-theft"},
+                )
+            ],
         )
 
     def test_attacker_final_move_blocked(self) -> None:

@@ -77,9 +77,7 @@ class SqlAlchemyJobQueue:
 
     # -- helpers -------------------------------------------------------------
 
-    def _audit_refs(
-        self, row: JobRow
-    ) -> tuple[str | None, str | None, int | None]:
+    def _audit_refs(self, row: JobRow) -> tuple[str | None, str | None, int | None]:
         """Business keys for the optional audit linkage (two point lookups --
         claim/reap lock only the jobs row, so no join under FOR UPDATE)."""
         competition_slug: str | None = None
@@ -115,13 +113,9 @@ class SqlAlchemyJobQueue:
         after the caller's locking SELECT has already fetched ``rows`` --
         claim/reap lock only the jobs row via FOR UPDATE, so no JOIN may be
         folded into that locking SELECT itself."""
-        competition_ids = {
-            row.competition_id for row in rows if row.competition_id is not None
-        }
+        competition_ids = {row.competition_id for row in rows if row.competition_id is not None}
         version_ids = {
-            row.challenge_version_id
-            for row in rows
-            if row.challenge_version_id is not None
+            row.challenge_version_id for row in rows if row.challenge_version_id is not None
         }
         competition_slugs: dict[uuid.UUID, str] = {}
         if competition_ids:
@@ -160,9 +154,7 @@ class SqlAlchemyJobQueue:
         result: list[Job] = []
         for row in rows:
             competition_slug = (
-                competition_slugs[row.competition_id]
-                if row.competition_id is not None
-                else None
+                competition_slugs[row.competition_id] if row.competition_id is not None else None
             )
             if row.challenge_version_id is not None:
                 definition_slug, version_no = version_refs[row.challenge_version_id]
@@ -290,9 +282,7 @@ class SqlAlchemyJobQueue:
             )
         else:
             row.status = "queued"
-            row.available_at = to_utc(now) + timedelta(
-                seconds=self._backoff_seconds(row)
-            )
+            row.available_at = to_utc(now) + timedelta(seconds=self._backoff_seconds(row))
             row.error_class = error_class
             row.error_detail = error_detail
             self._clear_lease(row)
@@ -318,9 +308,7 @@ class SqlAlchemyJobQueue:
         gate, not the enqueue instant, so a future-dated ``available_at`` no
         longer back-dates the audit trail. ``now`` defaults to ``available_at``
         for backward compatibility."""
-        competition_uuid = _resolve.competition_uuid_optional(
-            self._session, job.competition_id
-        )
+        competition_uuid = _resolve.competition_uuid_optional(self._session, job.competition_id)
         version_uuid = _resolve.version_uuid_optional(
             self._session, job.definition_slug, job.version_no
         )
@@ -329,18 +317,14 @@ class SqlAlchemyJobQueue:
         self._session.flush()
         self._record(row, None, "queued", now if now is not None else job.available_at)
         self._session.flush()
-        return job_from_orm(
-            row, job.competition_id, job.definition_slug, job.version_no
-        )
+        return job_from_orm(row, job.competition_id, job.definition_slug, job.version_no)
 
     def get(self, job_id: str) -> Job | None:
         try:
             key = _as_uuid(job_id)
         except (ValueError, AttributeError, TypeError):
             return None  # malformed id is a clean miss
-        row = self._session.scalars(
-            select(JobRow).where(JobRow.id == key)
-        ).one_or_none()
+        row = self._session.scalars(select(JobRow).where(JobRow.id == key)).one_or_none()
         return self._to_domain(row) if row is not None else None
 
     def get_by_idempotency_key(self, key: str) -> Job | None:
@@ -401,17 +385,13 @@ class SqlAlchemyJobQueue:
     def start(self, job_id: str, lease_token: str, now: datetime) -> None:
         row = self._fenced_row(job_id, lease_token)
         if row.status != "claimed":
-            raise LookupError(
-                f"job {job_id!r} is {row.status!r}, not claimed; cannot start"
-            )
+            raise LookupError(f"job {job_id!r} is {row.status!r}, not claimed; cannot start")
         row.status = "running"
         row.started_at = to_utc(now)
         self._record(row, "claimed", "running", now, worker_id=row.claimed_by)
         self._session.flush()
 
-    def heartbeat(
-        self, job_id: str, lease_token: str, lease_seconds: int, now: datetime
-    ) -> bool:
+    def heartbeat(self, job_id: str, lease_token: str, lease_seconds: int, now: datetime) -> bool:
         row = self._fenced_row(job_id, lease_token)
         row.lease_expires_at = to_utc(now) + timedelta(seconds=lease_seconds)
         row.heartbeat_at = to_utc(now)
@@ -429,9 +409,7 @@ class SqlAlchemyJobQueue:
     ) -> None:
         row = self._fenced_row(job_id, lease_token)
         if row.status != "running":
-            raise LookupError(
-                f"job {job_id!r} is {row.status!r}, not running; cannot complete"
-            )
+            raise LookupError(f"job {job_id!r} is {row.status!r}, not running; cannot complete")
         worker_id = row.claimed_by
         row.status = "succeeded"
         row.finished_at = to_utc(now)
@@ -453,8 +431,7 @@ class SqlAlchemyJobQueue:
     ) -> Job:
         if error_class not in VALID_JOB_ERROR_CLASSES:
             raise ValueError(
-                f"error_class must be one of {sorted(VALID_JOB_ERROR_CLASSES)}, "
-                f"got {error_class!r}"
+                f"error_class must be one of {sorted(VALID_JOB_ERROR_CLASSES)}, got {error_class!r}"
             )
         row = self._fenced_row(job_id, lease_token)
         worker_id = row.claimed_by
@@ -466,8 +443,7 @@ class SqlAlchemyJobQueue:
             # are accepted (matching the domain transition matrix).
             if row.status not in ("claimed", "running"):
                 raise LookupError(
-                    f"job {job_id!r} is {row.status!r}, not claimed/running; "
-                    "cannot cancel"
+                    f"job {job_id!r} is {row.status!r}, not claimed/running; cannot cancel"
                 )
             from_status = row.status
             row.status = "cancelled"
@@ -487,9 +463,7 @@ class SqlAlchemyJobQueue:
             self._session.flush()
             return self._to_domain(row)
         if row.status != "running":
-            raise LookupError(
-                f"job {job_id!r} is {row.status!r}, not running; cannot fail"
-            )
+            raise LookupError(f"job {job_id!r} is {row.status!r}, not running; cannot fail")
         if not retryable:
             row.status = "failed"
             row.finished_at = to_utc(now)
@@ -522,9 +496,7 @@ class SqlAlchemyJobQueue:
             # value and transitions to cancelled itself.
             row.cancel_requested_at = to_utc(now)
         else:
-            raise LookupError(
-                f"job {job_id!r} is {row.status!r}; cannot cancel a terminal job"
-            )
+            raise LookupError(f"job {job_id!r} is {row.status!r}; cannot cancel a terminal job")
         self._session.flush()
         return self._to_domain(row)
 
@@ -546,18 +518,14 @@ class SqlAlchemyJobQueue:
 
     def list_dead_letter(self) -> list[Job]:
         rows = self._session.scalars(
-            select(JobRow)
-            .where(JobRow.status == "dead_letter")
-            .order_by(JobRow.finished_at.asc())
+            select(JobRow).where(JobRow.status == "dead_letter").order_by(JobRow.finished_at.asc())
         ).all()
         return self._to_domain_many(rows)
 
     def retry_dead_letter(self, job_id: str, now: datetime) -> Job:
         row = self._locked_row(job_id)
         if row.status != "dead_letter":
-            raise LookupError(
-                f"job {job_id!r} is {row.status!r}, not dead_letter; cannot retry"
-            )
+            raise LookupError(f"job {job_id!r} is {row.status!r}, not dead_letter; cannot retry")
         row.status = "queued"
         row.attempt_count = 0  # the operator requeue resets the attempt budget
         row.available_at = to_utc(now)

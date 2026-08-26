@@ -54,9 +54,7 @@ def attach_publication(
     request: Request,
     competition_id: str,
     body: PublicationCreateRequest,
-    principal: Principal = Depends(
-        require_competition_permission(Permission.PUBLICATION_WRITE)
-    ),
+    principal: Principal = Depends(require_competition_permission(Permission.PUBLICATION_WRITE)),
     service=Depends(get_publication_service),
 ):
     body_json = body.model_dump(mode="json")
@@ -66,9 +64,7 @@ def attach_publication(
         return replayed
 
     publication = service.attach(body.to_domain(competition_id))
-    envelope = resource_envelope(
-        PUBLICATION_SCHEMA, publication_to_response(publication)
-    )
+    envelope = resource_envelope(PUBLICATION_SCHEMA, publication_to_response(publication))
     etag = compute_etag(publication_concurrency_payload(publication))
     record_audit(
         request,
@@ -76,9 +72,7 @@ def attach_publication(
         action="publication.attach",
         target=f"{competition_id}/{body.definition_slug}/v{body.version_no}",
     )
-    remember(
-        request, scope, body_json, status_code=201, envelope=envelope, etag=etag
-    )
+    remember(request, scope, body_json, status_code=201, envelope=envelope, etag=etag)
     return respond(201, envelope, etag=etag)
 
 
@@ -91,18 +85,16 @@ def list_publications(
     competition_id: str,
     limit: int | None = Query(default=None, ge=1),
     cursor: str | None = Query(default=None),
-    principal: Principal = Depends(
-        require_competition_permission(Permission.PUBLICATION_READ)
-    ),
+    principal: Principal = Depends(require_competition_permission(Permission.PUBLICATION_READ)),
     service=Depends(get_publication_service),
 ):
-    publications = sorted(
-        service.list_for_competition(competition_id), key=_sort_key
-    )
+    publications = sorted(service.list_for_competition(competition_id), key=_sort_key)
     page = paginate(publications, key=_sort_key, limit=limit, cursor=cursor)
     items = [publication_to_response(p) for p in page.items]
     envelope = list_envelope(
-        PUBLICATION_LIST_SCHEMA, items, limit=clamp_limit(limit),
+        PUBLICATION_LIST_SCHEMA,
+        items,
+        limit=clamp_limit(limit),
         next_cursor=page.next_cursor,
     )
     return respond(200, envelope)
@@ -119,9 +111,7 @@ def detach_publication(
     competition_id: str,
     definition_slug: str,
     version_no: int,
-    principal: Principal = Depends(
-        require_competition_permission(Permission.PUBLICATION_WRITE)
-    ),
+    principal: Principal = Depends(require_competition_permission(Permission.PUBLICATION_WRITE)),
     service=Depends(get_publication_service),
 ):
     service.detach(competition_id, definition_slug, version_no)

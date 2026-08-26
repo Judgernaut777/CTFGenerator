@@ -125,12 +125,8 @@ class WorkerJobService:
             )
         if check_liveness:
             last = auth.worker.last_heartbeat_at
-            if last is None or (now - last) > timedelta(
-                seconds=self._heartbeat_max_age
-            ):
-                raise WorkerStaleError(
-                    f"worker {auth.worker.name!r} liveness heartbeat is stale"
-                )
+            if last is None or (now - last) > timedelta(seconds=self._heartbeat_max_age):
+                raise WorkerStaleError(f"worker {auth.worker.name!r} liveness heartbeat is stale")
         return auth
 
     # -- liveness --------------------------------------------------------------
@@ -147,9 +143,7 @@ class WorkerJobService:
 
     # -- queue verbs -----------------------------------------------------------
 
-    def claim(
-        self, token: str, lease_seconds: int, now: datetime
-    ) -> JobLease | None:
+    def claim(self, token: str, lease_seconds: int, now: datetime) -> JobLease | None:
         """Claim the best job this worker may execute. ``worker_id`` and the
         capability set are derived from the credential -- never request-supplied
         -- so a worker cannot spoof another identity nor exceed its
@@ -163,9 +157,7 @@ class WorkerJobService:
                 auth.worker.name, capabilities, lease_seconds, now
             )
 
-    def start(
-        self, token: str, job_id: str, lease_token: str, now: datetime
-    ) -> None:
+    def start(self, token: str, job_id: str, lease_token: str, now: datetime) -> None:
         """``claimed`` -> ``running``. Permitted while draining (finish leases);
         fenced by ``lease_token`` in the queue. NOT liveness-gated: a worker that
         holds the lease is reporting real progress on work it owns, so it must be
@@ -190,9 +182,7 @@ class WorkerJobService:
             token, now, scope="jobs:heartbeat", forbid_drain=False, check_liveness=False
         )
         with self._database.session_scope() as session:
-            return self._queue_factory(session).heartbeat(
-                job_id, lease_token, lease_seconds, now
-            )
+            return self._queue_factory(session).heartbeat(job_id, lease_token, lease_seconds, now)
 
     def complete(
         self,
@@ -244,9 +234,7 @@ class WorkerJobService:
         completion = parse_build_completion(result_json)
         with self._database.session_scope() as session:
             queue = self._queue_factory(session)
-            queue.complete(
-                job_id, lease_token, result_json, result_ref, log_ref, now
-            )
+            queue.complete(job_id, lease_token, result_json, result_ref, log_ref, now)
             if completion is not None:
                 # Bind the side effects to the AUTHORITATIVE job, not the payload.
                 job = queue.get(job_id)
@@ -281,9 +269,7 @@ class WorkerJobService:
                         and job.definition_slug is not None
                         and job.version_no is not None
                     ):
-                        stack_repo = SqlAlchemyChallengeBuildStackImageRepository(
-                            session
-                        )
+                        stack_repo = SqlAlchemyChallengeBuildStackImageRepository(session)
                         for svc in completion.services:
                             stack_repo.add_service(
                                 job.definition_slug,
@@ -311,9 +297,7 @@ class WorkerJobService:
         """Report a failure (retry/dead-letter/cancel per the queue). Uses the
         completion scope; permitted while draining. NOT liveness-gated (a held
         lease reporting its real outcome is always accepted; see ``complete``)."""
-        self._authorize(
-            token, now, scope="jobs:complete", forbid_drain=False, check_liveness=False
-        )
+        self._authorize(token, now, scope="jobs:complete", forbid_drain=False, check_liveness=False)
         with self._database.session_scope() as session:
             return self._queue_factory(session).fail(
                 job_id, lease_token, error_class, error_detail, retryable, now

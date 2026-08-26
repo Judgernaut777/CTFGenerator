@@ -123,9 +123,7 @@ def _validate_against_family(
         report.warnings.append("private solver does not appear to expose CLI arguments")
 
 
-def _validate_generic(
-    spec_path: Path, spec_text: str | None, report: ValidationReport
-) -> None:
+def _validate_generic(spec_path: Path, spec_text: str | None, report: ValidationReport) -> None:
     """Minimal fallback check used when the family can't be resolved.
 
     Only asserts that ``challenge.yaml`` exists, is non-empty, and looks
@@ -176,8 +174,6 @@ def validate_challenge(challenge_path: Path) -> ValidationReport:
             try:
                 json.loads(timeline.read_text(encoding="utf-8"))
             except (OSError, UnicodeDecodeError, json.JSONDecodeError) as exc:
-                report.warnings.append(
-                    f"private/scenario_timeline.json is not valid JSON: {exc}"
-                )
+                report.warnings.append(f"private/scenario_timeline.json is not valid JSON: {exc}")
 
     return report

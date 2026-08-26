@@ -352,9 +352,7 @@ def _maybe_mount_web_app(
 
 
 _module_database = _database_from_env()
-_module_auth_service = (
-    AuthService(_module_database) if _module_database is not None else None
-)
+_module_auth_service = AuthService(_module_database) if _module_database is not None else None
 app = create_app(
     ApiSettings(
         rate_limit_enabled=os.environ.get("CTFGEN_API_RATE_LIMIT", "1") != "0",
@@ -363,8 +361,7 @@ app = create_app(
         # deployment that runs a separate worker-gateway listener sets
         # CTFGEN_API_MOUNT_WORKER_ROUTES=0 so /api/v1/worker/* is NOT on the public
         # human edge.
-        mount_worker_routes=os.environ.get("CTFGEN_API_MOUNT_WORKER_ROUTES", "1")
-        != "0",
+        mount_worker_routes=os.environ.get("CTFGEN_API_MOUNT_WORKER_ROUTES", "1") != "0",
     ),
     database=_module_database,
     auth_service=_module_auth_service,

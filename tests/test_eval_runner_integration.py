@@ -139,8 +139,10 @@ class SingleHostEvalRunnerTests(unittest.TestCase):
     def _run(self, db, *, adversarial: bool):
         gen = _RecordingGenerator()
         runner = SingleHostEvalJobRunner(db, generator=gen)
-        with mock.patch("ctf_generator.agent_eval.run_agent_eval") as plain, \
-                mock.patch("ctf_generator.agent_eval.run_adversarial_delta") as delta:
+        with (
+            mock.patch("ctf_generator.agent_eval.run_agent_eval") as plain,
+            mock.patch("ctf_generator.agent_eval.run_adversarial_delta") as delta,
+        ):
             plain.return_value = "PLAIN"
             delta.return_value = "DELTA"
             out = runner.run(
@@ -179,8 +181,11 @@ class SingleHostEvalRunnerTests(unittest.TestCase):
             runner = SingleHostEvalJobRunner(db, generator=gen)
             with self.assertRaises(ValueError):
                 runner.run(
-                    definition_slug=_SLUG, version_no=1, profile="writeup_replay",
-                    adversarial=False, now=_NOW,
+                    definition_slug=_SLUG,
+                    version_no=1,
+                    profile="writeup_replay",
+                    adversarial=False,
+                    now=_NOW,
                 )
             self.assertEqual(gen.calls, [])  # never rendered a draft
 
@@ -189,8 +194,11 @@ class SingleHostEvalRunnerTests(unittest.TestCase):
             runner = SingleHostEvalJobRunner(db, generator=_RecordingGenerator())
             with self.assertRaises(LookupError):
                 runner.run(
-                    definition_slug=_SLUG, version_no=99, profile="writeup_replay",
-                    adversarial=False, now=_NOW,
+                    definition_slug=_SLUG,
+                    version_no=99,
+                    profile="writeup_replay",
+                    adversarial=False,
+                    now=_NOW,
                 )
 
 

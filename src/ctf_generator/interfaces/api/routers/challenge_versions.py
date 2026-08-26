@@ -73,9 +73,7 @@ def create_version(
         cve_refs=tuple(body.cve_refs),
         cve_content_hash=body.cve_content_hash,
     )
-    envelope = resource_envelope(
-        CHALLENGE_VERSION_SCHEMA, version_to_response(version)
-    )
+    envelope = resource_envelope(CHALLENGE_VERSION_SCHEMA, version_to_response(version))
     etag = compute_etag(version_concurrency_payload(version))
     record_audit(
         request,
@@ -83,9 +81,7 @@ def create_version(
         action="challenge_version.create_draft",
         target=f"{version.definition_slug}/v{version.version_no}",
     )
-    remember(
-        request, scope, body_json, status_code=201, envelope=envelope, etag=etag
-    )
+    remember(request, scope, body_json, status_code=201, envelope=envelope, etag=etag)
     return respond(201, envelope, etag=etag)
 
 
@@ -95,17 +91,13 @@ def create_version(
     responses={k: ERROR_RESPONSES[k] for k in (400, 401, 403, 422, 429)},
 )
 def list_versions(
-    definition_slug: str = Query(
-        ..., min_length=1, description="Parent definition (required)"
-    ),
+    definition_slug: str = Query(..., min_length=1, description="Parent definition (required)"),
     limit: int | None = Query(default=None, ge=1),
     cursor: str | None = Query(default=None),
     principal: Principal = Depends(require_permission(Permission.CHALLENGE_READ)),
     service=Depends(get_challenge_version_service),
 ):
-    versions = sorted(
-        service.list_for_definition(definition_slug), key=lambda v: v.version_no
-    )
+    versions = sorted(service.list_for_definition(definition_slug), key=lambda v: v.version_no)
     page = paginate(versions, key=lambda v: v.version_no, limit=limit, cursor=cursor)
     items = [version_to_list_item(v) for v in page.items]
     envelope = list_envelope(
@@ -133,12 +125,8 @@ def get_version(
 ):
     version = service.get(definition_slug, version_no)
     if version is None:
-        raise LookupError(
-            f"challenge version not found: {definition_slug!r} v{version_no}"
-        )
-    envelope = resource_envelope(
-        CHALLENGE_VERSION_SCHEMA, version_to_response(version)
-    )
+        raise LookupError(f"challenge version not found: {definition_slug!r} v{version_no}")
+    envelope = resource_envelope(CHALLENGE_VERSION_SCHEMA, version_to_response(version))
     etag = compute_etag(version_concurrency_payload(version))
     return respond(200, envelope, etag=etag)
 
@@ -158,12 +146,8 @@ def publish_version(
     principal: Principal = Depends(require_permission(Permission.CHALLENGE_PUBLISH)),
     service=Depends(get_challenge_version_service),
 ):
-    version = service.publish(
-        definition_slug, version_no, datetime.now(UTC)
-    )
-    envelope = resource_envelope(
-        CHALLENGE_VERSION_SCHEMA, version_to_response(version)
-    )
+    version = service.publish(definition_slug, version_no, datetime.now(UTC))
+    envelope = resource_envelope(CHALLENGE_VERSION_SCHEMA, version_to_response(version))
     etag = compute_etag(version_concurrency_payload(version))
     record_audit(
         request,

@@ -60,9 +60,7 @@ class BootstrapRegistrationTests(unittest.TestCase):
         from ctf_generator.spec_generator import _FAMILY_BRIEF
 
         fam = get("web_business_logic_tenant_export")
-        self.assertEqual(
-            fam.llm_brief, _FAMILY_BRIEF["web_business_logic_tenant_export"]
-        )
+        self.assertEqual(fam.llm_brief, _FAMILY_BRIEF["web_business_logic_tenant_export"])
 
 
 class SnapshotWrapperTests(unittest.TestCase):

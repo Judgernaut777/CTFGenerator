@@ -116,9 +116,7 @@ class DeterminismTests(unittest.TestCase):
         spec = _spec(mode="red")
         without_cve = network.render(spec, random.Random("seed-x"))  # noqa: S311 -- seeded RNG for deterministic challenge generation; not for secrets
         with_cve = network.render(spec, random.Random("seed-x"), cve_record=_cve_record())  # noqa: S311 -- seeded RNG for deterministic challenge generation; not for secrets
-        self.assertNotEqual(
-            without_cve["public/description.md"], with_cve["public/description.md"]
-        )
+        self.assertNotEqual(without_cve["public/description.md"], with_cve["public/description.md"])
         self.assertIn("CVE-2099-00001", with_cve["public/description.md"])
 
 
@@ -180,9 +178,7 @@ class ModeDifferentiationTests(unittest.TestCase):
     def test_purple_description_differs_from_red(self) -> None:
         red = network.render(_spec(mode="red"), random.Random(_spec().seed))  # noqa: S311 -- seeded RNG for deterministic challenge generation; not for secrets
         purple = network.render(_spec(mode="purple"), random.Random(_spec().seed))  # noqa: S311 -- seeded RNG for deterministic challenge generation; not for secrets
-        self.assertNotEqual(
-            red["public/description.md"], purple["public/description.md"]
-        )
+        self.assertNotEqual(red["public/description.md"], purple["public/description.md"])
         self.assertIn("Blue-team deliverable", purple["public/description.md"])
         self.assertIn("detection-writeup-submitted", purple["public/description.md"])
         self.assertNotIn("detection-writeup-submitted", red["public/description.md"])
@@ -192,17 +188,11 @@ class ModeDifferentiationTests(unittest.TestCase):
         purple = network.render(_spec(mode="purple"), random.Random(_spec().seed))  # noqa: S311 -- seeded RNG for deterministic challenge generation; not for secrets
         # The private solution write-up is a genuinely different deliverable
         # in purple mode: it adds grading notes for the detection narrative.
-        self.assertNotEqual(
-            red["private/solution.md"], purple["private/solution.md"]
-        )
+        self.assertNotEqual(red["private/solution.md"], purple["private/solution.md"])
         self.assertIn("Blue-team deliverable (grading notes)", purple["private/solution.md"])
-        self.assertNotIn(
-            "Blue-team deliverable (grading notes)", red["private/solution.md"]
-        )
+        self.assertNotIn("Blue-team deliverable (grading notes)", red["private/solution.md"])
         # The detection notes deepen into concrete grading guidance in purple.
-        self.assertNotEqual(
-            red["private/detection_notes.md"], purple["private/detection_notes.md"]
-        )
+        self.assertNotEqual(red["private/detection_notes.md"], purple["private/detection_notes.md"])
         self.assertIn(
             "Grading this instance's `detection-writeup-submitted` checkpoint",
             purple["private/detection_notes.md"],
@@ -242,9 +232,9 @@ class ModeDifferentiationTests(unittest.TestCase):
         # Red mode ends on the class-independent teaching paragraph (no purple
         # deliverable appended). This tail is stable across all vuln classes.
         self.assertTrue(
-            files["private/solution.md"].rstrip("\n").endswith(
-                "pivot through the edge host is the constant."
-            )
+            files["private/solution.md"]
+            .rstrip("\n")
+            .endswith("pivot through the edge host is the constant.")
         )
 
 
@@ -324,9 +314,9 @@ class PerInstanceVulnClassTests(unittest.TestCase):
             seed = self._seed_for_class(vuln_class)
             solver = self._render_for_seed(seed)["private/solver.py"]
             with self.subTest(vuln_class=vuln_class):
-                self.assertIn("auth_token", solver)          # disclosed token
-                self.assertIn("context=asset_tag", solver)   # forged relay-trust
-                self.assertIn("WEAK_TOKENS", solver)         # dictionary attack
+                self.assertIn("auth_token", solver)  # disclosed token
+                self.assertIn("context=asset_tag", solver)  # forged relay-trust
+                self.assertIn("WEAK_TOKENS", solver)  # dictionary attack
 
     def test_hints_and_solution_are_class_aware(self) -> None:
         disclosed = self._render_for_seed(self._seed_for_class("disclosed_token"))
@@ -334,9 +324,7 @@ class PerInstanceVulnClassTests(unittest.TestCase):
         self.assertIn("disclosed_token", disclosed["private/solution.md"])
         self.assertIn("relay_trust", trust["private/solution.md"])
         # The non-generalization argument is documented in every instance.
-        self.assertIn(
-            "does not generalize", disclosed["private/solution.md"]
-        )
+        self.assertIn("does not generalize", disclosed["private/solution.md"])
 
 
 if __name__ == "__main__":

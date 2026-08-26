@@ -83,9 +83,7 @@ def _safe_build_context(raw: object, service: str) -> str:
     absolute paths and any ``..`` escape."""
     context = raw.get("context") if isinstance(raw, dict) else raw
     if not isinstance(context, str) or not context.strip():
-        raise ComposeManifestError(
-            f"service {service!r} has no usable build context"
-        )
+        raise ComposeManifestError(f"service {service!r} has no usable build context")
     context = context.strip()
     # Strip a SINGLE leading "./" only (not every leading dot/slash -- that would
     # collapse "../../x" to "x" and defeat the escape check below).
@@ -105,18 +103,14 @@ def _topological_order(
     for name, spec in specs.items():
         for dep in spec.depends_on:
             if dep not in specs:
-                raise ComposeManifestError(
-                    f"service {name!r} depends_on unknown service {dep!r}"
-                )
+                raise ComposeManifestError(f"service {name!r} depends_on unknown service {dep!r}")
     # in-degree = number of a node's own dependencies still unplaced
     remaining = {name: set(spec.depends_on) for name, spec in specs.items()}
     order: list[ServiceSpec] = []
     while remaining:
         ready = sorted(n for n, deps in remaining.items() if not deps)
         if not ready:
-            raise ComposeManifestError(
-                f"depends_on cycle among services {sorted(remaining)}"
-            )
+            raise ComposeManifestError(f"depends_on cycle among services {sorted(remaining)}")
         for name in ready:
             order.append(specs[name])
             del remaining[name]
@@ -145,8 +139,7 @@ def parse_compose_manifest(compose_text: str | None) -> StackManifest | None:
         return None
     if len(services) > MAX_STACK_SERVICES:
         raise ComposeManifestError(
-            f"stack has {len(services)} services, over the {MAX_STACK_SERVICES} "
-            "ceiling"
+            f"stack has {len(services)} services, over the {MAX_STACK_SERVICES} ceiling"
         )
 
     specs: dict[str, ServiceSpec] = {}
@@ -158,8 +151,7 @@ def parse_compose_manifest(compose_text: str | None) -> StackManifest | None:
         # an `image:`-only service with no `build:` is refused for this MVP.
         if "build" not in body:
             raise ComposeManifestError(
-                f"service {service!r} has no build: (image-only services are not "
-                "supported yet)"
+                f"service {service!r} has no build: (image-only services are not supported yet)"
             )
         specs[service] = ServiceSpec(
             name=service,
@@ -178,8 +170,11 @@ def parse_compose_manifest(compose_text: str | None) -> StackManifest | None:
         first = min(specs, key=str)
         ordered = tuple(
             ServiceSpec(
-                name=s.name, build_context=s.build_context, expose=s.expose,
-                depends_on=s.depends_on, is_primary=(s.name == first),
+                name=s.name,
+                build_context=s.build_context,
+                expose=s.expose,
+                depends_on=s.depends_on,
+                is_primary=(s.name == first),
             )
             for s in ordered
         )

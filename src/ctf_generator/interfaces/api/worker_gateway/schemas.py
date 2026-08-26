@@ -237,15 +237,11 @@ class TransitionRequest(BaseModel):
         ``to_state`` never reaches the DB. The legal-GRAPH check (a valid state but
         an illegal move) is enforced by the application/domain layer -> 409."""
         if value not in VALID_INSTANCE_STATES:
-            raise ValueError(
-                f"to_state must be one of {sorted(VALID_INSTANCE_STATES)}"
-            )
+            raise ValueError(f"to_state must be one of {sorted(VALID_INSTANCE_STATES)}")
         return value
 
 
-def endpoint_from_request(
-    instance_id: str, body: EndpointReportRequest
-) -> InstanceEndpoint:
+def endpoint_from_request(instance_id: str, body: EndpointReportRequest) -> InstanceEndpoint:
     return InstanceEndpoint(
         instance_id=instance_id,
         name=body.name,

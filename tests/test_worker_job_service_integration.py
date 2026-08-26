@@ -272,9 +272,7 @@ class WorkerJobServiceRejectionTests(unittest.TestCase):
             with db.session_scope() as s:
                 SqlAlchemyWorkerRegistry(s).heartbeat("wa", _NOW - timedelta(hours=1))
             # A real failure outcome is accepted despite stale liveness.
-            job = svc.fail(
-                token, job_id, lease.lease_token, "transient", "boom", True, _NOW
-            )
+            job = svc.fail(token, job_id, lease.lease_token, "transient", "boom", True, _NOW)
             self.assertIsInstance(job, Job)
 
     def test_scope_enforced_before_queue(self) -> None:

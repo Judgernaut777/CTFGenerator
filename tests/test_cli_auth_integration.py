@@ -128,7 +128,8 @@ class CliAuthClientTests(unittest.TestCase):
             try:
                 # login (unauthenticated).
                 issued = ApiClient(http, self.store, _BASE_URL).request(
-                    "POST", "/auth/login",
+                    "POST",
+                    "/auth/login",
                     json={"email": _EMAIL, "password": _PASSWORD},
                     authed=False,
                 )
@@ -144,12 +145,8 @@ class CliAuthClientTests(unittest.TestCase):
                 # Persist the session and confirm 0600 + token not otherwise leaked.
                 from ctf_generator.interfaces.cli.config import Session
 
-                self.store.save(
-                    Session(api_url=_BASE_URL, token=token, subject=me["subject"])
-                )
-                self.assertEqual(
-                    stat.S_IMODE(self.store.path.stat().st_mode), 0o600
-                )
+                self.store.save(Session(api_url=_BASE_URL, token=token, subject=me["subject"]))
+                self.assertEqual(stat.S_IMODE(self.store.path.stat().st_mode), 0o600)
 
                 # whoami via the stored session.
                 who = ApiClient(http, self.store, _BASE_URL).request("GET", "/auth/me")
@@ -170,9 +167,9 @@ class CliAuthClientTests(unittest.TestCase):
             http = _http(app)
             try:
                 with self.assertRaises(AuthRequired):
-                    ApiClient(
-                        http, self.store, _BASE_URL, token_override="garbage-token"
-                    ).request("GET", "/auth/me")
+                    ApiClient(http, self.store, _BASE_URL, token_override="garbage-token").request(
+                        "GET", "/auth/me"
+                    )
             finally:
                 http.close()
 
@@ -184,7 +181,8 @@ class CliAuthClientTests(unittest.TestCase):
             try:
                 with self.assertRaises(ApiError) as cm:
                     ApiClient(http, self.store, _BASE_URL).request(
-                        "POST", "/auth/login",
+                        "POST",
+                        "/auth/login",
                         json={"email": _EMAIL, "password": "wrong"},
                         authed=False,
                     )
@@ -216,8 +214,10 @@ class CliAuthCommandTests(unittest.TestCase):
             "CTFGEN_API_URL": _BASE_URL,
             "CTFGEN_PASSWORD": _PASSWORD,
         }
-        with mock.patch.object(platform, "build_http_client", _fake_build), \
-                mock.patch.dict(os.environ, env):
+        with (
+            mock.patch.object(platform, "build_http_client", _fake_build),
+            mock.patch.dict(os.environ, env),
+        ):
             yield
 
     def test_login_command_stores_session_without_printing_token(self) -> None:

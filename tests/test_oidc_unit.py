@@ -76,9 +76,7 @@ class PkceHelperTests(unittest.TestCase):
 
     def test_hash_state_is_sha256_hex(self) -> None:
         state = "some-state"
-        self.assertEqual(
-            pkce.hash_state(state), hashlib.sha256(state.encode()).hexdigest()
-        )
+        self.assertEqual(pkce.hash_state(state), hashlib.sha256(state.encode()).hexdigest())
         self.assertEqual(len(pkce.hash_state(state)), 64)
 
 

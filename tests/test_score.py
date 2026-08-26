@@ -41,8 +41,8 @@ class IntegrityGateTests(unittest.TestCase):
             encoding="utf-8",
         )
         (out / "challenge.yaml").write_text(
-            "family: \"web_business_logic_tenant_export\"\n"
-            "mode: \"red\"\n"
+            'family: "web_business_logic_tenant_export"\n'
+            'mode: "red"\n'
             "ai_resistance:\n"
             "  require_live_interaction: true\n"
             "  generic_scanner_usefulness: low\n"
@@ -130,9 +130,7 @@ class ScoreTests(unittest.TestCase):
 
             self.assertEqual(report.errors, [])
             self.assertEqual(len(report.dimensions), 5)
-            self.assertAlmostEqual(
-                sum(d.weight for d in report.dimensions), 1.0, places=6
-            )
+            self.assertAlmostEqual(sum(d.weight for d in report.dimensions), 1.0, places=6)
             self.assertGreaterEqual(report.total, 85.0)
             self.assertEqual(report.band, "strong")
             self.assertEqual(report.warnings, [])
@@ -171,9 +169,7 @@ class ScoreTests(unittest.TestCase):
             report = score_challenge(output)
             statefulness = next(d for d in report.dimensions if d.name == "statefulness")
             self.assertLess(statefulness.score, 100.0)
-            self.assertTrue(
-                any("hidden_sibling_validation" in w for w in report.warnings)
-            )
+            self.assertTrue(any("hidden_sibling_validation" in w for w in report.warnings))
 
     # --- Family-aware extensions ---------------------------------------------
 
@@ -335,13 +331,9 @@ class ScoreTests(unittest.TestCase):
             names = {d.name for d in report.dimensions}
             self.assertIn("scenario_resistance", names)
             self.assertEqual(len(report.dimensions), 6)
-            self.assertAlmostEqual(
-                sum(d.weight for d in report.dimensions), 1.0, places=6
-            )
+            self.assertAlmostEqual(sum(d.weight for d in report.dimensions), 1.0, places=6)
 
-            scenario_dim = next(
-                d for d in report.dimensions if d.name == "scenario_resistance"
-            )
+            scenario_dim = next(d for d in report.dimensions if d.name == "scenario_resistance")
             self.assertGreater(scenario_dim.score, 0.0)
 
             # Non-scenario dimensions unchanged (default challenge scores the
@@ -457,7 +449,9 @@ class ScoreWithAgentEvalTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as temp_dir:
             output = self._generate(temp_dir)
             eval_report_path = Path(temp_dir) / "weird-report.json"
-            eval_report_path.write_text(json.dumps({"result": {"nonsense": True}}), encoding="utf-8")
+            eval_report_path.write_text(
+                json.dumps({"result": {"nonsense": True}}), encoding="utf-8"
+            )
             blended = score_with_agent_eval(output, eval_report_path)
             self.assertIsNone(blended["agent_eval"])
             self.assertTrue(any("unrecognized shape" in w for w in blended["warnings"]))

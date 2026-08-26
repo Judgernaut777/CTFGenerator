@@ -34,22 +34,16 @@ def competition_uuid(session: Session, competition_id: str) -> uuid.UUID:
     return result
 
 
-def team_uuid(
-    session: Session, competition_uuid_: uuid.UUID, team_name: str
-) -> uuid.UUID:
+def team_uuid(session: Session, competition_uuid_: uuid.UUID, team_name: str) -> uuid.UUID:
     result = session.scalars(
-        select(Team.id).where(
-            Team.competition_id == competition_uuid_, Team.name == team_name
-        )
+        select(Team.id).where(Team.competition_id == competition_uuid_, Team.name == team_name)
     ).one_or_none()
     if result is None:
         raise LookupError(f"team not found in competition: {team_name!r}")
     return result
 
 
-def version_uuid(
-    session: Session, definition_slug: str, version_no: int
-) -> uuid.UUID:
+def version_uuid(session: Session, definition_slug: str, version_no: int) -> uuid.UUID:
     result = session.scalars(
         select(ChallengeVersion.id)
         .join(ChallengeDefinition, ChallengeVersion.definition_id == ChallengeDefinition.id)
@@ -59,9 +53,7 @@ def version_uuid(
         )
     ).one_or_none()
     if result is None:
-        raise LookupError(
-            f"challenge version not found: {definition_slug!r} v{version_no}"
-        )
+        raise LookupError(f"challenge version not found: {definition_slug!r} v{version_no}")
     return result
 
 
@@ -84,9 +76,7 @@ def user_uuid_optional(session: Session, email: str | None) -> uuid.UUID | None:
     return user_uuid(session, email)
 
 
-def competition_uuid_optional(
-    session: Session, competition_id: str | None
-) -> uuid.UUID | None:
+def competition_uuid_optional(session: Session, competition_id: str | None) -> uuid.UUID | None:
     """Resolve an optional competition slug (jobs audit linkage). ``None``
     passes through; a given-but-unknown slug fails loud."""
     if competition_id is None:
@@ -110,17 +100,13 @@ def version_uuid_optional(
 
 
 def worker_uuid(session: Session, worker_name: str) -> uuid.UUID:
-    result = session.scalars(
-        select(Worker.id).where(Worker.name == worker_name)
-    ).one_or_none()
+    result = session.scalars(select(Worker.id).where(Worker.name == worker_name)).one_or_none()
     if result is None:
         raise LookupError(f"worker not found: {worker_name!r}")
     return result
 
 
-def worker_uuid_optional(
-    session: Session, worker_name: str | None
-) -> uuid.UUID | None:
+def worker_uuid_optional(session: Session, worker_name: str | None) -> uuid.UUID | None:
     """Resolve an optional worker name to its uuid. ``None`` passes through; a
     given-but-unknown name fails loud."""
     if worker_name is None:
@@ -145,17 +131,13 @@ def competition_slug(session: Session, competition_uuid_: uuid.UUID) -> str:
 
 
 def team_name(session: Session, team_uuid_: uuid.UUID) -> str:
-    result = session.scalars(
-        select(Team.name).where(Team.id == team_uuid_)
-    ).one_or_none()
+    result = session.scalars(select(Team.name).where(Team.id == team_uuid_)).one_or_none()
     if result is None:
         raise LookupError(f"team id not found: {team_uuid_!r}")
     return result
 
 
-def version_business(
-    session: Session, version_uuid_: uuid.UUID
-) -> tuple[str, int]:
+def version_business(session: Session, version_uuid_: uuid.UUID) -> tuple[str, int]:
     row = session.execute(
         select(ChallengeDefinition.slug, ChallengeVersion.version_no)
         .join(ChallengeVersion, ChallengeVersion.definition_id == ChallengeDefinition.id)
@@ -167,26 +149,20 @@ def version_business(
 
 
 def user_email(session: Session, user_uuid_: uuid.UUID) -> str:
-    result = session.scalars(
-        select(User.email).where(User.id == user_uuid_)
-    ).one_or_none()
+    result = session.scalars(select(User.email).where(User.id == user_uuid_)).one_or_none()
     if result is None:
         raise LookupError(f"user id not found: {user_uuid_!r}")
     return result
 
 
 def worker_name(session: Session, worker_uuid_: uuid.UUID) -> str:
-    result = session.scalars(
-        select(Worker.name).where(Worker.id == worker_uuid_)
-    ).one_or_none()
+    result = session.scalars(select(Worker.name).where(Worker.id == worker_uuid_)).one_or_none()
     if result is None:
         raise LookupError(f"worker id not found: {worker_uuid_!r}")
     return result
 
 
-def worker_name_optional(
-    session: Session, worker_uuid_: uuid.UUID | None
-) -> str | None:
+def worker_name_optional(session: Session, worker_uuid_: uuid.UUID | None) -> str | None:
     if worker_uuid_ is None:
         return None
     return worker_name(session, worker_uuid_)

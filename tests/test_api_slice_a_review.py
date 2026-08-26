@@ -142,9 +142,7 @@ class CursorPaginationApiTests(unittest.TestCase):
     def _seed(self, client, n: int) -> list[str]:
         ids = [f"comp-{i:02d}" for i in range(n)]
         for cid in ids:
-            r = client.post(
-                "/api/v1/competitions", headers=_auth(), json=_competition_body(cid)
-            )
+            r = client.post("/api/v1/competitions", headers=_auth(), json=_competition_body(cid))
             self.assertEqual(r.status_code, 201, r.text)
         return ids
 
@@ -181,9 +179,7 @@ class CursorPaginationApiTests(unittest.TestCase):
             # deletion). Resuming strictly-after the cursor must still return the
             # tail rather than skipping it.
             with db.session_scope() as session:
-                session.execute(
-                    sa.delete(Competition).where(Competition.slug == boundary)
-                )
+                session.execute(sa.delete(Competition).where(Competition.slug == boundary))
 
             tail_seen: list[str] = []
             url = f"/api/v1/competitions?limit=2&cursor={cursor}"
@@ -203,9 +199,7 @@ class CursorPaginationApiTests(unittest.TestCase):
             self.assertEqual(tail_seen, ["comp-02", "comp-03", "comp-04"])
             self.assertNotIn(boundary, tail_seen)
             # The page-1 items plus the tail cover every non-deleted competition.
-            self.assertEqual(
-                sorted(set(first_ids) | set(tail_seen)), ids
-            )
+            self.assertEqual(sorted(set(first_ids) | set(tail_seen)), ids)
 
 
 @unittest.skipUnless(_ENABLED, _SKIP_REASON)
@@ -213,7 +207,8 @@ class EtagLostUpdateApiTests(unittest.TestCase):
     def test_stale_if_match_second_update_is_412(self) -> None:
         with _client() as (client, _db):
             r = client.post(
-                "/api/v1/competitions", headers=_auth(),
+                "/api/v1/competitions",
+                headers=_auth(),
                 json=_competition_body("etag-comp"),
             )
             self.assertEqual(r.status_code, 201, r.text)
@@ -245,7 +240,8 @@ class WindowInvariantApiTests(unittest.TestCase):
     def test_patch_violating_window_is_422_validation_failed(self) -> None:
         with _client() as (client, _db):
             r = client.post(
-                "/api/v1/competitions", headers=_auth(),
+                "/api/v1/competitions",
+                headers=_auth(),
                 json=_competition_body("win-comp"),
             )
             self.assertEqual(r.status_code, 201, r.text)
@@ -275,9 +271,7 @@ class AuditAndEnvelopeApiTests(unittest.TestCase):
 
         self.assertEqual(len(sink.events), 1)
         event = sink.events[0]
-        self.assertEqual(
-            set(event), {"actor", "action", "target", "outcome", "request_id"}
-        )
+        self.assertEqual(set(event), {"actor", "action", "target", "outcome", "request_id"})
         self.assertEqual(event["actor"], "admin-one")
         self.assertEqual(event["action"], "competition.create")
         self.assertEqual(event["target"], "audited")
@@ -344,25 +338,17 @@ class IdempotencyScopingApiTests(unittest.TestCase):
                 json=other,
             )
             self.assertEqual(r2.status_code, 409, r2.text)
-            self.assertEqual(
-                r2.json()["error"]["code"], "idempotency_key_reused"
-            )
+            self.assertEqual(r2.json()["error"]["code"], "idempotency_key_reused")
 
     def test_same_principal_key_same_body_replays(self) -> None:
         with _client() as (client, _db):
             key = {"Idempotency-Key": "replay-key"}
             body = _competition_body("delta")
-            r1 = client.post(
-                "/api/v1/competitions", headers={**_auth(_ADMIN), **key}, json=body
-            )
+            r1 = client.post("/api/v1/competitions", headers={**_auth(_ADMIN), **key}, json=body)
             self.assertEqual(r1.status_code, 201, r1.text)
-            r2 = client.post(
-                "/api/v1/competitions", headers={**_auth(_ADMIN), **key}, json=body
-            )
+            r2 = client.post("/api/v1/competitions", headers={**_auth(_ADMIN), **key}, json=body)
             self.assertEqual(r2.status_code, 201, r2.text)
-            self.assertEqual(
-                r2.json()["competition_id"], r1.json()["competition_id"]
-            )
+            self.assertEqual(r2.json()["competition_id"], r1.json()["competition_id"])
 
 
 if __name__ == "__main__":  # pragma: no cover

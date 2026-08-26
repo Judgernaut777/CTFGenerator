@@ -58,10 +58,30 @@ _ROOT_LOGGERS = ("ctfgen", "ctf_generator")
 # __dict__ is a caller-supplied structured ``extra`` we surface (and redact).
 _STANDARD_LOGRECORD_ATTRS = frozenset(
     {
-        "name", "msg", "args", "levelname", "levelno", "pathname", "filename",
-        "module", "exc_info", "exc_text", "stack_info", "lineno", "funcName",
-        "created", "msecs", "relativeCreated", "thread", "threadName",
-        "processName", "process", "taskName", "message", "asctime", "request_id",
+        "name",
+        "msg",
+        "args",
+        "levelname",
+        "levelno",
+        "pathname",
+        "filename",
+        "module",
+        "exc_info",
+        "exc_text",
+        "stack_info",
+        "lineno",
+        "funcName",
+        "created",
+        "msecs",
+        "relativeCreated",
+        "thread",
+        "threadName",
+        "processName",
+        "process",
+        "taskName",
+        "message",
+        "asctime",
+        "request_id",
     }
 )
 
@@ -70,9 +90,25 @@ _STANDARD_LOGRECORD_ATTRS = frozenset(
 # / ``database_url`` are all caught; over-redaction of an incidentally-named
 # field is the safe direction.
 _SENSITIVE_KEY_SUBSTRINGS = (
-    "password", "passwd", "pwd", "token", "secret", "api_key", "apikey",
-    "authorization", "credential", "session", "dsn", "database_url", "db_url",
-    "flag", "private_key", "signing_key", "provider_key", "bearer", "cookie",
+    "password",
+    "passwd",
+    "pwd",
+    "token",
+    "secret",
+    "api_key",
+    "apikey",
+    "authorization",
+    "credential",
+    "session",
+    "dsn",
+    "database_url",
+    "db_url",
+    "flag",
+    "private_key",
+    "signing_key",
+    "provider_key",
+    "bearer",
+    "cookie",
 )
 
 
@@ -160,9 +196,7 @@ class SecretRedactionFilter(logging.Filter):
         if isinstance(value, Mapping):
             out: dict[object, object] = {}
             for k, v in value.items():
-                out[k] = _REDACTED if _is_sensitive_key(str(k)) else cls._redact_value(
-                    v, depth + 1
-                )
+                out[k] = _REDACTED if _is_sensitive_key(str(k)) else cls._redact_value(v, depth + 1)
             return out
         if isinstance(value, (list, tuple, set)):
             return [cls._redact_value(v, depth + 1) for v in value]
@@ -194,9 +228,7 @@ class JsonFormatter(logging.Formatter):
             # formatter is used WITHOUT the filter.
             exc_text = getattr(record, "exc_text", None)
             if not exc_text and record.exc_info:
-                exc_text = redact_text(
-                    self.formatException(record.exc_info), LOG_SECRET_PATTERNS
-                )
+                exc_text = redact_text(self.formatException(record.exc_info), LOG_SECRET_PATTERNS)
             if exc_text:
                 payload["exc"] = exc_text
             if getattr(record, "stack_info", None):
@@ -204,9 +236,7 @@ class JsonFormatter(logging.Formatter):
             return json.dumps(payload, default=str, sort_keys=True)
         except Exception:  # pragma: no cover - formatting must never crash a log call
             safe = redact_text(str(getattr(record, "msg", "")))
-            return json.dumps(
-                {"level": "ERROR", "logger": record.name, "message": safe}
-            )
+            return json.dumps({"level": "ERROR", "logger": record.name, "message": safe})
 
 
 class TextFormatter(logging.Formatter):

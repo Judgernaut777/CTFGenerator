@@ -173,70 +173,77 @@ def _competition_body() -> dict:
 def _seed(client: TestClient, db: Database) -> None:
     """Competition + Red/Blue teams + a published, attached challenge whose spec
     carries the expected flag."""
-    assert client.post(
-        "/api/v1/competitions", headers=_auth(), json=_competition_body()
-    ).status_code == 201
+    assert (
+        client.post("/api/v1/competitions", headers=_auth(), json=_competition_body()).status_code
+        == 201
+    )
     for team in ("Red", "Blue"):
-        assert client.post(
-            "/api/v1/teams",
+        assert (
+            client.post(
+                "/api/v1/teams",
+                headers=_auth(),
+                json={"competition_id": _CID, "name": team},
+            ).status_code
+            == 201
+        )
+    assert (
+        client.post(
+            "/api/v1/challenge-definitions",
             headers=_auth(),
-            json={"competition_id": _CID, "name": team},
-        ).status_code == 201
-    assert client.post(
-        "/api/v1/challenge-definitions",
-        headers=_auth(),
-        json={"family": "web", "slug": _SLUG, "title": "SQLi One"},
-    ).status_code == 201
-    assert client.post(
-        "/api/v1/challenge-versions",
-        headers=_auth(),
-        json={
-            "definition_slug": _SLUG,
-            "seed": "seed-1",
-            "family_version": "1.0.0",
-            "spec": {"title": "SQLi One", "flag": _FLAG},
-        },
-    ).status_code == 201
-    assert client.post(
-        f"/api/v1/challenge-versions/{_SLUG}/1/publish", headers=_auth()
-    ).status_code == 200
+            json={"family": "web", "slug": _SLUG, "title": "SQLi One"},
+        ).status_code
+        == 201
+    )
+    assert (
+        client.post(
+            "/api/v1/challenge-versions",
+            headers=_auth(),
+            json={
+                "definition_slug": _SLUG,
+                "seed": "seed-1",
+                "family_version": "1.0.0",
+                "spec": {"title": "SQLi One", "flag": _FLAG},
+            },
+        ).status_code
+        == 201
+    )
+    assert (
+        client.post(f"/api/v1/challenge-versions/{_SLUG}/1/publish", headers=_auth()).status_code
+        == 200
+    )
     # No publication API endpoint yet (M9c) -- attach directly via the repo.
     with db.session_scope() as session:
         SqlAlchemyChallengePublicationRepository(session).add(
-            ChallengePublication(
-                competition_id=_CID, definition_slug=_SLUG, version_no=1
-            )
+            ChallengePublication(competition_id=_CID, definition_slug=_SLUG, version_no=1)
         )
 
 
-def _seed_extra_competition(
-    client: TestClient, db: Database, cid: str, name: str
-) -> None:
+def _seed_extra_competition(client: TestClient, db: Database, cid: str, name: str) -> None:
     """A SECOND competition + Red/Blue teams, sharing the already-published
     challenge from :func:`_seed` (definition/version are global) by attaching a
     fresh publication for this competition."""
     body = _competition_body()
     body["competition_id"] = cid
     body["name"] = name
-    assert client.post(
-        "/api/v1/competitions", headers=_auth(), json=body
-    ).status_code == 201
+    assert client.post("/api/v1/competitions", headers=_auth(), json=body).status_code == 201
     for team in ("Red", "Blue"):
-        assert client.post(
-            "/api/v1/teams",
-            headers=_auth(),
-            json={"competition_id": cid, "name": team},
-        ).status_code == 201
+        assert (
+            client.post(
+                "/api/v1/teams",
+                headers=_auth(),
+                json={"competition_id": cid, "name": team},
+            ).status_code
+            == 201
+        )
     with db.session_scope() as session:
         SqlAlchemyChallengePublicationRepository(session).add(
-            ChallengePublication(
-                competition_id=cid, definition_slug=_SLUG, version_no=1
-            )
+            ChallengePublication(competition_id=cid, definition_slug=_SLUG, version_no=1)
         )
 
 
-def _submit(client: TestClient, token: str, answer: str, *, team: str = "Red",
-            idem: str | None = None):
+def _submit(
+    client: TestClient, token: str, answer: str, *, team: str = "Red", idem: str | None = None
+):
     headers = _auth(token)
     if idem is not None:
         headers["Idempotency-Key"] = idem
@@ -310,9 +317,7 @@ class SubmissionsApiIntegrationTests(unittest.TestCase):
             self.assertEqual(first.status_code, 201, first.text)
             replay = _submit(client, _RED, _FLAG, idem="submit-1")
             self.assertEqual(replay.status_code, 201, replay.text)
-            self.assertEqual(
-                replay.json()["submission_id"], first.json()["submission_id"]
-            )
+            self.assertEqual(replay.json()["submission_id"], first.json()["submission_id"])
             self.assertEqual(replay.json()["solve"], first.json()["solve"])
             # A reused key with a different body -> 409 idempotency_key_reused.
             conflict = client.post(
@@ -326,9 +331,7 @@ class SubmissionsApiIntegrationTests(unittest.TestCase):
                 },
             )
             self.assertEqual(conflict.status_code, 409, conflict.text)
-            self.assertEqual(
-                conflict.json()["error"]["code"], "idempotency_key_reused"
-            )
+            self.assertEqual(conflict.json()["error"]["code"], "idempotency_key_reused")
 
     def test_player_cannot_read_other_teams_submissions(self) -> None:
         with _client_and_db() as (client, db):
@@ -341,9 +344,7 @@ class SubmissionsApiIntegrationTests(unittest.TestCase):
             _submit(client, _RED, _FLAG)
 
             # A Red player listing their own team -> only Red rows.
-            own = client.get(
-                f"/api/v1/competitions/{_CID}/submissions", headers=_auth(_RED)
-            )
+            own = client.get(f"/api/v1/competitions/{_CID}/submissions", headers=_auth(_RED))
             self.assertEqual(own.status_code, 200, own.text)
             self.assertTrue(own.json()["data"])
             self.assertTrue(all(s["team"] == "Red" for s in own.json()["data"]))
@@ -357,9 +358,7 @@ class SubmissionsApiIntegrationTests(unittest.TestCase):
             self.assertEqual(denied.json()["error"]["code"], "forbidden")
 
             # A Red player fetching a Blue submission by id -> 404 (no leak).
-            cross = client.get(
-                f"/api/v1/submissions/{blue_id}", headers=_auth(_RED)
-            )
+            cross = client.get(f"/api/v1/submissions/{blue_id}", headers=_auth(_RED))
             self.assertEqual(cross.status_code, 404, cross.text)
             self.assertEqual(cross.json()["error"]["code"], "not_found")
 
@@ -408,16 +407,12 @@ class SubmissionsApiIntegrationTests(unittest.TestCase):
             self.assertEqual(post.json()["error"]["code"], "forbidden")
 
             # GET list -> 403 (cannot see any team's rows).
-            listing = client.get(
-                f"/api/v1/competitions/{_CID}/submissions", headers=_auth(_NOTEAM)
-            )
+            listing = client.get(f"/api/v1/competitions/{_CID}/submissions", headers=_auth(_NOTEAM))
             self.assertEqual(listing.status_code, 403, listing.text)
             self.assertEqual(listing.json()["error"]["code"], "forbidden")
 
             # GET another team's submission by id -> 404 (never confirm existence).
-            cross = client.get(
-                f"/api/v1/submissions/{red_id}", headers=_auth(_NOTEAM)
-            )
+            cross = client.get(f"/api/v1/submissions/{red_id}", headers=_auth(_NOTEAM))
             self.assertEqual(cross.status_code, 404, cross.text)
             self.assertEqual(cross.json()["error"]["code"], "not_found")
 
@@ -453,16 +448,12 @@ class SubmissionsApiIntegrationTests(unittest.TestCase):
             self.assertEqual(b.status_code, 201, b.text)
 
             # Two distinct submissions, each under its own competition.
-            self.assertNotEqual(
-                a.json()["submission_id"], b.json()["submission_id"]
-            )
+            self.assertNotEqual(a.json()["submission_id"], b.json()["submission_id"])
             self.assertEqual(a.json()["competition_id"], _CID)
             self.assertEqual(b.json()["competition_id"], _CID_B)
 
             # B's row is recorded under competition B (not silently dropped).
-            listing = client.get(
-                f"/api/v1/competitions/{_CID_B}/submissions", headers=_auth(_RED)
-            )
+            listing = client.get(f"/api/v1/competitions/{_CID_B}/submissions", headers=_auth(_RED))
             self.assertEqual(listing.status_code, 200, listing.text)
             self.assertEqual(
                 [s["submission_id"] for s in listing.json()["data"]],
@@ -482,12 +473,8 @@ class SubmissionsApiIntegrationTests(unittest.TestCase):
             self.assertEqual(first.status_code, 201, first.text)
             second = _submit(client, _RED, _FLAG, idem="only-once")
             self.assertEqual(second.status_code, 201, second.text)
-            self.assertEqual(
-                second.json()["submission_id"], first.json()["submission_id"]
-            )
-            creates = [
-                e for e in sink.events if e.get("action") == "submission.create"
-            ]
+            self.assertEqual(second.json()["submission_id"], first.json()["submission_id"])
+            creates = [e for e in sink.events if e.get("action") == "submission.create"]
             self.assertEqual(len(creates), 1, sink.events)
 
 

@@ -60,17 +60,14 @@ def _attach(args: argparse.Namespace) -> int:
 
 def _list(args: argparse.Namespace) -> int:
     with open_client(args) as client:
-        rows = client.list(
-            f"/competitions/{args.competition_id}/publications", limit=args.limit
-        )
+        rows = client.list(f"/competitions/{args.competition_id}/publications", limit=args.limit)
     output.print_rows(rows, _COLUMNS, as_json=args.json)
     return 0
 
 
 def _detach(args: argparse.Namespace) -> int:
     path = (
-        f"/competitions/{args.competition_id}/publications/"
-        f"{args.definition_slug}/{args.version_no}"
+        f"/competitions/{args.competition_id}/publications/{args.definition_slug}/{args.version_no}"
     )
     with open_client(args) as client:
         client.request("DELETE", path)

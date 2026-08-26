@@ -112,12 +112,8 @@ class BaselineFixtureTests(unittest.TestCase):
             golden = json.loads((FIXTURES / f"{family}.json").read_text(encoding="utf-8"))
             for seed in index["seeds"]:
                 files = golden[seed].get("files", {})
-                private_hashes = {
-                    m["sha256"] for rel, m in files.items() if m["private"]
-                }
-                public_hashes = {
-                    m["sha256"] for rel, m in files.items() if m["public"]
-                }
+                private_hashes = {m["sha256"] for rel, m in files.items() if m["private"]}
+                public_hashes = {m["sha256"] for rel, m in files.items() if m["public"]}
                 with self.subTest(family=family, seed=seed):
                     shared = private_hashes & public_hashes
                     self.assertFalse(

@@ -83,7 +83,9 @@ class MigrationTests(unittest.TestCase):
 
 class SpecStampTests(unittest.TestCase):
     def test_spec_to_dict_is_stamped(self) -> None:
-        d = spec_to_dict(default_spec(seed="s", title="T", difficulty="medium", family="crypto_token_forgery"))
+        d = spec_to_dict(
+            default_spec(seed="s", title="T", difficulty="medium", family="crypto_token_forgery")
+        )
         self.assertEqual(d["schema"], schema.SPEC_SCHEMA)
         self.assertEqual(d["schema_version"], "1.1")
 
@@ -122,14 +124,18 @@ class FamilyMetadataTests(unittest.TestCase):
             self.assertEqual(meta["family"], name)
             self.assertEqual(meta["family_version"], fam.version)
             self.assertIn(meta["isolation_level"], {"container", "raw_tcp", "artifact"})
-            self.assertIn(meta["maintenance_status"], {"stable", "beta", "experimental", "deprecated"})
+            self.assertIn(
+                meta["maintenance_status"], {"stable", "beta", "experimental", "deprecated"}
+            )
 
     def test_known_capability_values(self) -> None:
         self.assertEqual(families.get("binary_heap_exploit").isolation_level, "raw_tcp")
         self.assertEqual(families.get("forensics_incident_triage").isolation_level, "artifact")
         self.assertEqual(families.get("cloud_metadata_ssrf").required_ports, (8080, 9000))
         # production-track categories are beta; the rest experimental
-        self.assertEqual(families.get("web_business_logic_tenant_export").maintenance_status, "beta")
+        self.assertEqual(
+            families.get("web_business_logic_tenant_export").maintenance_status, "beta"
+        )
         self.assertEqual(families.get("crypto_token_forgery").maintenance_status, "experimental")
 
     def test_seed_varied_port_families_declare_no_fixed_ports(self) -> None:
@@ -163,7 +169,10 @@ class McpSchemaErrorHandlingTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             out = Path(tmp) / "chal"
             generator.create_challenge(
-                output_dir=out, seed="s1", title="T", difficulty="medium",
+                output_dir=out,
+                seed="s1",
+                title="T",
+                difficulty="medium",
                 family="crypto_token_forgery",
             )
             priv = json.loads((out / "private/manifest.json").read_text())

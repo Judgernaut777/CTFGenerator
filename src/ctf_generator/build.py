@@ -74,7 +74,14 @@ _CONFUSABLE_CHARS = frozenset(
 
 # Windows reserved device names (portability + confusion avoidance).
 _WIN_RESERVED = frozenset(
-    {"CON", "PRN", "AUX", "NUL", *(f"COM{i}" for i in range(1, 10)), *(f"LPT{i}" for i in range(1, 10))}
+    {
+        "CON",
+        "PRN",
+        "AUX",
+        "NUL",
+        *(f"COM{i}" for i in range(1, 10)),
+        *(f"LPT{i}" for i in range(1, 10)),
+    }
 )
 
 
@@ -298,8 +305,10 @@ def write_build(
         elif isinstance(val, (str, bytes)):
             norm_files[rel] = RenderedFile.from_value(val)
         else:
-            raise TypeError(f"Expected RenderedFile, str, or bytes for {rel!r}, got {type(val).__name__}")
-    
+            raise TypeError(
+                f"Expected RenderedFile, str, or bytes for {rel!r}, got {type(val).__name__}"
+            )
+
     final = Path(final_dir)
     _reject_dangerous_output_root(final)
 
@@ -307,7 +316,9 @@ def write_build(
     # any work, so we fail fast and never partially build over a live dir.
     if final.exists():
         if final.is_symlink():
-            raise UnsafeDeletionError(f"output path is a symlink; refusing to write through it: {final}")
+            raise UnsafeDeletionError(
+                f"output path is a symlink; refusing to write through it: {final}"
+            )
         if not force:
             raise FileExistsError(f"{final} already exists; pass force=True to overwrite")
         if _is_nonempty_dir(final) and not is_managed_build_dir(final):
@@ -359,9 +370,7 @@ def write_build(
             data = rf.content  # RenderedFile already carries exact bytes
             total += len(data)
             if total > MAX_TOTAL_BYTES:
-                raise BuildLimitError(
-                    f"aggregate size exceeds limit {MAX_TOTAL_BYTES} bytes"
-                )
+                raise BuildLimitError(f"aggregate size exceeds limit {MAX_TOTAL_BYTES} bytes")
             target.write_bytes(data)
 
         _build_manifests(tmp, meta)

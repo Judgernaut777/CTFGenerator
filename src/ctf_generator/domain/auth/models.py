@@ -51,11 +51,7 @@ def _require_tz_aware(value: datetime, field_name: str) -> None:
 
 
 def _require_token_hash(value: str, field_name: str) -> None:
-    if (
-        not isinstance(value, str)
-        or len(value) != 64
-        or not set(value) <= _HEX64
-    ):
+    if not isinstance(value, str) or len(value) != 64 or not set(value) <= _HEX64:
         raise ValueError(
             f"{field_name} must be 64 lowercase hex chars (sha256 of the token; "
             "never store a plaintext token)"
@@ -154,8 +150,7 @@ class SystemRoleAssignment:
         _require_nonempty(self.user_email, "user_email")
         if self.role not in VALID_SYSTEM_ROLES:
             raise ValueError(
-                f"system role must be one of {sorted(VALID_SYSTEM_ROLES)}, "
-                f"got {self.role!r}"
+                f"system role must be one of {sorted(VALID_SYSTEM_ROLES)}, got {self.role!r}"
             )
 
 

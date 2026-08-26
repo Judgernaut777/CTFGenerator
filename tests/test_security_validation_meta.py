@@ -42,16 +42,12 @@ GATE_MODULES: dict[str, tuple[str, ...]] = {
 }
 
 _TESTS_DIR = Path(__file__).resolve().parent
-_CHECKLIST = (
-    _TESTS_DIR.parent / "docs" / "validation" / "security-checklist.md"
-)
+_CHECKLIST = _TESTS_DIR.parent / "docs" / "validation" / "security-checklist.md"
 
 
 class GateModulesExistAndCollect(unittest.TestCase):
     def test_gate_keys_are_exactly_s1_through_s9(self) -> None:
-        self.assertEqual(
-            sorted(GATE_MODULES), [f"S{i}" for i in range(1, 10)]
-        )
+        self.assertEqual(sorted(GATE_MODULES), [f"S{i}" for i in range(1, 10)])
 
     def test_every_cited_module_file_exists(self) -> None:
         for gate, mods in GATE_MODULES.items():
@@ -76,17 +72,13 @@ class GateModulesExistAndCollect(unittest.TestCase):
                     module = importlib.import_module(mod)
                     suite = loader.loadTestsFromModule(module)
                     count = suite.countTestCases()
-                    self.assertGreater(
-                        count, 0, f"{gate}: {mod} collected no test cases"
-                    )
+                    self.assertGreater(count, 0, f"{gate}: {mod} collected no test cases")
                     seen[mod] = count
 
 
 class ChecklistDocGuard(unittest.TestCase):
     def setUp(self) -> None:
-        self.assertTrue(
-            _CHECKLIST.is_file(), f"checklist doc missing: {_CHECKLIST}"
-        )
+        self.assertTrue(_CHECKLIST.is_file(), f"checklist doc missing: {_CHECKLIST}")
         self.text = _CHECKLIST.read_text(encoding="utf-8")
 
     def test_doc_lists_every_gate_s1_through_s9(self) -> None:

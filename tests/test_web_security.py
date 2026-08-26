@@ -64,9 +64,7 @@ class WebCsrfTests(unittest.TestCase):
             # Correct token (positive control) -> 303 redirect (logout succeeds).
             csrf = ws.extract_csrf(client.get("/app/").text)
             self.assertTrue(csrf)
-            ok = client.post(
-                "/app/logout", data={"csrf_token": csrf}, follow_redirects=False
-            )
+            ok = client.post("/app/logout", data={"csrf_token": csrf}, follow_redirects=False)
             self.assertEqual(ok.status_code, 303, ok.text)
 
     def test_csrf_error_page_leaks_nothing(self) -> None:
@@ -199,9 +197,7 @@ class WebCacheControlTests(unittest.TestCase):
     def test_web_html_carries_no_store(self) -> None:
         with ws.web_client() as (client, _db, _svc):
             login_page = client.get("/app/login")
-            self.assertEqual(
-                login_page.headers.get("cache-control"), "no-store", login_page.text
-            )
+            self.assertEqual(login_page.headers.get("cache-control"), "no-store", login_page.text)
             ws.login(client, ws.ALICE)
             for path in ("/app/", "/app/competitions", f"/app/competitions/{ws.COMP_A}"):
                 page = client.get(path)

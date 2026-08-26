@@ -184,9 +184,7 @@ class EntrypointTest(unittest.TestCase):
             self.assertNotIn("bootstrap-admin", code)
 
     def test_serves_worker_gateway_mode(self) -> None:
-        self.assertIn(
-            "uvicorn ctf_generator.interfaces.api.worker_app:worker_app", self.text
-        )
+        self.assertIn("uvicorn ctf_generator.interfaces.api.worker_app:worker_app", self.text)
 
 
 class ComposeTest(unittest.TestCase):

@@ -74,8 +74,7 @@ class AuditEvent:
         _require_nonempty(self.outcome, "outcome")
         if self.outcome not in VALID_AUDIT_OUTCOMES:
             raise ValueError(
-                f"outcome must be one of {sorted(VALID_AUDIT_OUTCOMES)}, "
-                f"got {self.outcome!r}"
+                f"outcome must be one of {sorted(VALID_AUDIT_OUTCOMES)}, got {self.outcome!r}"
             )
         # target / request_id are short identifiers; they may be empty (e.g. no
         # request context) but must be strings -- never None, so the row is total.

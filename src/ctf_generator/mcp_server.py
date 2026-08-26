@@ -70,6 +70,7 @@ def _resolve_in_workspace(user_path: str) -> Path:
         )
     return resolved
 
+
 # The design guidance handed to a host model before it calls build_spec. It is
 # exposed as an MCP prompt so an interactive client can prime the model with the
 # safety boundary this server enforces.

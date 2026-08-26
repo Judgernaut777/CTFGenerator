@@ -129,9 +129,7 @@ if _IMPORT_ERROR is not None:
 elif not _TEST_URL:
     _SKIP_REASON = "CTFGEN_TEST_DATABASE_URL not set (needs a running PostgreSQL)"
 elif not _TOOLING:
-    _SKIP_REASON = (
-        f"no pg_dump/pg_restore on host and container {_CONTAINER!r} unreachable"
-    )
+    _SKIP_REASON = f"no pg_dump/pg_restore on host and container {_CONTAINER!r} unreachable"
 else:
     _SKIP_REASON = ""
 
@@ -148,8 +146,18 @@ def _pg_dump(dbname: str) -> bytes:
         cmd = ["pg_dump", "-h", host, "-p", port, "-U", user, "-Fc", dbname]
         return subprocess.run(cmd, env=env, check=True, stdout=subprocess.PIPE).stdout
     cmd = [
-        "docker", "exec", "-e", f"PGPASSWORD={password}", _CONTAINER,
-        "pg_dump", "-h", "127.0.0.1", "-U", user, "-Fc", dbname,
+        "docker",
+        "exec",
+        "-e",
+        f"PGPASSWORD={password}",
+        _CONTAINER,
+        "pg_dump",
+        "-h",
+        "127.0.0.1",
+        "-U",
+        user,
+        "-Fc",
+        dbname,
     ]
     return subprocess.run(cmd, check=True, stdout=subprocess.PIPE).stdout
 
@@ -159,15 +167,36 @@ def _pg_restore(dbname: str, dump: bytes) -> None:
     if _host_pg():
         env = {**os.environ, "PGPASSWORD": password}
         cmd = [
-            "pg_restore", "--no-owner", "--no-privileges",
-            "-h", host, "-p", port, "-U", user, "-d", dbname,
+            "pg_restore",
+            "--no-owner",
+            "--no-privileges",
+            "-h",
+            host,
+            "-p",
+            port,
+            "-U",
+            user,
+            "-d",
+            dbname,
         ]
         subprocess.run(cmd, env=env, input=dump, check=True)
         return
     cmd = [
-        "docker", "exec", "-i", "-e", f"PGPASSWORD={password}", _CONTAINER,
-        "pg_restore", "--no-owner", "--no-privileges",
-        "-h", "127.0.0.1", "-U", user, "-d", dbname,
+        "docker",
+        "exec",
+        "-i",
+        "-e",
+        f"PGPASSWORD={password}",
+        _CONTAINER,
+        "pg_restore",
+        "--no-owner",
+        "--no-privileges",
+        "-h",
+        "127.0.0.1",
+        "-U",
+        user,
+        "-d",
+        dbname,
     ]
     subprocess.run(cmd, input=dump, check=True)
 
@@ -317,9 +346,7 @@ def _score_event(team: str, type_: str, ts: datetime = _NOW) -> ScoreEvent:
 def _manifest_from_source(db: Database) -> dict:
     with db.session_scope() as s:
         count = s.execute(sa.text("SELECT count(*) FROM score_events")).scalar_one()
-        max_seq = s.execute(
-            sa.text("SELECT coalesce(max(seq), 0) FROM score_events")
-        ).scalar_one()
+        max_seq = s.execute(sa.text("SELECT coalesce(max(seq), 0) FROM score_events")).scalar_one()
         audit = s.execute(sa.text("SELECT count(*) FROM audit_events")).scalar_one()
     return {
         "score_events_count": int(count),
@@ -465,10 +492,7 @@ class RestoreRoundTripTests(unittest.TestCase):
         with target_db.session_scope() as s:
             s.execute(sa.text("SET session_replication_role = replica"))
             s.execute(
-                sa.text(
-                    "DELETE FROM score_events WHERE seq = "
-                    "(SELECT max(seq) FROM score_events)"
-                )
+                sa.text("DELETE FROM score_events WHERE seq = (SELECT max(seq) FROM score_events)")
             )
         report = verify_restore(
             target_db,
@@ -492,8 +516,11 @@ class RestoreRoundTripTests(unittest.TestCase):
         target_db = self._database(target)
         with target_db.session_scope() as s:
             s.execute(sa.text("SET session_replication_role = replica"))
-            s.execute(sa.text("DELETE FROM audit_events WHERE ctid IN "
-                              "(SELECT ctid FROM audit_events LIMIT 1)"))
+            s.execute(
+                sa.text(
+                    "DELETE FROM audit_events WHERE ctid IN (SELECT ctid FROM audit_events LIMIT 1)"
+                )
+            )
         report = verify_restore(target_db, manifest=manifest)
         self.assertFalse(report.passed)
         self.assertIn("audit_rowcount", {c.name for c in report.failures()})
@@ -509,10 +536,9 @@ class RestoreRoundTripTests(unittest.TestCase):
         with target_db.session_scope() as s:
             # scoreboard_projections is a materialized fold (not append-only) --
             # a direct UPDATE simulates a corrupted/altered projection row.
-            s.execute(sa.text(
-                "UPDATE scoreboard_projections "
-                "SET entries = '{\"tampered\": true}'::jsonb"
-            ))
+            s.execute(
+                sa.text("UPDATE scoreboard_projections SET entries = '{\"tampered\": true}'::jsonb")
+            )
         report = verify_restore(target_db, artifact_store=None)
         self.assertFalse(report.passed)
         self.assertIn("scoreboard_parity", {c.name for c in report.failures()})

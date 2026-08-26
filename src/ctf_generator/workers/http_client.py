@@ -87,9 +87,7 @@ class HttpControlPlaneClient:
         return {"Authorization": f"Bearer {self._token}"}
 
     def _post(self, path: str, json: dict | None = None) -> httpx.Response:
-        return self._client.post(
-            f"{self._prefix}{path}", json=json or {}, headers=self._headers()
-        )
+        return self._client.post(f"{self._prefix}{path}", json=json or {}, headers=self._headers())
 
     def _get(self, path: str) -> httpx.Response:
         return self._client.get(f"{self._prefix}{path}", headers=self._headers())
@@ -140,18 +138,14 @@ class HttpControlPlaneClient:
     # -- queue verbs -----------------------------------------------------------
 
     def claim(self, token: str, lease_seconds: int, now: datetime) -> JobLease | None:
-        response = self._post(
-            "/worker/jobs/claim", {"lease_seconds": lease_seconds}
-        )
+        response = self._post("/worker/jobs/claim", {"lease_seconds": lease_seconds})
         if response.status_code == 204:
             return None
         self._raise_for_status(response)
         return _job_lease_from_wire(response.json())
 
     def start(self, token: str, job_id: str, lease_token: str, now: datetime) -> None:
-        response = self._post(
-            f"/worker/jobs/{job_id}/start", {"lease_token": lease_token}
-        )
+        response = self._post(f"/worker/jobs/{job_id}/start", {"lease_token": lease_token})
         self._raise_for_status(response)
 
     def heartbeat(
@@ -211,9 +205,7 @@ class HttpControlPlaneClient:
         return _instance_from_wire(response.json())
 
     def expected_image_digest(self, instance_id: str, now: datetime) -> str | None:
-        response = self._get(
-            f"/worker/instances/{instance_id}/expected-image-digest"
-        )
+        response = self._get(f"/worker/instances/{instance_id}/expected-image-digest")
         if response.status_code == 404:
             # Instance vanished between fetch and pin -> skip pinning (the launch
             # itself will surface the missing instance), mirroring get_instance.
@@ -336,9 +328,7 @@ class HttpControlPlaneClient:
                     )
             bundle_sha256 = response.headers.get("x-bundle-sha256", "")
             spec_sha256 = response.headers.get("x-spec-sha256", "")
-        return BuildBundle(
-            data=bytes(chunks), bundle_sha256=bundle_sha256, spec_sha256=spec_sha256
-        )
+        return BuildBundle(data=bytes(chunks), bundle_sha256=bundle_sha256, spec_sha256=spec_sha256)
 
     def close(self) -> None:  # pragma: no cover - lifecycle convenience
         self._client.close()

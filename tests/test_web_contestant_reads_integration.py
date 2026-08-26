@@ -130,9 +130,7 @@ class ContestantReadsWebTests(unittest.TestCase):
             ws.login(client, ws.EVE)  # member of COMP_A only, NOT COMP_B
             for path in ("play", "roster", "challenges"):
                 resp = client.get(f"/app/competitions/{ws.COMP_B}/{path}")
-                self.assertEqual(
-                    resp.status_code, 404, f"{path} should be existence-hiding 404"
-                )
+                self.assertEqual(resp.status_code, 404, f"{path} should be existence-hiding 404")
                 # The generic not-found page must not confirm the competition id.
                 self.assertNotIn(ws.COMP_B, resp.text)
 

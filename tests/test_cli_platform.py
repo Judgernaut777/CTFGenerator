@@ -143,9 +143,7 @@ class CreateFromCveCliTests(unittest.TestCase):
     def test_create_from_cve_unknown_id_fails(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             output = Path(temp_dir) / "chal"
-            code, _, err = _run(
-                ["create-from-cve", "-o", str(output), "CVE-0000-0000"]
-            )
+            code, _, err = _run(["create-from-cve", "-o", str(output), "CVE-0000-0000"])
             self.assertEqual(code, 1)
             self.assertIn("unknown CVE id", err)
 
@@ -247,9 +245,7 @@ class RunScenarioCliTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as temp_dir:
             challenge = self._generate_scenario_challenge(temp_dir)
             report_dir = Path(temp_dir) / "reports"
-            code, _, _ = _run(
-                ["run-scenario", str(challenge), "--report-dir", str(report_dir)]
-            )
+            code, _, _ = _run(["run-scenario", str(challenge), "--report-dir", str(report_dir)])
             self.assertEqual(code, 0)
             files = _reports(report_dir)
             self.assertEqual(len(files), 1)
@@ -657,7 +653,12 @@ class ServeHelperTests(unittest.TestCase):
     def test_build_serve_auth_uses_given_public_token(self) -> None:
         from ctf_generator.cli import _build_serve_auth
 
-        args = argparse_namespace(admin_user="admin", admin_password="hunter2", public_token="fixed-token")  # noqa: S106 -- fake credentials for CLI auth assembly test
+        # Fake credentials for CLI auth assembly test (S106 suppressed).
+        args = argparse_namespace(
+            admin_user="admin",
+            admin_password="hunter2",  # noqa: S106 -- fake credential
+            public_token="fixed-token",  # noqa: S106 -- fake token
+        )
         auth = _build_serve_auth(args)
         self.assertEqual(auth.admin_username, "admin")
         self.assertEqual(auth.public_token, "fixed-token")
@@ -742,9 +743,7 @@ class QuickstartCommandTests(unittest.TestCase):
     def test_quickstart_creates_sample_challenges_and_exits_zero(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             output_dir = Path(temp_dir) / "quickstart-out"
-            code, out, _ = _run(
-                ["quickstart", "--output", str(output_dir), "--seed", "qs-test"]
-            )
+            code, out, _ = _run(["quickstart", "--output", str(output_dir), "--seed", "qs-test"])
             self.assertEqual(code, 0)
 
             for name in ("web-sample", "crypto-sample", "cve-log4shell-sample"):

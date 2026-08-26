@@ -157,13 +157,11 @@ class Job:
         _require_nonempty(self.job_id, "job_id")
         if self.job_type not in VALID_JOB_TYPES:
             raise ValueError(
-                f"job_type must be one of {sorted(VALID_JOB_TYPES)}, "
-                f"got {self.job_type!r}"
+                f"job_type must be one of {sorted(VALID_JOB_TYPES)}, got {self.job_type!r}"
             )
         if self.status not in VALID_JOB_STATUSES:
             raise ValueError(
-                f"status must be one of {sorted(VALID_JOB_STATUSES)}, "
-                f"got {self.status!r}"
+                f"status must be one of {sorted(VALID_JOB_STATUSES)}, got {self.status!r}"
             )
         _require_nonempty(self.idempotency_key, "idempotency_key")
         _require_tz_aware(self.available_at, "available_at")
@@ -176,22 +174,18 @@ class Job:
         for cap in self.required_capabilities:
             _require_nonempty(cap, "required_capabilities entry")
         if not isinstance(self.max_attempts, int) or self.max_attempts < 1:
-            raise ValueError(
-                f"max_attempts must be an int >= 1, got {self.max_attempts!r}"
-            )
+            raise ValueError(f"max_attempts must be an int >= 1, got {self.max_attempts!r}")
         if (
             not isinstance(self.attempt_count, int)
             or self.attempt_count < 0
             or self.attempt_count > self.max_attempts
         ):
             raise ValueError(
-                "attempt_count must be an int in [0, max_attempts], "
-                f"got {self.attempt_count!r}"
+                f"attempt_count must be an int in [0, max_attempts], got {self.attempt_count!r}"
             )
         if not isinstance(self.backoff_base_seconds, int) or self.backoff_base_seconds < 1:
             raise ValueError(
-                f"backoff_base_seconds must be an int >= 1, "
-                f"got {self.backoff_base_seconds!r}"
+                f"backoff_base_seconds must be an int >= 1, got {self.backoff_base_seconds!r}"
             )
         if self.error_class is not None and self.error_class not in VALID_JOB_ERROR_CLASSES:
             raise ValueError(
@@ -203,9 +197,7 @@ class Job:
         if self.competition_id is not None:
             _require_nonempty(self.competition_id, "competition_id")
         if (self.definition_slug is None) != (self.version_no is None):
-            raise ValueError(
-                "definition_slug and version_no must be given together or not at all"
-            )
+            raise ValueError("definition_slug and version_no must be given together or not at all")
         if self.definition_slug is not None:
             _require_nonempty(self.definition_slug, "definition_slug")
         if self.version_no is not None and (
@@ -256,8 +248,7 @@ class JobTransition:
             )
         if self.to_status not in VALID_JOB_STATUSES:
             raise ValueError(
-                f"to_status must be one of {sorted(VALID_JOB_STATUSES)}, "
-                f"got {self.to_status!r}"
+                f"to_status must be one of {sorted(VALID_JOB_STATUSES)}, got {self.to_status!r}"
             )
         if not isinstance(self.attempt, int) or self.attempt < 0:
             raise ValueError(f"attempt must be an int >= 0, got {self.attempt!r}")

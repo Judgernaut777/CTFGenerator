@@ -164,9 +164,7 @@ class PerModeDivergenceTests(unittest.TestCase):
     def test_purple_private_deliverable_differs_from_red(self) -> None:
         files_red = self._render("red")
         files_purple = self._render("purple")
-        self.assertNotEqual(
-            files_red["private/solution.md"], files_purple["private/solution.md"]
-        )
+        self.assertNotEqual(files_red["private/solution.md"], files_purple["private/solution.md"])
         # Purple's solution must additionally require the detection/response
         # write-up; red's solution must remain exploit-only.
         self.assertIn("purple-mode) deliverable", files_purple["private/solution.md"])

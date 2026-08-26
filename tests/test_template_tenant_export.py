@@ -30,9 +30,7 @@ def _spec(**overrides: object) -> ChallengeSpec:
 
 class ModuleInterfaceTests(unittest.TestCase):
     def test_vuln_classes_exposed(self) -> None:
-        self.assertEqual(
-            set(tenant_export.VULN_CLASSES), {"field_trust", "predictable_job_id"}
-        )
+        self.assertEqual(set(tenant_export.VULN_CLASSES), {"field_trust", "predictable_job_id"})
 
 
 class VariantJsonTests(unittest.TestCase):

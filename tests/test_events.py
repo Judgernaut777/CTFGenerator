@@ -28,14 +28,17 @@ class InMemoryEventStoreTests(unittest.TestCase):
         first = store.append("team_join", "team-1", "chal-1", payload={"note": "hi"})
         second = store.append("flag_submit", "team-1", "chal-1")
 
-        self.assertEqual(first, Event(
-            seq=1,
-            ts="2023-11-14T22:13:20+00:00",
-            type="team_join",
-            team_id="team-1",
-            challenge_id="chal-1",
-            payload={"note": "hi"},
-        ))
+        self.assertEqual(
+            first,
+            Event(
+                seq=1,
+                ts="2023-11-14T22:13:20+00:00",
+                type="team_join",
+                team_id="team-1",
+                challenge_id="chal-1",
+                payload={"note": "hi"},
+            ),
+        )
         self.assertEqual(second.seq, 2)
         self.assertEqual(second.ts, "2023-11-14T22:14:20+00:00")
         self.assertEqual(second.payload, {})
@@ -132,10 +135,13 @@ class JsonlEventStoreTests(unittest.TestCase):
 
             third = reopened.append("hint_used", "team-1", "chal-1")
             self.assertEqual(third.seq, 3)
-            self.assertEqual(reopened.since(1), [
-                reopened.all()[1],
-                third,
-            ])
+            self.assertEqual(
+                reopened.since(1),
+                [
+                    reopened.all()[1],
+                    third,
+                ],
+            )
 
     def test_since_and_all_on_freshly_loaded_store(self) -> None:
         clock = ScriptedClock([0.0, 1.0, 2.0])

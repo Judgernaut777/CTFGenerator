@@ -33,9 +33,7 @@ def validate_window(
             {"field": "scoring_start_time", "issue": "must be within [start_time, end_time]"}
         )
     if freeze is not None and not (start <= freeze <= end):
-        problems.append(
-            {"field": "freeze_time", "issue": "must be within [start_time, end_time]"}
-        )
+        problems.append({"field": "freeze_time", "issue": "must be within [start_time, end_time]"})
     return problems
 
 
@@ -100,9 +98,7 @@ def competition_to_response(config: CompetitionConfig) -> dict[str, Any]:
         "start_time": config.start_time.isoformat(),
         "end_time": config.end_time.isoformat(),
         "scoring_start_time": (
-            config.scoring_start_time.isoformat()
-            if config.scoring_start_time
-            else None
+            config.scoring_start_time.isoformat() if config.scoring_start_time else None
         ),
         "freeze_time": config.freeze_time.isoformat() if config.freeze_time else None,
         "default_scoring": (

@@ -156,9 +156,7 @@ def _seed_parents(db) -> None:
         SqlAlchemyChallengeVersionRepository(s).publish("sql", 1, _NOW)
     with db.session_scope() as s:
         reg = SqlAlchemyWorkerRegistry(s)
-        reg.add(
-            Worker("w1", "docker-rootless", ("x86_64",), ("launch_instance",), 4, "1")
-        )
+        reg.add(Worker("w1", "docker-rootless", ("x86_64",), ("launch_instance",), 4, "1"))
         reg.approve("w1")
         reg.heartbeat("w1", _NOW)
     with db.session_scope() as s:
@@ -169,9 +167,7 @@ def _seed_parents(db) -> None:
 
 def _record_build_image(db) -> None:
     with db.session_scope() as s:
-        SqlAlchemyChallengeBuildImageRepository(s).add(
-            "sql", 1, _IMG, _DIGEST, _BUNDLE, _NOW
-        )
+        SqlAlchemyChallengeBuildImageRepository(s).add("sql", 1, _IMG, _DIGEST, _BUNDLE, _NOW)
 
 
 def _requirements() -> WorkerRequirements:
@@ -185,9 +181,7 @@ def _platform_item(amount: int = 1) -> ReservationItem:
 
 
 def _lifecycle(db) -> InstanceLifecycleService:
-    return InstanceLifecycleService(
-        db, scheduling=SchedulingService(db), jobs=JobService(db)
-    )
+    return InstanceLifecycleService(db, scheduling=SchedulingService(db), jobs=JobService(db))
 
 
 def _request(lifecycle, iid, **overrides):

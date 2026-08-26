@@ -91,9 +91,7 @@ class ScoreReportCliTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as temp_dir:
             challenge = _generate(temp_dir)
             report_dir = Path(temp_dir) / "reports"
-            with mock.patch.object(
-                report_writer, "write_report", side_effect=OSError("disk full")
-            ):
+            with mock.patch.object(report_writer, "write_report", side_effect=OSError("disk full")):
                 code = main(["score", str(challenge), "--report-dir", str(report_dir)])
             # Report-write failure must never change the command's exit code.
             self.assertEqual(code, 0)

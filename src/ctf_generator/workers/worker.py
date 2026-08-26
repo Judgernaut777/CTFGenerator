@@ -206,9 +206,7 @@ def _order_stack(
     manifest parser already refused those at build time) -- any unplaced services
     are appended in name order so launch still proceeds."""
     by_name = {s.service_name: s for s in stack}
-    remaining = {
-        s.service_name: {d for d in s.depends_on if d in by_name} for s in stack
-    }
+    remaining = {s.service_name: {d for d in s.depends_on if d in by_name} for s in stack}
     ordered: list[StackServiceImage] = []
     while remaining:
         ready = sorted(n for n, deps in remaining.items() if not deps)
@@ -248,17 +246,13 @@ def _safe_extract_bundle(data: bytes, dest: Path) -> None:
         total_size = 0
         for member in members:
             if not member.isfile():
-                raise ValueError(
-                    f"build bundle member is not a regular file: {member.name!r}"
-                )
+                raise ValueError(f"build bundle member is not a regular file: {member.name!r}")
             name = member.name
             if name.startswith("/") or ".." in Path(name).parts:
                 raise ValueError(f"build bundle member has an unsafe path: {name!r}")
             resolved = (dest_root / name).resolve()
             if resolved != dest_root and dest_root not in resolved.parents:
-                raise ValueError(
-                    f"build bundle member escapes the build context: {name!r}"
-                )
+                raise ValueError(f"build bundle member escapes the build context: {name!r}")
             total_size += member.size
             if total_size > MAX_BUILD_BUNDLE_BYTES:
                 raise ValueError(
@@ -283,14 +277,11 @@ def _select_build_context(bundle_root: Path) -> Path:
         return bundle_root
     services_dir = bundle_root / "services"
     if services_dir.is_dir():
-        candidates = sorted(
-            p.parent for p in services_dir.glob("*/Dockerfile") if p.is_file()
-        )
+        candidates = sorted(p.parent for p in services_dir.glob("*/Dockerfile") if p.is_file())
         if candidates:
             return candidates[0]
     raise ValueError(
-        "build bundle contains no buildable Dockerfile "
-        "(checked the bundle root and services/*/)"
+        "build bundle contains no buildable Dockerfile (checked the bundle root and services/*/)"
     )
 
 
@@ -303,8 +294,7 @@ class WorkerControlPlaneClient(Protocol):
         """Return a live scoped bearer token (refreshing/rotating as needed)."""
         ...
 
-    def claim(self, token: str, lease_seconds: int, now: datetime) -> JobLease | None:
-        ...
+    def claim(self, token: str, lease_seconds: int, now: datetime) -> JobLease | None: ...
 
     def start(self, token: str, job_id: str, lease_token: str, now: datetime) -> None:
         """``claimed`` -> ``running`` before the worker begins the work."""
@@ -312,13 +302,11 @@ class WorkerControlPlaneClient(Protocol):
 
     def heartbeat(
         self, token: str, job_id: str, lease_token: str, lease_seconds: int, now: datetime
-    ) -> bool:
-        ...
+    ) -> bool: ...
 
     def complete(
         self, token: str, job_id: str, lease_token: str, result: dict | None, now: datetime
-    ) -> None:
-        ...
+    ) -> None: ...
 
     def fail(
         self,
@@ -329,11 +317,9 @@ class WorkerControlPlaneClient(Protocol):
         error_detail: str | None,
         retryable: bool,
         now: datetime,
-    ) -> None:
-        ...
+    ) -> None: ...
 
-    def get_instance(self, instance_id: str) -> Instance | None:
-        ...
+    def get_instance(self, instance_id: str) -> Instance | None: ...
 
     def replace_instance(self, instance_id: str, now: datetime) -> Instance:
         """Re-place + re-reserve an instance whose ``assigned_worker`` is ``None``
@@ -368,8 +354,7 @@ class WorkerControlPlaneClient(Protocol):
 
     def transition_instance(
         self, instance_id: str, to_state: str, *, reason: str, now: datetime
-    ) -> None:
-        ...
+    ) -> None: ...
 
     def fetch_build_bundle(
         self,
@@ -551,8 +536,13 @@ class Worker:
             # travels in error_detail.
             _LOG.error("job %s refused: unsupported runtime", job.job_id)
             self._client.fail(
-                token, job.job_id, lease.lease_token, "infrastructure",
-                f"unsupported_runtime: {exc}", False, self._clock(),
+                token,
+                job.job_id,
+                lease.lease_token,
+                "infrastructure",
+                f"unsupported_runtime: {exc}",
+                False,
+                self._clock(),
             )
             return
         except Exception as exc:  # noqa: BLE001 - report any failure as retryable
@@ -566,8 +556,13 @@ class Worker:
                 else f"{type(exc).__name__}: {exc}"
             )
             self._client.fail(
-                token, job.job_id, lease.lease_token, "internal",
-                detail, True, self._clock(),
+                token,
+                job.job_id,
+                lease.lease_token,
+                "internal",
+                detail,
+                True,
+                self._clock(),
             )
             return
         # Renew the lease right before completing so a slow launch cannot lose its
@@ -577,9 +572,7 @@ class Worker:
         self._client.heartbeat(
             token, job.job_id, lease.lease_token, self._config.lease_seconds, self._clock()
         )
-        self._client.complete(
-            token, job.job_id, lease.lease_token, outcome.result, self._clock()
-        )
+        self._client.complete(token, job.job_id, lease.lease_token, outcome.result, self._clock())
 
     # -- dispatch table --------------------------------------------------------
 
@@ -630,9 +623,7 @@ class Worker:
 
     def _build_request(self, instance: Instance) -> ContainerRequest:
         if not instance.image_ref:
-            raise ValueError(
-                f"instance {instance.instance_id!r} has no image_ref to launch"
-            )
+            raise ValueError(f"instance {instance.instance_id!r} has no image_ref to launch")
         team_key = f"{instance.competition_id}:{instance.team_name}"
         return ContainerRequest(
             instance_id=instance.instance_id,
@@ -742,9 +733,7 @@ class Worker:
             },
         )
 
-    def _verify_image_digest(
-        self, instance_id: str, image_ref: str, now: datetime
-    ) -> None:
+    def _verify_image_digest(self, instance_id: str, image_ref: str, now: datetime) -> None:
         """Refuse to launch a mutated or substituted image. If the control plane
         recorded a build digest for ``image_ref`` (the registry row this instance's
         image_ref resolves to), the locally-present image's id MUST equal it; a
@@ -761,9 +750,7 @@ class Worker:
             image_ref, self._client.expected_image_digest(instance_id, now)
         )
 
-    def _refuse_on_digest_mismatch(
-        self, image_ref: str, expected: str | None
-    ) -> None:
+    def _refuse_on_digest_mismatch(self, image_ref: str, expected: str | None) -> None:
         """Refuse (``UnsupportedRuntimeError``) if a recorded ``expected`` digest
         does not match the local image's id, or the image is absent locally. No
         recorded digest => skip. Shared by the single-image pin and the per-service
@@ -855,9 +842,7 @@ class Worker:
             ),
             now,
         )
-        self._client.transition_instance(
-            instance_id, "stopping", reason="stop requested", now=now
-        )
+        self._client.transition_instance(instance_id, "stopping", reason="stop requested", now=now)
         self._client.transition_instance(
             instance_id, "stopped", reason="container removed", now=now
         )
@@ -874,9 +859,7 @@ class Worker:
         # its service containers are running, so a crashed sibling is never
         # invisible (a single-image instance is just one container).
         containers = self._backend.find_stack_containers(instance_id)
-        observations = [
-            self._backend.health_check(instance_id, cid) for cid, _svc in containers
-        ]
+        observations = [self._backend.health_check(instance_id, cid) for cid, _svc in containers]
         state, healthy = self._aggregate_state(observations)
         self._client.report_health(
             HealthObservation(
@@ -889,9 +872,7 @@ class Worker:
             ),
             now,
         )
-        return _DispatchOutcome(
-            result={"healthy": healthy, "services": len(containers)}
-        )
+        return _DispatchOutcome(result={"healthy": healthy, "services": len(containers)})
 
     def _do_logs(self, instance_id: str, now: datetime) -> _DispatchOutcome:
         # Collect from EVERY service container, not just one, so a stack's logs are
@@ -904,9 +885,7 @@ class Worker:
             len(self._backend.collect_logs(instance_id, cid).splitlines())
             for cid, _svc in containers
         )
-        return _DispatchOutcome(
-            result={"log_lines": total, "services": len(containers)}
-        )
+        return _DispatchOutcome(result={"log_lines": total, "services": len(containers)})
 
     @staticmethod
     def _aggregate_state(observations: list) -> tuple[str, bool]:
@@ -931,10 +910,7 @@ class Worker:
             return [cid for cid, _svc in pairs]
         order = {svc.service_name: i for i, svc in enumerate(_order_stack(stack))}
         fallback = len(order)
-        return [
-            cid
-            for cid, svc in sorted(pairs, key=lambda p: order.get(p[1], fallback))
-        ]
+        return [cid for cid, svc in sorted(pairs, key=lambda p: order.get(p[1], fallback))]
 
     # -- agent evaluation (M15b, NOT instance-scoped) --------------------------
 
@@ -1001,14 +977,10 @@ class Worker:
                 }
             )
 
-        return _DispatchOutcome(
-            result=self._eval_result(eval_run_id, adversarial, report)
-        )
+        return _DispatchOutcome(result=self._eval_result(eval_run_id, adversarial, report))
 
     @staticmethod
-    def _eval_result(
-        eval_run_id: str, adversarial: bool, report
-    ) -> dict:
+    def _eval_result(eval_run_id: str, adversarial: bool, report) -> dict:
         """Project a raw eval report into the allowlisted, secret-free result.
 
         For a plain profile the report is an ``AgentEvalReport``
@@ -1034,9 +1006,7 @@ class Worker:
                 "solved": bool(report.solved),
                 "steps": int(report.steps),
             }
-        result["notes"] = [
-            _redact_eval_text(str(note)) for note in raw_notes[:_MAX_EVAL_NOTES]
-        ]
+        result["notes"] = [_redact_eval_text(str(note)) for note in raw_notes[:_MAX_EVAL_NOTES]]
         return result
 
     # -- build (M-buildpipeline, NOT instance-scoped) ---------------------------
@@ -1077,8 +1047,7 @@ class Worker:
             raise ValueError("build_challenge payload missing spec_sha256")
         if self._build_backend is None:
             raise RuntimeError(
-                "worker has no BuildBackend configured; cannot dispatch "
-                "build_challenge"
+                "worker has no BuildBackend configured; cannot dispatch build_challenge"
             )
 
         bundle = self._client.fetch_build_bundle(
@@ -1152,9 +1121,7 @@ class Worker:
         primary: dict | None = None
         for svc in manifest.services:
             context_dir = self._resolve_service_context(bundle_root, svc.build_context)
-            svc_tag = _stack_service_tag(
-                definition_slug, version_no, bundle_sha256, svc.name
-            )
+            svc_tag = _stack_service_tag(definition_slug, version_no, bundle_sha256, svc.name)
             svc_digest = self._build_image(context_dir, svc_tag)
             entry = {
                 "service": svc.name,
@@ -1198,13 +1165,9 @@ class Worker:
         root = bundle_root.resolve()
         ctx = (bundle_root / build_context).resolve()
         if ctx != root and root not in ctx.parents:
-            raise ValueError(
-                f"service build context {build_context!r} escapes the bundle"
-            )
+            raise ValueError(f"service build context {build_context!r} escapes the bundle")
         if not (ctx / "Dockerfile").is_file():
-            raise ValueError(
-                f"service build context {build_context!r} has no Dockerfile"
-            )
+            raise ValueError(f"service build context {build_context!r} has no Dockerfile")
         return ctx
 
     def _current_container(self, instance_id: str) -> str | None:
@@ -1282,14 +1245,11 @@ def main(argv: Sequence[str] | None = None) -> int:  # pragma: no cover - entryp
     # runtime gaps (rootless/userns/apparmor) so a rootful demo host can launch.
     # Unset => secure default (require_rootless=True, refuse a rootful host).
     raw_gaps = os.environ.get("CTFGEN_WORKER_ACKNOWLEDGED_GAPS", "").strip()
-    acknowledged_gaps = frozenset(
-        g.strip() for g in raw_gaps.split(",") if g.strip()
-    )
+    acknowledged_gaps = frozenset(g.strip() for g in raw_gaps.split(",") if g.strip())
     unknown = acknowledged_gaps - ACKNOWLEDGEABLE_GAPS
     if unknown:
         _LOG.error(
-            "ctfgen-worker: CTFGEN_WORKER_ACKNOWLEDGED_GAPS has unknown gaps %s; "
-            "allowed: %s",
+            "ctfgen-worker: CTFGEN_WORKER_ACKNOWLEDGED_GAPS has unknown gaps %s; allowed: %s",
             sorted(unknown),
             sorted(ACKNOWLEDGEABLE_GAPS),
         )

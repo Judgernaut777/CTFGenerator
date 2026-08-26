@@ -65,9 +65,7 @@ class SqlAlchemyReportSnapshotRepository:
         row = self._session.get(ReportSnapshotRow, pk)
         return _to_domain(row) if row is not None else None
 
-    def latest_for_subject(
-        self, report_type: str, subject: str
-    ) -> ReportSnapshot | None:
+    def latest_for_subject(self, report_type: str, subject: str) -> ReportSnapshot | None:
         """The most recent snapshot for ``(report_type, subject)``, or ``None``.
         Newest wins (``created_at`` desc, then a stable ``id`` tiebreak)."""
         row = self._session.scalars(
@@ -76,16 +74,12 @@ class SqlAlchemyReportSnapshotRepository:
                 ReportSnapshotRow.report_type == report_type,
                 ReportSnapshotRow.subject == subject,
             )
-            .order_by(
-                ReportSnapshotRow.created_at.desc(), ReportSnapshotRow.id.desc()
-            )
+            .order_by(ReportSnapshotRow.created_at.desc(), ReportSnapshotRow.id.desc())
             .limit(1)
         ).first()
         return _to_domain(row) if row is not None else None
 
-    def list_for_subject(
-        self, report_type: str, subject: str
-    ) -> list[ReportSnapshot]:
+    def list_for_subject(self, report_type: str, subject: str) -> list[ReportSnapshot]:
         """Every snapshot for ``(report_type, subject)``, newest first."""
         rows = self._session.scalars(
             select(ReportSnapshotRow)
@@ -93,8 +87,6 @@ class SqlAlchemyReportSnapshotRepository:
                 ReportSnapshotRow.report_type == report_type,
                 ReportSnapshotRow.subject == subject,
             )
-            .order_by(
-                ReportSnapshotRow.created_at.desc(), ReportSnapshotRow.id.desc()
-            )
+            .order_by(ReportSnapshotRow.created_at.desc(), ReportSnapshotRow.id.desc())
         )
         return [_to_domain(r) for r in rows]

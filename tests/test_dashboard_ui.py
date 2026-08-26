@@ -95,7 +95,14 @@ class PublicPageTests(unittest.TestCase):
         self.assertNotIn("innerHTML", page)
 
     def test_initial_rows_are_html_escaped(self) -> None:
-        rows = [{"display_name": "<img src=x onerror=alert(1)>", "rank": 1, "score": 10, "solve_count": 1}]
+        rows = [
+            {
+                "display_name": "<img src=x onerror=alert(1)>",
+                "rank": 1,
+                "score": 10,
+                "solve_count": 1,
+            }
+        ]
         page = public_scoreboard_page(rows)
         self.assertNotIn("<img src=x onerror=alert(1)>", page)
         self.assertIn("&lt;img", page)

@@ -30,23 +30,18 @@ INSTANCE_ACTION_JOB_TYPES: dict[str, str] = {
 }
 
 
-def corrective_idempotency_key(
-    instance_id: str, generation: int, action: str
-) -> str:
+def corrective_idempotency_key(instance_id: str, generation: int, action: str) -> str:
     """The single stable idempotency key for an instance corrective job:
     ``instance:<id>:gen<n>:<action>``. Two enqueues with this key collapse to one
     job (a second pass / retry is a no-op)."""
     if action not in INSTANCE_ACTION_JOB_TYPES:
         raise ValueError(
-            f"action must be one of {sorted(INSTANCE_ACTION_JOB_TYPES)}, "
-            f"got {action!r}"
+            f"action must be one of {sorted(INSTANCE_ACTION_JOB_TYPES)}, got {action!r}"
         )
     return f"instance:{instance_id}:gen{generation}:{action}"
 
 
-def build_corrective_job(
-    instance: Instance, generation: int, action: str, now: datetime
-) -> Job:
+def build_corrective_job(instance: Instance, generation: int, action: str, now: datetime) -> Job:
     """Build the (idempotency-keyed) corrective job for ``action`` against
     ``instance`` at ``generation``. Carries the instance's competition /
     challenge-version audit linkage and a reference-only payload; requires the
@@ -55,9 +50,7 @@ def build_corrective_job(
     return Job(
         job_id=str(uuid.uuid4()),
         job_type=job_type,
-        idempotency_key=corrective_idempotency_key(
-            instance.instance_id, generation, action
-        ),
+        idempotency_key=corrective_idempotency_key(instance.instance_id, generation, action),
         available_at=now,
         required_capabilities=(job_type,),
         payload={

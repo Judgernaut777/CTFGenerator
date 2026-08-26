@@ -65,9 +65,7 @@ class AlphaExitSimulationTests(unittest.TestCase):
         self.assertTrue(self.res.invariants["append_only_consistent"])
 
     def test_published_version_is_content_addressed_and_immutable(self) -> None:
-        self.assertTrue(
-            self.res.invariants["published_content_addressed_immutable"]
-        )
+        self.assertTrue(self.res.invariants["published_content_addressed_immutable"])
         # The content identity is a real sha256 hex digest.
         self.assertIsNotNone(self.res.spec_sha256)
         self.assertRegex(self.res.spec_sha256, r"\A[0-9a-f]{64}\Z")
@@ -79,9 +77,7 @@ class AlphaExitSimulationTests(unittest.TestCase):
         blob = "\n".join(self.res.log)
         self.assertNotIn("CTF{internal-alpha-secret-flag}", blob)
         self.assertNotIn("Bearer ", blob)
-        self.assertTrue(
-            self.res.invariants["flag_absent_from_contestant_surfaces"]
-        )
+        self.assertTrue(self.res.invariants["flag_absent_from_contestant_surfaces"])
 
 
 if __name__ == "__main__":  # pragma: no cover

@@ -86,7 +86,9 @@ def _authenticator() -> StubAuthenticator:
                 "org-user", {"organizer"}, memberships={_CID: ("organizer", None)}
             ),
             _PLAYER: principal_for(
-                "player-user", {"player"}, team="Red",
+                "player-user",
+                {"player"},
+                team="Red",
                 memberships={_CID: ("player", "Red")},
             ),
         }
@@ -99,9 +101,7 @@ def _client_and_db():
         command.upgrade(_alembic_config(url), "head")
         db = Database(DatabaseConfig(url=url))
         try:
-            app = create_app(
-                ApiSettings(), database=db, authenticator=_authenticator()
-            )
+            app = create_app(ApiSettings(), database=db, authenticator=_authenticator())
             yield TestClient(app), db
         finally:
             db.dispose()
@@ -124,39 +124,48 @@ def _competition_body() -> dict:
 
 def _seed(client: TestClient, db: Database) -> None:
     """Competition + Red/Blue teams + two published, attached challenges."""
-    assert client.post(
-        "/api/v1/competitions", headers=_auth(), json=_competition_body()
-    ).status_code == 201
+    assert (
+        client.post("/api/v1/competitions", headers=_auth(), json=_competition_body()).status_code
+        == 201
+    )
     for team in ("Red", "Blue"):
-        assert client.post(
-            "/api/v1/teams",
-            headers=_auth(),
-            json={"competition_id": _CID, "name": team},
-        ).status_code == 201
+        assert (
+            client.post(
+                "/api/v1/teams",
+                headers=_auth(),
+                json={"competition_id": _CID, "name": team},
+            ).status_code
+            == 201
+        )
     for slug, flag in _FLAGS.items():
-        assert client.post(
-            "/api/v1/challenge-definitions",
-            headers=_auth(),
-            json={"family": "web", "slug": slug, "title": slug},
-        ).status_code == 201
-        assert client.post(
-            "/api/v1/challenge-versions",
-            headers=_auth(),
-            json={
-                "definition_slug": slug,
-                "seed": "s",
-                "family_version": "1.0.0",
-                "spec": {"title": slug, "flag": flag},
-            },
-        ).status_code == 201
-        assert client.post(
-            f"/api/v1/challenge-versions/{slug}/1/publish", headers=_auth()
-        ).status_code == 200
+        assert (
+            client.post(
+                "/api/v1/challenge-definitions",
+                headers=_auth(),
+                json={"family": "web", "slug": slug, "title": slug},
+            ).status_code
+            == 201
+        )
+        assert (
+            client.post(
+                "/api/v1/challenge-versions",
+                headers=_auth(),
+                json={
+                    "definition_slug": slug,
+                    "seed": "s",
+                    "family_version": "1.0.0",
+                    "spec": {"title": slug, "flag": flag},
+                },
+            ).status_code
+            == 201
+        )
+        assert (
+            client.post(f"/api/v1/challenge-versions/{slug}/1/publish", headers=_auth()).status_code
+            == 200
+        )
         with db.session_scope() as session:
             SqlAlchemyChallengePublicationRepository(session).add(
-                ChallengePublication(
-                    competition_id=_CID, definition_slug=slug, version_no=1
-                )
+                ChallengePublication(competition_id=_CID, definition_slug=slug, version_no=1)
             )
 
 
@@ -180,9 +189,7 @@ class ScoreboardApiIntegrationTests(unittest.TestCase):
     def test_empty_scoreboard(self) -> None:
         with _client_and_db() as (client, db):
             _seed(client, db)
-            r = client.get(
-                f"/api/v1/competitions/{_CID}/scoreboard", headers=_auth(_PLAYER)
-            )
+            r = client.get(f"/api/v1/competitions/{_CID}/scoreboard", headers=_auth(_PLAYER))
             self.assertEqual(r.status_code, 200, r.text)
             self.assertEqual(r.json()["schema"], "ctfgen.scoreboard")
             self.assertEqual(r.json()["data"], [])
@@ -197,9 +204,7 @@ class ScoreboardApiIntegrationTests(unittest.TestCase):
             _solve(client, "Blue", "sqli-1")
             ScoreProjector(db).run_until_drained()
 
-            full = client.get(
-                f"/api/v1/competitions/{_CID}/scoreboard", headers=_auth(_PLAYER)
-            )
+            full = client.get(f"/api/v1/competitions/{_CID}/scoreboard", headers=_auth(_PLAYER))
             self.assertEqual(full.status_code, 200, full.text)
             rows = full.json()["data"]
             self.assertEqual([r["team_id"] for r in rows], ["Red", "Blue"])

@@ -165,9 +165,7 @@ def _enroll_worker(
     """Register + approve a worker and return its bearer token. Establishes a fresh
     liveness heartbeat unless ``fresh`` is False (used for the stale test)."""
     enrollment = WorkerEnrollmentService(db)
-    enrollment.register_worker(
-        Worker(name, "docker-rootless", architectures, caps, 4, "1.0.0")
-    )
+    enrollment.register_worker(Worker(name, "docker-rootless", architectures, caps, 4, "1.0.0"))
     now = _now()
     issued = (
         enrollment.approve_worker(name, now)
@@ -228,7 +226,8 @@ def _ensure_parents(db) -> None:
     with db.session_scope() as s:
         SqlAlchemyCompetitionRepository(s).add(
             CompetitionConfig(
-                competition_id=_CID, name="Spring CTF",
+                competition_id=_CID,
+                name="Spring CTF",
                 start_time=now - timedelta(hours=1),
                 end_time=now + timedelta(hours=47),
             )
@@ -239,9 +238,14 @@ def _ensure_parents(db) -> None:
         )
         SqlAlchemyChallengeVersionRepository(s).add(
             ChallengeVersion(
-                definition_slug="sqli", version_no=1, state="draft",
-                family_version="1.0", seed="s", spec_sha256="h1",
-                spec={"t": 1}, spec_version="1.0",
+                definition_slug="sqli",
+                version_no=1,
+                state="draft",
+                family_version="1.0",
+                seed="s",
+                spec_sha256="h1",
+                spec={"t": 1},
+                spec_version="1.0",
             )
         )
     with db.session_scope() as s:
@@ -272,7 +276,9 @@ def _seed_instance(db, *, assigned=_WORKER, state="starting", with_secrets=False
         if with_secrets:
             repo.record_credential(
                 InstanceCredential(
-                    instance_id=iid, name="ssh", secret_ref=_CRED_SECRET,
+                    instance_id=iid,
+                    name="ssh",
+                    secret_ref=_CRED_SECRET,
                     scopes=("shell",),
                 )
             )
@@ -357,8 +363,10 @@ class WorkerHttpHappyPathTests(unittest.TestCase):
                 f"/api/v1/worker/instances/{iid}/health",
                 headers=_bearer(token),
                 json={
-                    "observed_state": "starting", "healthy": False,
-                    "generation": 1, "observed_at": _now().isoformat(),
+                    "observed_state": "starting",
+                    "healthy": False,
+                    "generation": 1,
+                    "observed_at": _now().isoformat(),
                 },
             )
             self.assertEqual(health.status_code, 204, health.text)
@@ -367,8 +375,12 @@ class WorkerHttpHappyPathTests(unittest.TestCase):
                 f"/api/v1/worker/instances/{iid}/endpoint",
                 headers=_bearer(token),
                 json={
-                    "name": "web", "host": "10.0.0.2", "port": 8080,
-                    "protocol": "tcp", "url": "tcp://10.0.0.2:8080", "internal": True,
+                    "name": "web",
+                    "host": "10.0.0.2",
+                    "port": 8080,
+                    "protocol": "tcp",
+                    "url": "tcp://10.0.0.2:8080",
+                    "internal": True,
                 },
             )
             self.assertEqual(ep.status_code, 204, ep.text)
@@ -387,17 +399,13 @@ class WorkerHttpHappyPathTests(unittest.TestCase):
             )
             self.assertEqual(trans.status_code, 204, trans.text)
             with db.session_scope() as s:
-                self.assertEqual(
-                    SqlAlchemyInstanceRepository(s).get(iid).state, "healthy"
-                )
+                self.assertEqual(SqlAlchemyInstanceRepository(s).get(iid).state, "healthy")
 
     def test_get_owned_instance_view(self) -> None:
         with _client_and_db() as (client, db):
             token = _enroll_worker(db)
             iid = _seed_instance(db, assigned=_WORKER)
-            r = client.get(
-                f"/api/v1/worker/instances/{iid}", headers=_bearer(token)
-            )
+            r = client.get(f"/api/v1/worker/instances/{iid}", headers=_bearer(token))
             self.assertEqual(r.status_code, 200, r.text)
             body = r.json()
             self.assertEqual(body["instance_id"], iid)
@@ -424,7 +432,7 @@ class WorkerHttpIdentityIsFromCredentialTests(unittest.TestCase):
                 json={
                     "lease_seconds": 60,
                     "worker_name": _OTHER_WORKER,  # spoof attempt
-                    "worker_id": _OTHER_WORKER,     # spoof attempt
+                    "worker_id": _OTHER_WORKER,  # spoof attempt
                 },
             )
             self.assertEqual(claim.status_code, 200, claim.text)
@@ -443,8 +451,11 @@ class WorkerHttpIdentityIsFromCredentialTests(unittest.TestCase):
                 f"/api/v1/worker/instances/{iid}/health",
                 headers=_bearer(token),
                 json={
-                    "observed_state": "healthy", "healthy": True, "generation": 1,
-                    "observed_at": _now().isoformat(), "worker": _OTHER_WORKER,
+                    "observed_state": "healthy",
+                    "healthy": True,
+                    "generation": 1,
+                    "observed_at": _now().isoformat(),
+                    "worker": _OTHER_WORKER,
                 },
             )
             self.assertEqual(r.status_code, 204, r.text)
@@ -474,9 +485,7 @@ class WorkerHttpCredentialRejectionTests(unittest.TestCase):
         with _client_and_db() as (client, db):
             token = _enroll_worker(db)
             WorkerEnrollmentService(db).revoke_worker(_WORKER, _now())
-            r = client.post(
-                "/api/v1/worker/jobs/claim", headers=_bearer(token), json={}
-            )
+            r = client.post("/api/v1/worker/jobs/claim", headers=_bearer(token), json={})
             self.assertEqual(r.status_code, 401, r.text)
 
     def test_quarantined_credential_is_401(self) -> None:
@@ -484,9 +493,7 @@ class WorkerHttpCredentialRejectionTests(unittest.TestCase):
             token = _enroll_worker(db)
             with db.session_scope() as s:
                 SqlAlchemyWorkerRegistry(s).quarantine(_WORKER, _now(), "isolation")
-            r = client.post(
-                "/api/v1/worker/jobs/claim", headers=_bearer(token), json={}
-            )
+            r = client.post("/api/v1/worker/jobs/claim", headers=_bearer(token), json={})
             self.assertEqual(r.status_code, 401, r.text)
 
     def test_draining_worker_cannot_claim_is_409(self) -> None:
@@ -495,9 +502,7 @@ class WorkerHttpCredentialRejectionTests(unittest.TestCase):
             _enqueue_launch_job(db)
             with db.session_scope() as s:
                 SqlAlchemyWorkerRegistry(s).drain(_WORKER, _now())
-            r = client.post(
-                "/api/v1/worker/jobs/claim", headers=_bearer(token), json={}
-            )
+            r = client.post("/api/v1/worker/jobs/claim", headers=_bearer(token), json={})
             self.assertEqual(r.status_code, 409, r.text)
             self.assertEqual(r.json()["error"]["code"], "worker_draining")
 
@@ -506,13 +511,9 @@ class WorkerHttpCredentialRejectionTests(unittest.TestCase):
             # Enrolled WITHOUT a fresh heartbeat -> liveness stale.
             token = _enroll_worker(db, fresh=False)
             with db.session_scope() as s:
-                SqlAlchemyWorkerRegistry(s).heartbeat(
-                    _WORKER, _now() - timedelta(hours=1)
-                )
+                SqlAlchemyWorkerRegistry(s).heartbeat(_WORKER, _now() - timedelta(hours=1))
             _enqueue_launch_job(db)
-            r = client.post(
-                "/api/v1/worker/jobs/claim", headers=_bearer(token), json={}
-            )
+            r = client.post("/api/v1/worker/jobs/claim", headers=_bearer(token), json={})
             self.assertEqual(r.status_code, 409, r.text)
             self.assertEqual(r.json()["error"]["code"], "worker_stale")
 
@@ -525,7 +526,9 @@ class WorkerHttpCredentialRejectionTests(unittest.TestCase):
                 f"/api/v1/worker/instances/{iid}/health",
                 headers=_bearer(token),
                 json={
-                    "observed_state": "healthy", "healthy": True, "generation": 1,
+                    "observed_state": "healthy",
+                    "healthy": True,
+                    "generation": 1,
                     "observed_at": _now().isoformat(),
                 },
             )
@@ -539,9 +542,7 @@ class WorkerHttpLeaseAndOwnershipTests(unittest.TestCase):
         with _client_and_db() as (client, db):
             token = _enroll_worker(db)
             job_id = _enqueue_launch_job(db)
-            claim = client.post(
-                "/api/v1/worker/jobs/claim", headers=_bearer(token), json={}
-            )
+            claim = client.post("/api/v1/worker/jobs/claim", headers=_bearer(token), json={})
             self.assertEqual(claim.status_code, 200)
             # Complete with a lease token the worker never held -> 404 (stale fence).
             bad = client.post(
@@ -572,7 +573,9 @@ class WorkerHttpLeaseAndOwnershipTests(unittest.TestCase):
                 f"/api/v1/worker/instances/{iid}/health",
                 headers=_bearer(token),
                 json={
-                    "observed_state": "healthy", "healthy": True, "generation": 1,
+                    "observed_state": "healthy",
+                    "healthy": True,
+                    "generation": 1,
                     "observed_at": _now().isoformat(),
                 },
             )
@@ -590,12 +593,8 @@ class WorkerHttpLeaseAndOwnershipTests(unittest.TestCase):
         with _client_and_db() as (client, db):
             token = _enroll_worker(db, name=_WORKER)
             _enroll_worker(db, name=_OTHER_WORKER)
-            iid = _seed_instance(
-                db, assigned=_OTHER_WORKER, with_secrets=True
-            )
-            r = client.get(
-                f"/api/v1/worker/instances/{iid}", headers=_bearer(token)
-            )
+            iid = _seed_instance(db, assigned=_OTHER_WORKER, with_secrets=True)
+            r = client.get(f"/api/v1/worker/instances/{iid}", headers=_bearer(token))
             self.assertEqual(r.status_code, 403, r.text)
             self.assertNotIn(_SEED_SECRET, r.text)
             self.assertNotIn(_CRED_SECRET, r.text)
@@ -611,9 +610,7 @@ class WorkerHttpBundleFetchTests(unittest.TestCase):
     was the pre-fix behavior: any enrolled worker could pull any bundle)."""
 
     def _claim(self, client, token, job_id) -> str:
-        claim = client.post(
-            "/api/v1/worker/jobs/claim", headers=_bearer(token), json={}
-        )
+        claim = client.post("/api/v1/worker/jobs/claim", headers=_bearer(token), json={})
         self.assertEqual(claim.status_code, 200, claim.text)
         lease = claim.json()
         self.assertEqual(lease["job_id"], job_id)
@@ -653,9 +650,7 @@ class WorkerHttpBundleFetchTests(unittest.TestCase):
         with _client_and_db() as (client, db):
             _ensure_parents(db)
             # jobs:claim only -- no artifacts:pull.
-            token = _enroll_worker(
-                db, caps=("build_challenge",), scopes=("jobs:claim",)
-            )
+            token = _enroll_worker(db, caps=("build_challenge",), scopes=("jobs:claim",))
             job_id = _enqueue_build_job(db)
             r = client.get(
                 "/api/v1/worker/builds/sqli/1/bundle",
@@ -688,9 +683,7 @@ class WorkerHttpBundleFetchTests(unittest.TestCase):
         with _client_and_db() as (client, db):
             _ensure_parents(db)
             token = _enroll_worker(db, name=_WORKER, caps=("build_challenge",))
-            other_token = _enroll_worker(
-                db, name=_OTHER_WORKER, caps=("build_challenge",)
-            )
+            other_token = _enroll_worker(db, name=_OTHER_WORKER, caps=("build_challenge",))
             job_id = _enqueue_build_job(db)
             # w2 claims the job; w1 (a validly-credentialed worker) tries to
             # use w2's lease_token -- a foreign lease, not one w1 holds.
@@ -717,9 +710,14 @@ class WorkerHttpBundleFetchTests(unittest.TestCase):
             with db.session_scope() as s:
                 SqlAlchemyChallengeVersionRepository(s).add(
                     ChallengeVersion(
-                        definition_slug="sqli", version_no=2, state="draft",
-                        family_version="1.0", seed="s2", spec_sha256="h2",
-                        spec={"t": 2}, spec_version="1.0",
+                        definition_slug="sqli",
+                        version_no=2,
+                        state="draft",
+                        family_version="1.0",
+                        seed="s2",
+                        spec_sha256="h2",
+                        spec={"t": 2},
+                        spec_version="1.0",
                     )
                 )
 
@@ -755,11 +753,10 @@ class WorkerHttpAuthPlanesAreDisjointTests(unittest.TestCase):
                     ("post", "/api/v1/worker/auth", None),
                     ("post", "/api/v1/worker/jobs/claim", {}),
                 ):
-                    r = getattr(client, method)(
-                        path, headers=_bearer(token), json=payload
-                    )
+                    r = getattr(client, method)(path, headers=_bearer(token), json=payload)
                     self.assertEqual(
-                        r.status_code, 401,
+                        r.status_code,
+                        401,
                         f"human {token} reached {path}: {r.status_code} {r.text}",
                     )
 
@@ -774,7 +771,8 @@ class WorkerHttpAuthPlanesAreDisjointTests(unittest.TestCase):
                 "/api/v1/competitions",
                 headers=_bearer(token),
                 json={
-                    "competition_id": _CID, "name": "x",
+                    "competition_id": _CID,
+                    "name": "x",
                     "start_time": "2026-06-01T09:00:00Z",
                     "end_time": "2026-06-03T09:00:00Z",
                 },
@@ -806,9 +804,7 @@ class WorkerHttpTransitionValidationTests(unittest.TestCase):
             self.assertIn("request_id", body["error"])
             # The instance stays in its original state (no transition attempted).
             with db.session_scope() as s:
-                self.assertEqual(
-                    SqlAlchemyInstanceRepository(s).get(iid).state, "starting"
-                )
+                self.assertEqual(SqlAlchemyInstanceRepository(s).get(iid).state, "starting")
 
     def test_illegal_graph_transition_is_409_not_500(self) -> None:
         with _client_and_db() as (client, db):
@@ -827,9 +823,7 @@ class WorkerHttpTransitionValidationTests(unittest.TestCase):
             self.assertNotIn("starting", r.text)
             self.assertNotIn("archived", r.text)
             with db.session_scope() as s:
-                self.assertEqual(
-                    SqlAlchemyInstanceRepository(s).get(iid).state, "starting"
-                )
+                self.assertEqual(SqlAlchemyInstanceRepository(s).get(iid).state, "starting")
 
 
 @unittest.skipUnless(_ENABLED, _SKIP_REASON)
@@ -847,17 +841,13 @@ class WorkerHttpReplaceInstanceTests(unittest.TestCase):
             _seed_platform_quota(db)
             iid = _seed_instance(db, assigned=None, state="starting")
 
-            r = client.post(
-                f"/api/v1/worker/instances/{iid}/replace", headers=_bearer(token)
-            )
+            r = client.post(f"/api/v1/worker/instances/{iid}/replace", headers=_bearer(token))
             self.assertEqual(r.status_code, 200, r.text)
             # The response attributes the instance to THIS worker.
             self.assertEqual(r.json()["assigned_worker"], _WORKER)
             # The DB confirms the ownership mutation and the capacity hold.
             with db.session_scope() as s:
-                self.assertEqual(
-                    SqlAlchemyInstanceRepository(s).get(iid).assigned_worker, _WORKER
-                )
+                self.assertEqual(SqlAlchemyInstanceRepository(s).get(iid).assigned_worker, _WORKER)
             reservation = SchedulingService(db).get_reservation(iid)
             self.assertIsNotNone(reservation)
             self.assertEqual(reservation.state, "held")
@@ -874,13 +864,9 @@ class WorkerHttpReplaceInstanceTests(unittest.TestCase):
             token = _enroll_worker(db, name=_WORKER, architectures=("aarch64",))
             _seed_platform_quota(db)
             iid = _seed_instance(db, assigned=None, state="starting")
-            r = client.post(
-                f"/api/v1/worker/instances/{iid}/replace", headers=_bearer(token)
-            )
+            r = client.post(f"/api/v1/worker/instances/{iid}/replace", headers=_bearer(token))
             self.assertEqual(r.status_code, 200, r.text)
-            self.assertEqual(
-                SchedulingService(db).get_reservation(iid).worker_key, _WORKER
-            )
+            self.assertEqual(SchedulingService(db).get_reservation(iid).worker_key, _WORKER)
 
     def test_replace_on_another_workers_instance_is_403_and_unchanged(self) -> None:
         with _client_and_db() as (client, db):
@@ -889,9 +875,7 @@ class WorkerHttpReplaceInstanceTests(unittest.TestCase):
             _seed_platform_quota(db)
             iid = _seed_instance(db, assigned=_OTHER_WORKER, state="starting")
 
-            r = client.post(
-                f"/api/v1/worker/instances/{iid}/replace", headers=_bearer(token)
-            )
+            r = client.post(f"/api/v1/worker/instances/{iid}/replace", headers=_bearer(token))
             self.assertEqual(r.status_code, 403, r.text)
             self.assertEqual(r.json()["error"]["code"], "forbidden_ownership")
             # Ownership is NOT changed and no reservation was made for the caller.
@@ -915,9 +899,7 @@ class WorkerHttpUnassignedReadTests(unittest.TestCase):
             # Unassigned instance the worker does not (yet) own; seeded WITH a
             # credential secret to prove the read never leaks it.
             iid = _seed_instance(db, assigned=None, with_secrets=True)
-            r = client.get(
-                f"/api/v1/worker/instances/{iid}", headers=_bearer(token)
-            )
+            r = client.get(f"/api/v1/worker/instances/{iid}", headers=_bearer(token))
             self.assertEqual(r.status_code, 200, r.text)
             body = r.json()
             self.assertEqual(body["instance_id"], iid)
@@ -931,12 +913,8 @@ class WorkerHttpUnassignedReadTests(unittest.TestCase):
         with _client_and_db() as (client, db):
             token = _enroll_worker(db, name=_WORKER)
             _enroll_worker(db, name=_OTHER_WORKER)
-            iid = _seed_instance(
-                db, assigned=_OTHER_WORKER, with_secrets=True
-            )
-            r = client.get(
-                f"/api/v1/worker/instances/{iid}", headers=_bearer(token)
-            )
+            iid = _seed_instance(db, assigned=_OTHER_WORKER, with_secrets=True)
+            r = client.get(f"/api/v1/worker/instances/{iid}", headers=_bearer(token))
             self.assertEqual(r.status_code, 403, r.text)
             self.assertNotIn(_SEED_SECRET, r.text)
             self.assertNotIn(_CRED_SECRET, r.text)

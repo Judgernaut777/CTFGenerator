@@ -71,13 +71,9 @@ class SqlAlchemySolveRepository:
         else resolved on demand -- so the submission path resolves the scope once
         and passes it here instead of re-resolving."""
         if competition_uuid is None:
-            competition_uuid = _resolve.competition_uuid(
-                self._session, solve.competition_id
-            )
+            competition_uuid = _resolve.competition_uuid(self._session, solve.competition_id)
         if team_uuid is None:
-            team_uuid = _resolve.team_uuid(
-                self._session, competition_uuid, solve.team_name
-            )
+            team_uuid = _resolve.team_uuid(self._session, competition_uuid, solve.team_name)
         if version_uuid is None:
             version_uuid = _resolve.version_uuid(
                 self._session, solve.definition_slug, solve.version_no
@@ -96,9 +92,7 @@ class SqlAlchemySolveRepository:
             key = _as_uuid(solve_id)
         except (ValueError, AttributeError, TypeError):
             return None  # malformed id is a clean miss, not a persistence error
-        row = self._session.execute(
-            _hydrate_query().where(SolveRow.id == key)
-        ).one_or_none()
+        row = self._session.execute(_hydrate_query().where(SolveRow.id == key)).one_or_none()
         return self._map(row) if row is not None else None
 
     def get_by_submission(self, submission_id: str) -> Solve | None:
@@ -133,8 +127,6 @@ class SqlAlchemySolveRepository:
 
     def list_for_competition(self, competition_id: str) -> list[Solve]:
         rows = self._session.execute(
-            _hydrate_query()
-            .where(Competition.slug == competition_id)
-            .order_by(SolveRow.solved_at)
+            _hydrate_query().where(Competition.slug == competition_id).order_by(SolveRow.solved_at)
         ).all()
         return [self._map(row) for row in rows]

@@ -23,12 +23,8 @@ class SqlAlchemyChallengeDefinitionRepository:
     def __init__(self, session: Session) -> None:
         self._session = session
 
-    def _row(
-        self, slug: str, *, for_update: bool = False
-    ) -> ChallengeDefinitionRow | None:
-        stmt = select(ChallengeDefinitionRow).where(
-            ChallengeDefinitionRow.slug == slug
-        )
+    def _row(self, slug: str, *, for_update: bool = False) -> ChallengeDefinitionRow | None:
+        stmt = select(ChallengeDefinitionRow).where(ChallengeDefinitionRow.slug == slug)
         if for_update:
             stmt = stmt.with_for_update()
         return self._session.scalars(stmt).one_or_none()

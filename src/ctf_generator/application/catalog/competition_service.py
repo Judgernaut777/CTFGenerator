@@ -86,9 +86,7 @@ class CompetitionService:
         with self._database.session_scope() as session:
             return SqlAlchemyCompetitionRepository(session).list()
 
-    def update(
-        self, config: CompetitionConfig, *, guard: Guard | None = None
-    ) -> CompetitionConfig:
+    def update(self, config: CompetitionConfig, *, guard: Guard | None = None) -> CompetitionConfig:
         """Update the mutable fields of an existing competition atomically.
 
         ``guard`` (if given) is invoked with the freshly-read *current* aggregate
@@ -113,9 +111,7 @@ class CompetitionService:
                 else repo.get(config.competition_id)
             )
             if current is None:
-                raise LookupError(
-                    f"competition not found: {config.competition_id!r}"
-                )
+                raise LookupError(f"competition not found: {config.competition_id!r}")
             if guard is not None:
                 guard(current)
             repo.update(config)

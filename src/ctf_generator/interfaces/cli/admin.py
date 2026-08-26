@@ -46,8 +46,7 @@ def _resolve_password(explicit: str | None) -> str:
         return from_env
     if not sys.stdin.isatty():  # pragma: no cover - non-interactive guard
         raise SystemExit(
-            "no password supplied: pass --password, set "
-            f"{_PASSWORD_ENV}, or run interactively"
+            f"no password supplied: pass --password, set {_PASSWORD_ENV}, or run interactively"
         )
     return getpass.getpass("New admin password: ")  # pragma: no cover - interactive
 
@@ -110,9 +109,7 @@ def _enroll_worker(args: argparse.Namespace) -> int:
     architectures = tuple(
         a.strip() for a in (args.architectures or platform.machine()).split(",") if a.strip()
     )
-    capabilities = tuple(
-        c.strip() for c in args.capabilities.split(",") if c.strip()
-    )
+    capabilities = tuple(c.strip() for c in args.capabilities.split(",") if c.strip())
     try:
         service = WorkerEnrollmentService(database)
         service.register_worker(
@@ -180,9 +177,7 @@ def _grant_membership(args: argparse.Namespace) -> int:
     finally:
         database.dispose()
     where = f" on team {membership.team_name!r}" if membership.team_name else ""
-    print(
-        f"granted {membership.role!r} to {args.email} in {args.competition!r}{where}"
-    )
+    print(f"granted {membership.role!r} to {args.email} in {args.competition!r}{where}")
     return 0
 
 
@@ -224,15 +219,19 @@ def build_parser() -> argparse.ArgumentParser:
     )
     enroll.add_argument("--name", required=True, help="unique worker name")
     enroll.add_argument(
-        "--runtime-type", dest="runtime_type", default="docker-rootless",
+        "--runtime-type",
+        dest="runtime_type",
+        default="docker-rootless",
         help="engine label (default docker-rootless)",
     )
     enroll.add_argument(
-        "--architectures", default=None,
+        "--architectures",
+        default=None,
         help="comma-separated (default: this host's machine arch)",
     )
     enroll.add_argument(
-        "--capabilities", default=",".join(_DEFAULT_WORKER_CAPS),
+        "--capabilities",
+        default=",".join(_DEFAULT_WORKER_CAPS),
         help="comma-separated worker capabilities",
     )
     enroll.add_argument("--capacity", type=int, default=4, help="max concurrent jobs")

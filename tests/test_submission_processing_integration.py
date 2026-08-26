@@ -156,9 +156,7 @@ def _seed(db, *, flag: str | None = _FLAG, attach: bool = True) -> None:
     if attach:
         with db.session_scope() as s:
             SqlAlchemyChallengePublicationRepository(s).add(
-                ChallengePublication(
-                    competition_id="cup", definition_slug="sql", version_no=1
-                )
+                ChallengePublication(competition_id="cup", definition_slug="sql", version_no=1)
             )
 
 
@@ -177,9 +175,7 @@ def _seed_second_competition(db, comp_id: str = "other", team: str = "Red") -> N
         SqlAlchemyTeamRepository(s).add(Team(comp_id, team))
     with db.session_scope() as s:
         SqlAlchemyChallengePublicationRepository(s).add(
-            ChallengePublication(
-                competition_id=comp_id, definition_slug="sql", version_no=1
-            )
+            ChallengePublication(competition_id=comp_id, definition_slug="sql", version_no=1)
         )
 
 
@@ -235,9 +231,7 @@ class SubmissionProcessingTests(unittest.TestCase):
             _R.team_uuid = _wrap(originals["team"], "team")
             _R.version_uuid = _wrap(originals["version"], "version")
             try:
-                outcome = SubmissionProcessingService(db).process_submission(
-                    _request(_FLAG)
-                )
+                outcome = SubmissionProcessingService(db).process_submission(_request(_FLAG))
             finally:
                 _R.competition_uuid = originals["competition"]
                 _R.team_uuid = originals["team"]
@@ -261,16 +255,12 @@ class SubmissionProcessingTests(unittest.TestCase):
             self.assertFalse(outcome.replay)
             # Deferred issue #2 by construction:
             self.assertEqual(outcome.solve.solved_at, outcome.submission.submitted_at)
-            self.assertEqual(
-                outcome.solve.submission_id, outcome.submission.submission_id
-            )
+            self.assertEqual(outcome.solve.submission_id, outcome.submission.submission_id)
             self.assertEqual(outcome.score_event.type, "solve")
             self.assertIsNotNone(outcome.score_event.seq)
             with db.session_scope() as s:
                 events = SqlAlchemyScoreLedger(s).list_for_competition("cup")
-                solve = SqlAlchemySolveRepository(s).get_for_challenge(
-                    "cup", "Red", "sql", 1
-                )
+                solve = SqlAlchemySolveRepository(s).get_for_challenge("cup", "Red", "sql", 1)
         self.assertEqual(len(events), 1)
         self.assertEqual(events[0].solve_id, outcome.solve.solve_id)
         self.assertEqual(solve.solved_at, _NOW)
@@ -338,9 +328,7 @@ class SubmissionProcessingTests(unittest.TestCase):
             sid = str(uuid.uuid4())
             service.process_submission(_request(_FLAG, submission_id=sid))
             with self.assertRaises(IdempotencyConflictError):
-                service.process_submission(
-                    _request(_FLAG, submission_id=sid, team_name="Blue")
-                )
+                service.process_submission(_request(_FLAG, submission_id=sid, team_name="Blue"))
 
     def test_unattached_challenge_rejected_nothing_persisted(self) -> None:
         with _migrated_database() as (db, _url):
@@ -350,9 +338,7 @@ class SubmissionProcessingTests(unittest.TestCase):
             with self.assertRaises(ChallengeNotAttachedError):
                 service.process_submission(request)
             with db.session_scope() as s:
-                stored = SqlAlchemyLedgerSubmissionRepository(s).get(
-                    request.submission_id
-                )
+                stored = SqlAlchemyLedgerSubmissionRepository(s).get(request.submission_id)
                 events = SqlAlchemyScoreLedger(s).list_for_competition("cup")
         self.assertIsNone(stored)
         self.assertEqual(events, [])
@@ -365,18 +351,14 @@ class SubmissionProcessingTests(unittest.TestCase):
             with self.assertRaises(FlagUnavailableError):
                 service.process_submission(request)
             with db.session_scope() as s:
-                stored = SqlAlchemyLedgerSubmissionRepository(s).get(
-                    request.submission_id
-                )
+                stored = SqlAlchemyLedgerSubmissionRepository(s).get(request.submission_id)
         self.assertIsNone(stored)
 
     def test_archived_but_attached_version_remains_submittable(self) -> None:
         with _migrated_database() as (db, _url):
             _seed(db)
             with db.session_scope() as s:
-                SqlAlchemyChallengeVersionRepository(s).archive(
-                    "sql", 1, _NOW + timedelta(hours=1)
-                )
+                SqlAlchemyChallengeVersionRepository(s).archive("sql", 1, _NOW + timedelta(hours=1))
             service = SubmissionProcessingService(db)
             outcome = service.process_submission(_request(_FLAG))
         self.assertTrue(outcome.accepted)
@@ -468,9 +450,7 @@ class SubmissionProcessingTests(unittest.TestCase):
                     return None
                 return original_get(self, submission_id)  # the post-conflict re-read
 
-            with mock.patch.object(
-                SqlAlchemyLedgerSubmissionRepository, "get", fake_get
-            ):
+            with mock.patch.object(SqlAlchemyLedgerSubmissionRepository, "get", fake_get):
                 with self.assertRaises(IdempotencyConflictError):
                     service.process_submission(
                         _request(_FLAG, submission_id=sid, competition_id="other")
@@ -513,9 +493,7 @@ class SubmissionProcessingTests(unittest.TestCase):
             with db.session_scope() as s:
                 solves = SqlAlchemySolveRepository(s).list_for_competition("cup")
                 events = SqlAlchemyScoreLedger(s).list_for_competition("cup")
-                submissions = SqlAlchemyLedgerSubmissionRepository(s).list_for_team(
-                    "cup", "Red"
-                )
+                submissions = SqlAlchemyLedgerSubmissionRepository(s).list_for_team("cup", "Red")
         # Exactly one solve, one 'solve' event, eight correct submissions.
         self.assertEqual(len(solves), 1)
         self.assertEqual([e.type for e in events], ["solve"])

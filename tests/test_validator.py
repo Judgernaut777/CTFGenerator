@@ -99,7 +99,7 @@ class ResolveFamilyTests(RegistrySnapshotMixin, unittest.TestCase):
         self.assertIsNone(_resolve_family(text))
 
     def test_returns_none_for_missing_family_field(self) -> None:
-        text = "title: \"No family here\"\n"
+        text = 'title: "No family here"\n'
         self.assertIsNone(_resolve_family(text))
 
 
@@ -119,9 +119,7 @@ class FamilyAwareValidationTests(RegistrySnapshotMixin, unittest.TestCase):
         with tempfile.TemporaryDirectory() as temp_dir:
             output = Path(temp_dir) / "scratch"
             output.mkdir()
-            (output / "challenge.yaml").write_text(
-                dump_yaml(spec.to_mapping()), encoding="utf-8"
-            )
+            (output / "challenge.yaml").write_text(dump_yaml(spec.to_mapping()), encoding="utf-8")
             (output / "flag.txt").write_text("FLAG{abc123}", encoding="utf-8")
             (output / "docker-compose.yml").write_text(
                 "services:\n  solo:\n    image: busybox\n", encoding="utf-8"
@@ -144,18 +142,14 @@ class FamilyAwareValidationTests(RegistrySnapshotMixin, unittest.TestCase):
         with tempfile.TemporaryDirectory() as temp_dir:
             output = Path(temp_dir) / "scratch"
             output.mkdir()
-            (output / "challenge.yaml").write_text(
-                dump_yaml(spec.to_mapping()), encoding="utf-8"
-            )
+            (output / "challenge.yaml").write_text(dump_yaml(spec.to_mapping()), encoding="utf-8")
             # flag.txt deliberately omitted.
 
             report = validate_challenge(output)
             self.assertIn("missing required file: flag.txt", report.errors)
             # And it must NOT demand tenant_export's unrelated scaffolding
             # (e.g. services/api/app.py) for a family that doesn't declare it.
-            self.assertFalse(
-                any("services/api/app.py" in err for err in report.errors)
-            )
+            self.assertFalse(any("services/api/app.py" in err for err in report.errors))
 
     def test_missing_compose_service_marker_is_an_error(self) -> None:
         families.register(
@@ -172,17 +166,13 @@ class FamilyAwareValidationTests(RegistrySnapshotMixin, unittest.TestCase):
         with tempfile.TemporaryDirectory() as temp_dir:
             output = Path(temp_dir) / "scratch"
             output.mkdir()
-            (output / "challenge.yaml").write_text(
-                dump_yaml(spec.to_mapping()), encoding="utf-8"
-            )
+            (output / "challenge.yaml").write_text(dump_yaml(spec.to_mapping()), encoding="utf-8")
             (output / "docker-compose.yml").write_text(
                 "services:\n  solo:\n    image: busybox\n", encoding="utf-8"
             )
 
             report = validate_challenge(output)
-            self.assertTrue(
-                any("sidecar:" in err for err in report.errors), report.errors
-            )
+            self.assertTrue(any("sidecar:" in err for err in report.errors), report.errors)
 
 
 class GenericFallbackTests(unittest.TestCase):
@@ -223,14 +213,10 @@ class GenericFallbackTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as temp_dir:
             output = Path(temp_dir) / "garbage-spec"
             output.mkdir()
-            (output / "challenge.yaml").write_text(
-                "not yaml at all just words\n", encoding="utf-8"
-            )
+            (output / "challenge.yaml").write_text("not yaml at all just words\n", encoding="utf-8")
 
             report = validate_challenge(output)
-            self.assertTrue(
-                any("does not look like valid YAML" in err for err in report.errors)
-            )
+            self.assertTrue(any("does not look like valid YAML" in err for err in report.errors))
 
     def test_nonexistent_path_still_reports_error(self) -> None:
         report = validate_challenge(Path("/nonexistent/does-not-exist"))
@@ -315,9 +301,7 @@ class ScenarioSoftCheckTests(unittest.TestCase):
 
             report = validate_challenge(output)
             self.assertEqual(report.errors, [])
-            self.assertFalse(
-                any("scenario_timeline.json" in w for w in report.warnings)
-            )
+            self.assertFalse(any("scenario_timeline.json" in w for w in report.warnings))
 
     def test_scenario_with_invalid_json_timeline_warns(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -345,8 +329,7 @@ class ScenarioSoftCheckTests(unittest.TestCase):
             self.assertEqual(report.errors, [])
             self.assertTrue(
                 any(
-                    "scenario_timeline.json" in w and "not valid JSON" in w
-                    for w in report.warnings
+                    "scenario_timeline.json" in w and "not valid JSON" in w for w in report.warnings
                 )
             )
 

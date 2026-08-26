@@ -73,16 +73,10 @@ def create_competition(
         return replayed
 
     config = service.create(body.to_domain())
-    envelope = resource_envelope(
-        COMPETITION_SCHEMA, competition_to_response(config)
-    )
+    envelope = resource_envelope(COMPETITION_SCHEMA, competition_to_response(config))
     etag = compute_etag(competition_concurrency_payload(config))
-    record_audit(
-        request, principal, action="competition.create", target=config.competition_id
-    )
-    remember(
-        request, scope, body_json, status_code=201, envelope=envelope, etag=etag
-    )
+    record_audit(request, principal, action="competition.create", target=config.competition_id)
+    remember(request, scope, body_json, status_code=201, envelope=envelope, etag=etag)
     return respond(201, envelope, etag=etag)
 
 
@@ -101,9 +95,7 @@ def list_competitions(
     # its membership competitions that grant competition:read -- so a caller holding
     # competition:read from ONE competition no longer reads every competition's
     # config.
-    principal: Principal = Depends(
-        require_any_competition_permission(Permission.COMPETITION_READ)
-    ),
+    principal: Principal = Depends(require_any_competition_permission(Permission.COMPETITION_READ)),
     service=Depends(get_competition_service),
 ):
     configs = service.list()
@@ -111,9 +103,7 @@ def list_competitions(
     if allowed is not None:
         configs = [c for c in configs if c.competition_id in allowed]
     configs = sorted(configs, key=lambda c: c.competition_id)
-    page = paginate(
-        configs, key=lambda c: c.competition_id, limit=limit, cursor=cursor
-    )
+    page = paginate(configs, key=lambda c: c.competition_id, limit=limit, cursor=cursor)
     items = [competition_to_response(c) for c in page.items]
     envelope = list_envelope(
         COMPETITION_LIST_SCHEMA,
@@ -134,17 +124,13 @@ def list_competitions(
 )
 def get_competition(
     competition_id: str,
-    principal: Principal = Depends(
-        require_competition_permission(Permission.COMPETITION_READ)
-    ),
+    principal: Principal = Depends(require_competition_permission(Permission.COMPETITION_READ)),
     service=Depends(get_competition_service),
 ):
     config = service.get(competition_id)
     if config is None:
         raise LookupError(f"competition not found: {competition_id!r}")
-    envelope = resource_envelope(
-        COMPETITION_SCHEMA, competition_to_response(config)
-    )
+    envelope = resource_envelope(COMPETITION_SCHEMA, competition_to_response(config))
     etag = compute_etag(competition_concurrency_payload(config))
     return respond(200, envelope, etag=etag)
 
@@ -161,9 +147,7 @@ def patch_competition(
     request: Request,
     competition_id: str,
     body: CompetitionPatchRequest,
-    principal: Principal = Depends(
-        require_competition_permission(Permission.COMPETITION_WRITE)
-    ),
+    principal: Principal = Depends(require_competition_permission(Permission.COMPETITION_WRITE)),
     service=Depends(get_competition_service),
 ):
     if_match = request.headers.get("If-Match")
@@ -182,19 +166,11 @@ def patch_competition(
     # cannot bypass it and the handler stays free of the business rule.
 
     def guard(fresh) -> None:
-        if not etags_match(
-            if_match, compute_etag(competition_concurrency_payload(fresh))
-        ):
-            raise PreconditionFailedError(
-                "If-Match does not match the current resource version"
-            )
+        if not etags_match(if_match, compute_etag(competition_concurrency_payload(fresh))):
+            raise PreconditionFailedError("If-Match does not match the current resource version")
 
     updated = service.update(merged, guard=guard)
-    envelope = resource_envelope(
-        COMPETITION_SCHEMA, competition_to_response(updated)
-    )
+    envelope = resource_envelope(COMPETITION_SCHEMA, competition_to_response(updated))
     etag = compute_etag(competition_concurrency_payload(updated))
-    record_audit(
-        request, principal, action="competition.update", target=competition_id
-    )
+    record_audit(request, principal, action="competition.update", target=competition_id)
     return respond(200, envelope, etag=etag)

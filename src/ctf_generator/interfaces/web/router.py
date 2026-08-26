@@ -140,9 +140,7 @@ def _require_flat(principal: Principal, permission: Permission) -> None:
     ``require_permission``. Used for competition CREATE, which cannot be scoped to a
     pre-existing membership. Raises :class:`AuthorizationError` (-> 403 page)."""
     if not principal.has(permission):
-        raise AuthorizationError(
-            f"principal lacks required permission {permission.value!r}"
-        )
+        raise AuthorizationError(f"principal lacks required permission {permission.value!r}")
 
 
 def _redirect(request: Request, name: str, **params: str) -> RedirectResponse:
@@ -202,9 +200,7 @@ def _competition_from_input(
     scoring = _parse_dt(
         values.get("scoring_start_time"), "scoring_start_time", errors, required=False
     )
-    freeze = _parse_dt(
-        values.get("freeze_time"), "freeze_time", errors, required=False
-    )
+    freeze = _parse_dt(values.get("freeze_time"), "freeze_time", errors, required=False)
     if errors:
         return None
     assert start is not None and end is not None  # noqa: S101 - guarded above
@@ -227,9 +223,7 @@ def _competition_from_input(
     )
 
 
-def _apply_window_problems(
-    exc: CompetitionWindowError, errors: dict[str, str]
-) -> None:
+def _apply_window_problems(exc: CompetitionWindowError, errors: dict[str, str]) -> None:
     """Fold the service's ``{field, issue}`` timing-window problems into per-field
     form errors (the messages are autoescaped when rendered)."""
     for problem in exc.problems:
@@ -269,8 +263,11 @@ def _render_competition_form(
         }
     context.update({"values": values, "errors": errors})
     return renderer.render(
-        request, "competition_form.html", context,
-        principal=principal, status_code=status_code,
+        request,
+        "competition_form.html",
+        context,
+        principal=principal,
+        status_code=status_code,
     )
 
 
@@ -285,9 +282,7 @@ def _render_teams(
     errors: dict[str, str],
     status_code: int = 200,
 ) -> Response:
-    teams = sorted(
-        service.list_for_competition(competition_id), key=lambda t: t.name
-    )
+    teams = sorted(service.list_for_competition(competition_id), key=lambda t: t.name)
     context = {
         "competition_id": competition_id,
         "teams": [team_row(t) for t in teams],
@@ -295,8 +290,11 @@ def _render_teams(
         "errors": errors,
     }
     return renderer.render(
-        request, "teams.html", context,
-        principal=principal, status_code=status_code,
+        request,
+        "teams.html",
+        context,
+        principal=principal,
+        status_code=status_code,
     )
 
 
@@ -322,9 +320,7 @@ def _version_choices(
     return choices
 
 
-def _parse_publication_target(
-    target: str, errors: dict[str, str]
-) -> tuple[str, int] | None:
+def _parse_publication_target(target: str, errors: dict[str, str]) -> tuple[str, int] | None:
     """Parse the ``slug:version_no`` select value. A malformed value is a field
     error (re-render), never a 500."""
     slug, sep, raw_version = target.rpartition(":")
@@ -367,8 +363,11 @@ def _render_publications(
         "errors": errors,
     }
     return renderer.render(
-        request, "publications.html", context,
-        principal=principal, status_code=status_code,
+        request,
+        "publications.html",
+        context,
+        principal=principal,
+        status_code=status_code,
     )
 
 
@@ -403,9 +402,7 @@ def login_form(
     # Mint the login-CSRF token: echo it into BOTH the (httpOnly) cookie and the
     # hidden field so POST /login can verify the double-submit pair.
     token = issue_login_csrf_token()
-    response = renderer.render(
-        request, "login.html", {"error": None, "login_csrf_token": token}
-    )
+    response = renderer.render(request, "login.html", {"error": None, "login_csrf_token": token})
     set_login_csrf_cookie(response, token, settings)
     return response
 
@@ -440,12 +437,8 @@ async def login_submit(
             },
             status_code=401,
         )
-    response = RedirectResponse(
-        url=str(request.url_for("web_dashboard")), status_code=303
-    )
-    set_session_cookie(
-        response, issued.token, settings, now=now, expires_at=issued.expires_at
-    )
+    response = RedirectResponse(url=str(request.url_for("web_dashboard")), status_code=303)
+    set_session_cookie(response, issued.token, settings, now=now, expires_at=issued.expires_at)
     # The login-CSRF token is single-use: drop it once the session is established.
     clear_login_csrf_cookie(response, settings)
     return response
@@ -498,9 +491,7 @@ def competitions_list(
         "competitions": [competition_row(c) for c in configs],
         "can_create": principal.has(Permission.COMPETITION_WRITE),
     }
-    return renderer.render(
-        request, "competitions_list.html", context, principal=principal
-    )
+    return renderer.render(request, "competitions_list.html", context, principal=principal)
 
 
 # -- competition create (write) --------------------------------------------
@@ -544,22 +535,37 @@ async def competition_create(
     config = _competition_from_input(values, competition_id=values["competition_id"], errors=errors)
     if errors or config is None:
         return _render_competition_form(
-            request, renderer, principal, values=values, errors=errors,
-            mode="create", status_code=400,
+            request,
+            renderer,
+            principal,
+            values=values,
+            errors=errors,
+            mode="create",
+            status_code=400,
         )
     try:
         stored = service.create(config)
     except CompetitionWindowError as exc:
         _apply_window_problems(exc, errors)
         return _render_competition_form(
-            request, renderer, principal, values=values, errors=errors,
-            mode="create", status_code=400,
+            request,
+            renderer,
+            principal,
+            values=values,
+            errors=errors,
+            mode="create",
+            status_code=400,
         )
     except IntegrityError:
         errors["competition_id"] = "A competition with this ID already exists."
         return _render_competition_form(
-            request, renderer, principal, values=values, errors=errors,
-            mode="create", status_code=409,
+            request,
+            renderer,
+            principal,
+            values=values,
+            errors=errors,
+            mode="create",
+            status_code=409,
         )
     return _redirect(request, "web_competition_detail", competition_id=stored.competition_id)
 
@@ -588,9 +594,7 @@ def competition_detail_view(
         "can_view_instances": Permission.INSTANCE_READ in perms,
         "can_view_scoreboard": Permission.SCOREBOARD_READ in perms,
     }
-    return renderer.render(
-        request, "competition_detail.html", context, principal=principal
-    )
+    return renderer.render(request, "competition_detail.html", context, principal=principal)
 
 
 # -- competition edit + team + publication write handlers -------------------
@@ -613,9 +617,13 @@ def competition_edit_form(
     if config is None:
         raise LookupError(_NOT_FOUND)
     return _render_competition_form(
-        request, renderer, principal,
-        values=competition_form_values(config), errors={},
-        mode="edit", competition_id=competition_id,
+        request,
+        renderer,
+        principal,
+        values=competition_form_values(config),
+        errors={},
+        mode="edit",
+        competition_id=competition_id,
     )
 
 
@@ -643,16 +651,28 @@ async def competition_update(
     )
     if errors or merged is None:
         return _render_competition_form(
-            request, renderer, principal, values=values, errors=errors,
-            mode="edit", competition_id=competition_id, status_code=400,
+            request,
+            renderer,
+            principal,
+            values=values,
+            errors=errors,
+            mode="edit",
+            competition_id=competition_id,
+            status_code=400,
         )
     try:
         service.update(merged)
     except CompetitionWindowError as exc:
         _apply_window_problems(exc, errors)
         return _render_competition_form(
-            request, renderer, principal, values=values, errors=errors,
-            mode="edit", competition_id=competition_id, status_code=400,
+            request,
+            renderer,
+            principal,
+            values=values,
+            errors=errors,
+            mode="edit",
+            competition_id=competition_id,
+            status_code=400,
         )
     return _redirect(request, "web_competition_detail", competition_id=competition_id)
 
@@ -692,16 +712,28 @@ async def team_create(
     if not name:
         errors["name"] = "Required."
         return _render_teams(
-            request, renderer, principal, service, competition_id,
-            values=values, errors=errors, status_code=400,
+            request,
+            renderer,
+            principal,
+            service,
+            competition_id,
+            values=values,
+            errors=errors,
+            status_code=400,
         )
     try:
         service.create(Team(competition_id=competition_id, name=name))
     except IntegrityError:
         errors["name"] = "A team with this name already exists."
         return _render_teams(
-            request, renderer, principal, service, competition_id,
-            values=values, errors=errors, status_code=409,
+            request,
+            renderer,
+            principal,
+            service,
+            competition_id,
+            values=values,
+            errors=errors,
+            status_code=409,
         )
     return _redirect(request, "web_teams", competition_id=competition_id)
 
@@ -713,19 +745,22 @@ def publications_view(
     principal: Principal = Depends(get_web_principal),
     renderer: TemplateRenderer = Depends(get_renderer),
     pub_service: PublicationService = Depends(get_web_publication_service),
-    def_service: ChallengeDefinitionService = Depends(
-        get_web_challenge_definition_service
-    ),
-    ver_service: ChallengeVersionService = Depends(
-        get_web_challenge_version_service
-    ),
+    def_service: ChallengeDefinitionService = Depends(get_web_challenge_definition_service),
+    ver_service: ChallengeVersionService = Depends(get_web_challenge_version_service),
 ) -> Response:
     assert_competition_permission_or_404(
         principal, competition_id, Permission.PUBLICATION_READ, not_found=_NOT_FOUND
     )
     return _render_publications(
-        request, renderer, principal, competition_id,
-        pub_service, def_service, ver_service, values={}, errors={},
+        request,
+        renderer,
+        principal,
+        competition_id,
+        pub_service,
+        def_service,
+        ver_service,
+        values={},
+        errors={},
     )
 
 
@@ -736,12 +771,8 @@ async def publication_attach(
     principal: Principal = Depends(get_web_principal),
     renderer: TemplateRenderer = Depends(get_renderer),
     pub_service: PublicationService = Depends(get_web_publication_service),
-    def_service: ChallengeDefinitionService = Depends(
-        get_web_challenge_definition_service
-    ),
-    ver_service: ChallengeVersionService = Depends(
-        get_web_challenge_version_service
-    ),
+    def_service: ChallengeDefinitionService = Depends(get_web_challenge_definition_service),
+    ver_service: ChallengeVersionService = Depends(get_web_challenge_version_service),
     _csrf: None = Depends(require_csrf),
 ) -> Response:
     assert_competition_permission_or_404(
@@ -754,9 +785,16 @@ async def publication_attach(
     parsed = _parse_publication_target(target, errors)
     if parsed is None:
         return _render_publications(
-            request, renderer, principal, competition_id,
-            pub_service, def_service, ver_service,
-            values=values, errors=errors, status_code=400,
+            request,
+            renderer,
+            principal,
+            competition_id,
+            pub_service,
+            def_service,
+            ver_service,
+            values=values,
+            errors=errors,
+            status_code=400,
         )
     slug, version_no = parsed
     status_code = 200
@@ -779,9 +817,16 @@ async def publication_attach(
         status_code = 409
     if errors:
         return _render_publications(
-            request, renderer, principal, competition_id,
-            pub_service, def_service, ver_service,
-            values=values, errors=errors, status_code=status_code,
+            request,
+            renderer,
+            principal,
+            competition_id,
+            pub_service,
+            def_service,
+            ver_service,
+            values=values,
+            errors=errors,
+            status_code=status_code,
         )
     return _redirect(request, "web_publications", competition_id=competition_id)
 
@@ -879,9 +924,7 @@ def instances_view(
         "competition_id": competition_id,
         "instances": [instance_row(i) for i in instances],
     }
-    return renderer.render(
-        request, "instances_list.html", context, principal=principal
-    )
+    return renderer.render(request, "instances_list.html", context, principal=principal)
 
 
 @router.get("/instances/{instance_id}", name="web_instance_detail")
@@ -897,14 +940,15 @@ def instance_detail_view(
         raise LookupError(_INSTANCE_NOT_FOUND)
     instance, endpoints, health = view
     assert_competition_permission_or_404(
-        principal, instance.competition_id, Permission.INSTANCE_READ,
+        principal,
+        instance.competition_id,
+        Permission.INSTANCE_READ,
         not_found=_INSTANCE_NOT_FOUND,
     )
     # Operate actions are meaningless on a terminal (archived, frozen) instance
     # and would trip the DB transition guard -- hide the buttons for it.
     can_operate = (
-        Permission.INSTANCE_OPERATE
-        in competition_permissions(principal, instance.competition_id)
+        Permission.INSTANCE_OPERATE in competition_permissions(principal, instance.competition_id)
         and not instance.is_terminal
     )
     context = {
@@ -912,9 +956,7 @@ def instance_detail_view(
         "competition_id": instance.competition_id,
         "can_operate": can_operate,
     }
-    return renderer.render(
-        request, "instance_detail.html", context, principal=principal
-    )
+    return renderer.render(request, "instance_detail.html", context, principal=principal)
 
 
 @router.post("/instances/{instance_id}/stop", name="web_instance_stop")
@@ -925,9 +967,7 @@ async def instance_stop(
     service: InstanceLifecycleService = Depends(get_web_instance_lifecycle_service),
     _csrf: None = Depends(require_csrf),
 ) -> Response:
-    instance = _load_instance_or_404(
-        service, principal, instance_id, Permission.INSTANCE_OPERATE
-    )
+    instance = _load_instance_or_404(service, principal, instance_id, Permission.INSTANCE_OPERATE)
     # A terminal (archived) row is frozen by the 0010 transition guard; a stop
     # would trip a DB error (500). It is a no-op -- redirect back, never 500.
     if not instance.is_terminal:
@@ -943,9 +983,7 @@ async def instance_reset(
     service: InstanceLifecycleService = Depends(get_web_instance_lifecycle_service),
     _csrf: None = Depends(require_csrf),
 ) -> Response:
-    instance = _load_instance_or_404(
-        service, principal, instance_id, Permission.INSTANCE_OPERATE
-    )
+    instance = _load_instance_or_404(service, principal, instance_id, Permission.INSTANCE_OPERATE)
     # Terminal rows are frozen (see instance_stop); a reset would 500. No-op.
     if not instance.is_terminal:
         now = datetime.now(UTC)
@@ -961,9 +999,7 @@ async def instance_delete(
     service: InstanceLifecycleService = Depends(get_web_instance_lifecycle_service),
     _csrf: None = Depends(require_csrf),
 ) -> Response:
-    instance = _load_instance_or_404(
-        service, principal, instance_id, Permission.INSTANCE_OPERATE
-    )
+    instance = _load_instance_or_404(service, principal, instance_id, Permission.INSTANCE_OPERATE)
     service.request_delete(instance_id, datetime.now(UTC))
     # After a delete the instance list is the useful destination.
     return _redirect(request, "web_instances", competition_id=instance.competition_id)
@@ -1014,8 +1050,13 @@ def ops_jobs_view(
     jid = (job_id or "").strip()
     lookup = service.get(jid) if jid else None
     return _render_ops_jobs(
-        request, renderer, principal, service,
-        lookup_id=jid, lookup=lookup, lookup_not_found=bool(jid) and lookup is None,
+        request,
+        renderer,
+        principal,
+        service,
+        lookup_id=jid,
+        lookup=lookup,
+        lookup_not_found=bool(jid) and lookup is None,
     )
 
 
@@ -1034,8 +1075,12 @@ async def ops_job_cancel(
     except LookupError as exc:
         # An invalid target/state is a friendly re-render, NEVER a 500.
         return _render_ops_jobs(
-            request, renderer, principal, service,
-            error=str(exc) or "That job could not be cancelled.", status_code=409,
+            request,
+            renderer,
+            principal,
+            service,
+            error=str(exc) or "That job could not be cancelled.",
+            status_code=409,
         )
     return _redirect(request, "web_ops_jobs")
 
@@ -1054,8 +1099,12 @@ async def ops_job_retry(
         service.retry_dead_letter(job_id, datetime.now(UTC))
     except LookupError as exc:
         return _render_ops_jobs(
-            request, renderer, principal, service,
-            error=str(exc) or "That job could not be retried.", status_code=409,
+            request,
+            renderer,
+            principal,
+            service,
+            error=str(exc) or "That job could not be retried.",
+            status_code=409,
         )
     return _redirect(request, "web_ops_jobs")
 
@@ -1081,9 +1130,7 @@ def _render_builds(
     notice: str | None = None,
     status_code: int = 200,
 ) -> Response:
-    builds = sorted(
-        service.list_for_version(slug, version_no), key=lambda b: b.build_sha256
-    )
+    builds = sorted(service.list_for_version(slug, version_no), key=lambda b: b.build_sha256)
     context = {
         "slug": slug,
         "version_no": version_no,
@@ -1133,14 +1180,26 @@ def builds_view(
     if parsed is None:
         # No (or bad) version selected: render the empty picker, no list yet.
         return _render_builds(
-            request, renderer, principal, service, slug, 0,
-            can_trigger=can_trigger, values={"version_no": (version_no or "").strip()},
+            request,
+            renderer,
+            principal,
+            service,
+            slug,
+            0,
+            can_trigger=can_trigger,
+            values={"version_no": (version_no or "").strip()},
             errors=errors,
         )
     return _render_builds(
-        request, renderer, principal, service, slug, parsed,
+        request,
+        renderer,
+        principal,
+        service,
+        slug,
+        parsed,
         can_trigger=can_trigger,
-        values={"version_no": str(parsed)}, errors={},
+        values={"version_no": str(parsed)},
+        errors={},
     )
 
 
@@ -1159,25 +1218,44 @@ async def build_trigger(
     parsed = _parse_version_no(form.get("version_no"), errors)
     if parsed is None:
         return _render_builds(
-            request, renderer, principal, service, slug, 0,
-            can_trigger=True, values={"version_no": form.get("version_no", "").strip()},
-            errors=errors, status_code=400,
+            request,
+            renderer,
+            principal,
+            service,
+            slug,
+            0,
+            can_trigger=True,
+            values={"version_no": form.get("version_no", "").strip()},
+            errors=errors,
+            status_code=400,
         )
     try:
         _job, created = service.trigger_build(slug, parsed, datetime.now(UTC))
     except LookupError:
         errors["version_no"] = "That challenge version was not found."
         return _render_builds(
-            request, renderer, principal, service, slug, parsed,
-            can_trigger=True, values={"version_no": str(parsed)}, errors=errors,
+            request,
+            renderer,
+            principal,
+            service,
+            slug,
+            parsed,
+            can_trigger=True,
+            values={"version_no": str(parsed)},
+            errors=errors,
             status_code=404,
         )
-    notice = (
-        "Build job enqueued." if created else "A build for this version is already queued."
-    )
+    notice = "Build job enqueued." if created else "A build for this version is already queued."
     return _render_builds(
-        request, renderer, principal, service, slug, parsed,
-        can_trigger=True, values={"version_no": str(parsed)}, errors={},
+        request,
+        renderer,
+        principal,
+        service,
+        slug,
+        parsed,
+        can_trigger=True,
+        values={"version_no": str(parsed)},
+        errors={},
         notice=notice,
     )
 
@@ -1206,9 +1284,7 @@ def scoreboard_view(
         key=scoreboard_entry_key,
     )
     lag = None
-    if Permission.SCOREBOARD_LAG_READ in competition_permissions(
-        principal, competition_id
-    ):
+    if Permission.SCOREBOARD_LAG_READ in competition_permissions(principal, competition_id):
         snapshot = service.lag()
         lag = {
             "pending_count": snapshot.pending_count,
@@ -1221,9 +1297,7 @@ def scoreboard_view(
         "entries": entries,
         "lag": lag,
     }
-    return renderer.render(
-        request, "scoreboard.html", context, principal=principal
-    )
+    return renderer.render(request, "scoreboard.html", context, principal=principal)
 
 
 # -- reports (organizer read + freeze a snapshot) ---------------------------
@@ -1250,9 +1324,7 @@ def _render_version_report(
     error: str | None = None,
     status_code: int = 200,
 ) -> Response:
-    subject = report_subject(
-        report_type.value, definition_slug=slug, version_no=version_no
-    )
+    subject = report_subject(report_type.value, definition_slug=slug, version_no=version_no)
     snapshots = service.list_snapshots(report_type.value, subject)
     latest = snapshots[0] if snapshots else None
     context = {
@@ -1265,8 +1337,11 @@ def _render_version_report(
         "error": error,
     }
     return renderer.render(
-        request, "report_version.html", context,
-        principal=principal, status_code=status_code,
+        request,
+        "report_version.html",
+        context,
+        principal=principal,
+        status_code=status_code,
     )
 
 
@@ -1307,18 +1382,30 @@ async def version_report_snapshot(
     _require_flat(principal, version_report_permission(report_type))
     try:
         service.snapshot(
-            report_type.value, principal.subject,
-            definition_slug=slug, version_no=version_no,
+            report_type.value,
+            principal.subject,
+            definition_slug=slug,
+            version_no=version_no,
         )
     except LookupError:
         # A nonexistent version is a friendly re-render, never a 500.
         return _render_version_report(
-            request, renderer, principal, service, slug, version_no, report_type,
-            error="That challenge version was not found.", status_code=404,
+            request,
+            renderer,
+            principal,
+            service,
+            slug,
+            version_no,
+            report_type,
+            error="That challenge version was not found.",
+            status_code=404,
         )
     return _redirect(
-        request, "web_version_report",
-        slug=slug, version_no=str(version_no), report_type=report_type.value,
+        request,
+        "web_version_report",
+        slug=slug,
+        version_no=str(version_no),
+        report_type=report_type.value,
     )
 
 
@@ -1342,14 +1429,15 @@ def _render_competition_run_report(
         "notice": notice,
     }
     return renderer.render(
-        request, "report_competition_run.html", context,
-        principal=principal, status_code=status_code,
+        request,
+        "report_competition_run.html",
+        context,
+        principal=principal,
+        status_code=status_code,
     )
 
 
-@router.get(
-    "/competitions/{competition_id}/reports/run", name="web_competition_run_report"
-)
+@router.get("/competitions/{competition_id}/reports/run", name="web_competition_run_report")
 def competition_run_report_view(
     competition_id: str,
     request: Request,
@@ -1362,9 +1450,7 @@ def competition_run_report_view(
     assert_competition_permission_or_404(
         principal, competition_id, Permission.SCOREBOARD_READ, not_found=_NOT_FOUND
     )
-    return _render_competition_run_report(
-        request, renderer, principal, service, competition_id
-    )
+    return _render_competition_run_report(request, renderer, principal, service, competition_id)
 
 
 @router.post(
@@ -1383,6 +1469,4 @@ async def competition_run_report_snapshot(
         principal, competition_id, Permission.SCOREBOARD_READ, not_found=_NOT_FOUND
     )
     service.snapshot("competition_run", principal.subject, competition_id=competition_id)
-    return _redirect(
-        request, "web_competition_run_report", competition_id=competition_id
-    )
+    return _redirect(request, "web_competition_run_report", competition_id=competition_id)

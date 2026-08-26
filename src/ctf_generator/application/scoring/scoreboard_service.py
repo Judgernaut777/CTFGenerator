@@ -42,9 +42,7 @@ class ScoreboardService:
         ``last_solve_at``, ``rank``); no ORM row or private data escapes.
         """
         with self._database.session_scope() as session:
-            record = SqlAlchemyScoreboardProjectionRepository(session).get(
-                competition_id
-            )
+            record = SqlAlchemyScoreboardProjectionRepository(session).get(competition_id)
         if record is None:
             return []
         raw_entries = record.entries.get("entries", [])

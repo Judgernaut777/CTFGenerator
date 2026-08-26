@@ -96,9 +96,7 @@ def _client_and_db():
         command.upgrade(_alembic_config(url), "head")
         db = Database(DatabaseConfig(url=url))
         try:
-            app = create_app(
-                ApiSettings(), database=db, authenticator=_authenticator()
-            )
+            app = create_app(ApiSettings(), database=db, authenticator=_authenticator())
             yield TestClient(app), db
         finally:
             db.dispose()
@@ -109,23 +107,29 @@ def _auth(token: str = _ADMIN) -> dict[str, str]:
 
 
 def _seed_version(client: TestClient) -> None:
-    assert client.post(
-        "/api/v1/challenge-definitions",
-        headers=_auth(),
-        json={"family": "web", "slug": _SLUG, "title": "SQLi"},
-    ).status_code == 201
+    assert (
+        client.post(
+            "/api/v1/challenge-definitions",
+            headers=_auth(),
+            json={"family": "web", "slug": _SLUG, "title": "SQLi"},
+        ).status_code
+        == 201
+    )
     # The version's spec_sha256 is derived from the spec; we plant a build whose
     # spec_sha256 must match, so read the version back for its hash.
-    assert client.post(
-        "/api/v1/challenge-versions",
-        headers=_auth(),
-        json={
-            "definition_slug": _SLUG,
-            "seed": "s",
-            "family_version": "1.0.0",
-            "spec": {"title": "SQLi"},
-        },
-    ).status_code == 201
+    assert (
+        client.post(
+            "/api/v1/challenge-versions",
+            headers=_auth(),
+            json={
+                "definition_slug": _SLUG,
+                "seed": "s",
+                "family_version": "1.0.0",
+                "spec": {"title": "SQLi"},
+            },
+        ).status_code
+        == 201
+    )
 
 
 def _plant_build(db: Database) -> str:
@@ -163,12 +167,8 @@ class BuildsApiIntegrationTests(unittest.TestCase):
             )
             self.assertEqual(lst.status_code, 200, lst.text)
             self.assertEqual(lst.json()["schema"], "ctfgen.build-list")
-            self.assertIn(
-                build_sha, [b["build_sha256"] for b in lst.json()["data"]]
-            )
-            detail = client.get(
-                f"/api/v1/builds/{build_sha}", headers=_auth(_ORGANIZER)
-            )
+            self.assertIn(build_sha, [b["build_sha256"] for b in lst.json()["data"]])
+            detail = client.get(f"/api/v1/builds/{build_sha}", headers=_auth(_ORGANIZER))
             self.assertEqual(detail.status_code, 200, detail.text)
             self.assertEqual(detail.json()["build_sha256"], build_sha)
             self.assertIn("manifest", detail.json())

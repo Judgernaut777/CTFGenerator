@@ -33,7 +33,8 @@ class BuildIsolationIntegrationTests(unittest.TestCase):
         for tag in self._tags:
             subprocess.run(
                 ["docker", "image", "rm", "--force", tag],
-                capture_output=True, text=True,
+                capture_output=True,
+                text=True,
             )
 
     def _context(self, dockerfile: str) -> str:
@@ -62,13 +63,9 @@ class BuildIsolationIntegrationTests(unittest.TestCase):
         tag = f"ctfgen-build-idtest-{uuid.uuid4().hex[:8]}:latest"
         self._tags.append(tag)
         context = self._context('FROM alpine:latest\nCMD ["sleep","86400"]\n')
-        build_digest = _BACKEND.build_image(
-            context_dir=context, tag=tag, network=False
-        )
+        build_digest = _BACKEND.build_image(context_dir=context, tag=tag, network=False)
         self.assertEqual(_BACKEND.image_id(tag), build_digest)
-        self.assertIsNone(
-            _BACKEND.image_id(f"ctfgen-absent-{uuid.uuid4().hex[:8]}:latest")
-        )
+        self.assertIsNone(_BACKEND.image_id(f"ctfgen-absent-{uuid.uuid4().hex[:8]}:latest"))
 
     def test_oversized_image_is_refused_and_removed(self) -> None:
         tag = f"ctfgen-build-oversize-{uuid.uuid4().hex[:8]}:latest"

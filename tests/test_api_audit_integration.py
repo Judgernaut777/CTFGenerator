@@ -97,9 +97,7 @@ def _authenticator() -> StubAuthenticator:
     return StubAuthenticator(
         {
             _ADMIN: principal_for("admin-user", {"admin"}, system_roles={"admin"}),
-            _SUPPORT: principal_for(
-                "support-user", {"support"}, system_roles={"support"}
-            ),
+            _SUPPORT: principal_for("support-user", {"support"}, system_roles={"support"}),
             _ORGANIZER: principal_for(
                 "org-user", {"organizer"}, memberships={"c": ("organizer", None)}
             ),
@@ -176,21 +174,19 @@ class AuditApiIntegrationTests(unittest.TestCase):
             )
             self.assertEqual(by_actor.status_code, 200)
             self.assertTrue(
-                all(e["actor"] == "admin-user" and e["outcome"] == "success"
-                    for e in by_actor.json()["data"])
+                all(
+                    e["actor"] == "admin-user" and e["outcome"] == "success"
+                    for e in by_actor.json()["data"]
+                )
             )
 
     def test_support_may_read_but_organizer_and_player_are_denied(self) -> None:
         with _client_and_db() as (client, _db):
-            self.assertEqual(
-                client.get("/api/v1/audit", headers=_auth(_SUPPORT)).status_code, 200
-            )
+            self.assertEqual(client.get("/api/v1/audit", headers=_auth(_SUPPORT)).status_code, 200)
             self.assertEqual(
                 client.get("/api/v1/audit", headers=_auth(_ORGANIZER)).status_code, 403
             )
-            self.assertEqual(
-                client.get("/api/v1/audit", headers=_auth(_PLAYER)).status_code, 403
-            )
+            self.assertEqual(client.get("/api/v1/audit", headers=_auth(_PLAYER)).status_code, 403)
 
     def test_denied_privileged_attempt_is_itself_recorded(self) -> None:
         with _client_and_db() as (client, _db):
@@ -198,9 +194,7 @@ class AuditApiIntegrationTests(unittest.TestCase):
             denied = client.get("/api/v1/audit", headers=_auth(_PLAYER))
             self.assertEqual(denied.status_code, 403)
             # ...appears in the trail (outcome=denied), visible to an admin.
-            trail = client.get(
-                "/api/v1/audit?outcome=denied", headers=_auth(_ADMIN)
-            ).json()["data"]
+            trail = client.get("/api/v1/audit?outcome=denied", headers=_auth(_ADMIN)).json()["data"]
             self.assertTrue(trail, "expected the denied attempt to be recorded")
             denied_targets = {e["target"] for e in trail}
             self.assertIn("/api/v1/audit", denied_targets)
@@ -231,20 +225,14 @@ class AuditApiIntegrationTests(unittest.TestCase):
 
     def test_malformed_filter_is_clean_400_not_500(self) -> None:
         with _client_and_db() as (client, _db):
-            bad_outcome = client.get(
-                "/api/v1/audit?outcome=bogus", headers=_auth(_ADMIN)
-            )
+            bad_outcome = client.get("/api/v1/audit?outcome=bogus", headers=_auth(_ADMIN))
             self.assertEqual(bad_outcome.status_code, 400, bad_outcome.text)
             self.assertEqual(bad_outcome.json()["error"]["code"], "invalid_request")
 
-            bad_time = client.get(
-                "/api/v1/audit?since=not-a-date", headers=_auth(_ADMIN)
-            )
+            bad_time = client.get("/api/v1/audit?since=not-a-date", headers=_auth(_ADMIN))
             self.assertEqual(bad_time.status_code, 400, bad_time.text)
 
-            bad_cursor = client.get(
-                "/api/v1/audit?cursor=!!!not-base64!!!", headers=_auth(_ADMIN)
-            )
+            bad_cursor = client.get("/api/v1/audit?cursor=!!!not-base64!!!", headers=_auth(_ADMIN))
             self.assertEqual(bad_cursor.status_code, 400, bad_cursor.text)
 
     def test_secret_shaped_target_is_still_just_data(self) -> None:

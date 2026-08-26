@@ -34,9 +34,7 @@ _SKIP = "docker CLI/daemon not available"
 
 
 def _docker(*args: str, check: bool = True) -> subprocess.CompletedProcess[str]:
-    return subprocess.run(
-        ["docker", *args], capture_output=True, text=True, check=check
-    )
+    return subprocess.run(["docker", *args], capture_output=True, text=True, check=check)
 
 
 @unittest.skipUnless(_DOCKER, _SKIP)
@@ -56,10 +54,15 @@ class BuildMirrorIntegrationTests(unittest.TestCase):
         # `cat /resp`, which sends a pre-built full response and closes. (alpine's
         # busybox has no httpd applet, but nc -l -e is reliable.)
         _docker(
-            "run", "-d", "--name", self._mirror_name,
-            "--network", self._internal_net,
+            "run",
+            "-d",
+            "--name",
+            self._mirror_name,
+            "--network",
+            self._internal_net,
             "alpine:latest",
-            "sh", "-c",
+            "sh",
+            "-c",
             'printf "HTTP/1.0 200 OK\\r\\nContent-Length: 14\\r\\n'
             'Connection: close\\r\\n\\r\\nMIRROR-PKG-OK\\n" > /resp; '
             "while true; do nc -l -p 8000 -e /bin/cat /resp >/dev/null 2>&1; done",
@@ -89,8 +92,13 @@ class BuildMirrorIntegrationTests(unittest.TestCase):
         # Poll (from a peer container on the same net) until the nc server accepts.
         for _ in range(20):
             probe = _docker(
-                "run", "--rm", "--network", self._internal_net, "alpine:latest",
-                "sh", "-c",
+                "run",
+                "--rm",
+                "--network",
+                self._internal_net,
+                "alpine:latest",
+                "sh",
+                "-c",
                 f"wget -q -T 2 -O - http://{self._mirror_name}:8000/pkg.txt",
                 check=False,
             )
@@ -125,7 +133,8 @@ class BuildMirrorIntegrationTests(unittest.TestCase):
         backend = DockerRuntimeBackend(build_mirror_network=self._internal_net)
         with self.assertRaises(DockerCommandError):
             backend.build_image(
-                context_dir=self._context(), tag=self._tag("optout"),
+                context_dir=self._context(),
+                tag=self._tag("optout"),
                 allow_mirror=False,
             )
 
@@ -136,17 +145,17 @@ class BuildMirrorIntegrationTests(unittest.TestCase):
         backend = DockerRuntimeBackend(build_mirror_network=self._open_net)
         with self.assertRaises(UnsupportedRuntimeError):
             backend.build_image(
-                context_dir=self._context(), tag=self._tag("open"),
+                context_dir=self._context(),
+                tag=self._tag("open"),
                 allow_mirror=True,
             )
 
     def test_missing_mirror_network_is_refused(self) -> None:
-        backend = DockerRuntimeBackend(
-            build_mirror_network=f"ctfgen-nope-{self._suffix}"
-        )
+        backend = DockerRuntimeBackend(build_mirror_network=f"ctfgen-nope-{self._suffix}")
         with self.assertRaises(UnsupportedRuntimeError):
             backend.build_image(
-                context_dir=self._context(), tag=self._tag("missing"),
+                context_dir=self._context(),
+                tag=self._tag("missing"),
                 allow_mirror=True,
             )
 

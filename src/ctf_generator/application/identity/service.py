@@ -74,14 +74,10 @@ class IdentityService:
                 repo.update(membership)
             stored = repo.get(user_email, competition_id)
         if stored is None:  # pragma: no cover - just upserted in the same UoW
-            raise LookupError(
-                f"membership lost after upsert: {user_email!r} in {competition_id!r}"
-            )
+            raise LookupError(f"membership lost after upsert: {user_email!r} in {competition_id!r}")
         return stored
 
-    def list_memberships_for_competition(
-        self, competition_id: str
-    ) -> list[Membership]:
+    def list_memberships_for_competition(self, competition_id: str) -> list[Membership]:
         """Every membership in ``competition_id`` (empty if the competition is
         unknown or has none). This is the application-layer read the contestant
         web roster consumes so an interface handler never touches the membership
@@ -91,6 +87,4 @@ class IdentityService:
         caller is responsible for confining the result to the caller's tenancy
         scope (own team only) before rendering."""
         with self._database.session_scope() as session:
-            return SqlAlchemyMembershipRepository(session).list_for_competition(
-                competition_id
-            )
+            return SqlAlchemyMembershipRepository(session).list_for_competition(competition_id)

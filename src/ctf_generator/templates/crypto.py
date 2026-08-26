@@ -134,7 +134,9 @@ def render(
         "public/hints.yaml": dump_yaml({"hints": _hints(variant, admin_route)}),
         "private/solution.md": _solution(variant, login_route, whoami_route, admin_route),
         "private/solver.py": _solver(variant, login_route, admin_route),
-        "private/variant.json": _variant_json(spec, variant, login_route, whoami_route, admin_route),
+        "private/variant.json": _variant_json(
+            spec, variant, login_route, whoami_route, admin_route
+        ),
         "private/checkpoints.yaml": dump_yaml(
             {"checkpoints": [{"name": name, "required": True} for name in spec.checkpoints]}
         ),
@@ -152,9 +154,7 @@ def _variant(rng: random.Random) -> Variant:
     whoami_noun = rng.choice(["whoami", "profile", "me"])
     issuer = rng.choice(["Northwind Portal", "Aurora Ops", "Cobalt Suite", "Vantage Console"])
     demo_user = rng.choice(["guest", "intern", "analyst", "viewer"])
-    demo_password = (
-        f"{rng.choice(['Spring', 'River', 'Delta', 'Ember'])}{rng.randrange(100, 999)}!"
-    )
+    demo_password = f"{rng.choice(['Spring', 'River', 'Delta', 'Ember'])}{rng.randrange(100, 999)}!"
     admin_user = rng.choice(["root_admin", "sysadmin", "superuser", "admin_ops"])
     if vuln_class == "weak_secret":
         secret = rng.choice(_WEAK_SECRETS)
@@ -190,32 +190,35 @@ def _vuln_label(vuln_class: str) -> str:
 def _variant_json(
     spec: ChallengeSpec, v: Variant, login_route: str, whoami_route: str, admin_route: str
 ) -> str:
-    return json.dumps(
-        {
-            "meta": spec.meta_mapping(),
-            "family": FAMILY_NAME,
-            "flag": v.flag,
-            "vuln_class": v.vuln_class,
-            "routes": {
-                "health": "/healthz",
-                "login": login_route,
-                "whoami": whoami_route,
-                "admin": admin_route,
+    return (
+        json.dumps(
+            {
+                "meta": spec.meta_mapping(),
+                "family": FAMILY_NAME,
+                "flag": v.flag,
+                "vuln_class": v.vuln_class,
+                "routes": {
+                    "health": "/healthz",
+                    "login": login_route,
+                    "whoami": whoami_route,
+                    "admin": admin_route,
+                },
+                "credentials": {
+                    "demo_user": v.demo_user,
+                    "demo_password": v.demo_password,
+                    "admin_user": v.admin_user,
+                },
+                "token": {
+                    "issuer": v.issuer,
+                    "secret": v.secret,
+                    "vulnerability": _vuln_label(v.vuln_class),
+                },
             },
-            "credentials": {
-                "demo_user": v.demo_user,
-                "demo_password": v.demo_password,
-                "admin_user": v.admin_user,
-            },
-            "token": {
-                "issuer": v.issuer,
-                "secret": v.secret,
-                "vulnerability": _vuln_label(v.vuln_class),
-            },
-        },
-        indent=2,
-        sort_keys=True,
-    ) + "\n"
+            indent=2,
+            sort_keys=True,
+        )
+        + "\n"
+    )
 
 
 def _compose() -> str:
@@ -254,7 +257,7 @@ CMD ["python", "app.py"]
 def _decode_token_body(vuln_class: str) -> str:
     """The vulnerable ``decode_token`` body for this instance's class."""
     if vuln_class == "alg_none":
-        return '''    alg = str(header.get("alg", "")).lower()
+        return """    alg = str(header.get("alg", "")).lower()
     if alg == "none":
         # VULNERABILITY (CWE-347): a legacy 'alg: none' debug path accepts a
         # token with NO signature check at all. It predates the current auth
@@ -272,9 +275,9 @@ def _decode_token_body(vuln_class: str) -> str:
         return None
     if not hmac.compare_digest(expected, actual):
         return None
-    return payload'''
+    return payload"""
     # weak_secret: strict HS256 verification only -- but SECRET is guessable.
-    return '''    alg = str(header.get("alg", "")).lower()
+    return """    alg = str(header.get("alg", "")).lower()
     # No 'alg: none' path here: unsigned tokens are rejected. The verification
     # itself is correct -- the VULNERABILITY (CWE-347) is that SECRET is a
     # weak, guessable value an attacker can recover by a dictionary attack.
@@ -289,7 +292,7 @@ def _decode_token_body(vuln_class: str) -> str:
         return None
     if not hmac.compare_digest(expected, actual):
         return None
-    return payload'''
+    return payload"""
 
 
 def _api_app(v: Variant, login_route: str, whoami_route: str, admin_route: str) -> str:
@@ -645,7 +648,7 @@ if __name__ == "__main__":
 
 
 def _healthcheck() -> str:
-    return '''from __future__ import annotations
+    return """from __future__ import annotations
 
 import argparse
 import json
@@ -665,4 +668,4 @@ def main():
 
 if __name__ == "__main__":
     sys.exit(main())
-'''
+"""

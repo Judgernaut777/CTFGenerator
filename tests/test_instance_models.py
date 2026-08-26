@@ -130,9 +130,7 @@ class TransitionMatrixTests(unittest.TestCase):
             ("failed", "starting"),
             ("quarantined", "archived"),
         ]:
-            self.assertTrue(
-                is_legal_instance_transition(src, dst), f"{src}->{dst} should be legal"
-            )
+            self.assertTrue(is_legal_instance_transition(src, dst), f"{src}->{dst} should be legal")
 
     def test_representative_illegal_moves(self) -> None:
         for src, dst in [
@@ -153,22 +151,14 @@ class TransitionMatrixTests(unittest.TestCase):
 
 class ChildAggregateValidationTests(unittest.TestCase):
     def test_endpoint_ok_and_bad_port(self) -> None:
-        InstanceEndpoint(
-            instance_id="i", name="web", host="h", port=8080, protocol="tcp", url="u"
-        )
+        InstanceEndpoint(instance_id="i", name="web", host="h", port=8080, protocol="tcp", url="u")
         with self.assertRaises(ValueError):
-            InstanceEndpoint(
-                instance_id="i", name="web", host="h", port=0, protocol="tcp", url="u"
-            )
+            InstanceEndpoint(instance_id="i", name="web", host="h", port=0, protocol="tcp", url="u")
 
     def test_runtime_resource_kind_and_state(self) -> None:
-        RuntimeResource(
-            instance_id="i", kind="container", external_ref="c1", worker="w"
-        )
+        RuntimeResource(instance_id="i", kind="container", external_ref="c1", worker="w")
         with self.assertRaises(ValueError):
-            RuntimeResource(
-                instance_id="i", kind="pod", external_ref="c1", worker="w"
-            )
+            RuntimeResource(instance_id="i", kind="pod", external_ref="c1", worker="w")
         with self.assertRaises(ValueError):
             RuntimeResource(
                 instance_id="i",
@@ -264,9 +254,7 @@ class CorrectiveContractTests(unittest.TestCase):
         inst = _instance(image_ref="registry/img@sha256:deadbeef")
         job = build_corrective_job(inst, inst.generation, "launch", _NOW)
         self.assertEqual(job.job_type, "launch_instance")
-        self.assertEqual(
-            job.idempotency_key, f"instance:{inst.instance_id}:gen1:launch"
-        )
+        self.assertEqual(job.idempotency_key, f"instance:{inst.instance_id}:gen1:launch")
         self.assertEqual(job.required_capabilities, ("launch_instance",))
         # Payload carries references only -- no flag/secret/credential material.
         self.assertEqual(

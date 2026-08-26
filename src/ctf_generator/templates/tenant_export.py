@@ -126,35 +126,38 @@ def _variant_json(spec: ChallengeSpec, v: Variant, route_base: str, support_rout
     # ``tokens`` + ``routes`` are class-independent (same 11 keys either way) so
     # variant-uniqueness scoring does not depend on the drawn class. Class-only
     # facts live under ``vuln_class``/``class_params`` and are not scored.
-    return json.dumps(
-        {
-            "meta": spec.meta_mapping(),
-            "family": "web_business_logic_tenant_export",
-            "vuln_class": v.vuln_class,
-            "class_params": {
-                "job_prefix": v.job_prefix,
-                "victim_seq": v.victim_seq,
-                "counter_start": v.counter_start,
+    return (
+        json.dumps(
+            {
+                "meta": spec.meta_mapping(),
+                "family": "web_business_logic_tenant_export",
+                "vuln_class": v.vuln_class,
+                "class_params": {
+                    "job_prefix": v.job_prefix,
+                    "victim_seq": v.victim_seq,
+                    "counter_start": v.counter_start,
+                },
+                "routes": {
+                    "export_base": route_base,
+                    "support": support_route,
+                },
+                "tokens": {
+                    "export_noun": v.export_noun,
+                    "support_noun": v.support_noun,
+                    "tenant_field": v.tenant_field,
+                    "attacker_tenant": v.attacker_tenant,
+                    "victim_tenant": v.victim_tenant,
+                    "attacker_invoice": v.attacker_invoice,
+                    "victim_invoice": v.victim_invoice,
+                    "attacker_user": v.attacker_user,
+                    "victim_user": v.victim_user,
+                },
             },
-            "routes": {
-                "export_base": route_base,
-                "support": support_route,
-            },
-            "tokens": {
-                "export_noun": v.export_noun,
-                "support_noun": v.support_noun,
-                "tenant_field": v.tenant_field,
-                "attacker_tenant": v.attacker_tenant,
-                "victim_tenant": v.victim_tenant,
-                "attacker_invoice": v.attacker_invoice,
-                "victim_invoice": v.victim_invoice,
-                "attacker_user": v.attacker_user,
-                "victim_user": v.victim_user,
-            },
-        },
-        indent=2,
-        sort_keys=True,
-    ) + "\n"
+            indent=2,
+            sort_keys=True,
+        )
+        + "\n"
+    )
 
 
 def _compose() -> str:
@@ -225,7 +228,7 @@ def _support_items(v: Variant) -> str:
     nothing there, so the adaptive solver falls through to enumeration.
     """
     if v.vuln_class == "field_trust":
-        return f'''[
+        return f"""[
             {{
                 "id": "ops-117",
                 "severity": "low",
@@ -241,8 +244,8 @@ def _support_items(v: Variant) -> str:
                 "severity": "info",
                 "message": "Scanner findings against /debug/vars were remediated last quarter.",
             }},
-        ]'''
-    return f'''[
+        ]"""
+    return f"""[
             {{
                 "id": "ops-142",
                 "severity": "low",
@@ -258,7 +261,7 @@ def _support_items(v: Variant) -> str:
                 "severity": "info",
                 "message": "Scanner findings against /debug/vars were remediated last quarter.",
             }},
-        ]'''
+        ]"""
 
 
 def _queue_body(v: Variant, route_base: str) -> str:
@@ -316,7 +319,7 @@ def _queue_body(v: Variant, route_base: str) -> str:
 
 def _download_body(v: Variant) -> str:
     if v.vuln_class == "field_trust":
-        return '''    user = current_user()
+        return """    user = current_user()
     job = redis_client.hgetall(f"job:{job_id}")
     if not job:
         return jsonify({"error": "unknown job"}), 404
@@ -324,8 +327,8 @@ def _download_body(v: Variant) -> str:
         return jsonify({"error": "job belongs to another user"}), 403
     if job.get("status") != "ready":
         return jsonify({"error": "export is not ready", "status": job.get("status", "missing")}), 409
-    return jsonify({"job_id": job_id, "export": job.get("export", "")})'''
-    return '''    # Intentional vulnerability (predictable_job_id): the download route never
+    return jsonify({"job_id": job_id, "export": job.get("export", "")})"""
+    return """    # Intentional vulnerability (predictable_job_id): the download route never
     # checks that the job belongs to the caller, so any known/guessed job ID is
     # retrievable (IDOR) -- and job IDs are sequential.
     job = redis_client.hgetall(f"job:{job_id}")
@@ -333,7 +336,7 @@ def _download_body(v: Variant) -> str:
         return jsonify({"error": "unknown job"}), 404
     if job.get("status") != "ready":
         return jsonify({"error": "export is not ready", "status": job.get("status", "missing")}), 409
-    return jsonify({"job_id": job_id, "export": job.get("export", "")})'''
+    return jsonify({"job_id": job_id, "export": job.get("export", "")})"""
 
 
 def _seed_block(v: Variant) -> str:
@@ -518,7 +521,7 @@ def _worker(v: Variant) -> str:
     ])
     redis_client.hset(f"job:{{job['job_id']}}", mapping={{"status": "ready", "export": export}})'''
     else:
-        process_body = '''    invoice_id = job["invoice_id"]
+        process_body = """    invoice_id = job["invoice_id"]
     owner_tenant = job.get("owner_tenant")
     row = INVOICES.get(invoice_id)
     # The API already enforced same-tenant access, so the worker only exports
@@ -533,7 +536,7 @@ def _worker(v: Variant) -> str:
         "amount=" + row["amount"],
         "note=" + row["note"],
     ])
-    redis_client.hset(f"job:{job['job_id']}", mapping={"status": "ready", "export": export})'''
+    redis_client.hset(f"job:{job['job_id']}", mapping={"status": "ready", "export": export})"""
 
     return f'''from __future__ import annotations
 
@@ -786,7 +789,7 @@ if __name__ == "__main__":
 
 
 def _healthcheck() -> str:
-    return '''from __future__ import annotations
+    return """from __future__ import annotations
 
 import argparse
 import json
@@ -806,11 +809,11 @@ def main():
 
 if __name__ == "__main__":
     sys.exit(main())
-'''
+"""
 
 
 def _validate_solver() -> str:
-    return '''from __future__ import annotations
+    return """from __future__ import annotations
 
 from pathlib import Path
 
@@ -819,7 +822,7 @@ def test_solver_mentions_flag_pattern():
     solver = Path("private/solver.py").read_text(encoding="utf-8")
     assert "ctf\\\\{" in solver
     assert "urllib" in solver
-'''
+"""
 
 
 def _validate_variant(v: Variant) -> str:

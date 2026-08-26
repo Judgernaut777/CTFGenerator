@@ -31,9 +31,7 @@ class SubmissionQueryService:
     def __init__(self, database: Database) -> None:
         self._database = database
 
-    def list_for_team(
-        self, competition_id: str, team_name: str
-    ) -> list[LedgerSubmission]:
+    def list_for_team(self, competition_id: str, team_name: str) -> list[LedgerSubmission]:
         with self._database.session_scope() as session:
             return SqlAlchemyLedgerSubmissionRepository(session).list_for_team(
                 competition_id, team_name
@@ -41,22 +39,16 @@ class SubmissionQueryService:
 
     def list_for_competition(self, competition_id: str) -> list[LedgerSubmission]:
         with self._database.session_scope() as session:
-            return SqlAlchemyLedgerSubmissionRepository(
-                session
-            ).list_for_competition(competition_id)
+            return SqlAlchemyLedgerSubmissionRepository(session).list_for_competition(
+                competition_id
+            )
 
-    def get_detail(
-        self, submission_id: str
-    ) -> tuple[LedgerSubmission, Solve | None] | None:
+    def get_detail(self, submission_id: str) -> tuple[LedgerSubmission, Solve | None] | None:
         """Return one attempt and the solve it produced (``None`` if it was not a
         first-correct solve), or ``None`` if the submission is unknown."""
         with self._database.session_scope() as session:
-            submission = SqlAlchemyLedgerSubmissionRepository(session).get(
-                submission_id
-            )
+            submission = SqlAlchemyLedgerSubmissionRepository(session).get(submission_id)
             if submission is None:
                 return None
-            solve = SqlAlchemySolveRepository(session).get_by_submission(
-                submission_id
-            )
+            solve = SqlAlchemySolveRepository(session).get_by_submission(submission_id)
             return submission, solve

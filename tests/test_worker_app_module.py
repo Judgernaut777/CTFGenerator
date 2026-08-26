@@ -60,8 +60,14 @@ class WorkerAppModuleTest(unittest.TestCase):
         # meta) -- NOT just the /api/v1/-prefixed subset. A human router added at a
         # non-/api/v1 prefix (e.g. /auth or the /app web UI) must ALSO be caught, or
         # a human surface could silently leak onto the network-isolated worker plane.
-        _META = ("/api/v1/openapi.json", "/api/v1/docs", "/api/v1/redoc",
-                 "/docs", "/redoc", "/openapi.json")
+        _META = (
+            "/api/v1/openapi.json",
+            "/api/v1/docs",
+            "/api/v1/redoc",
+            "/docs",
+            "/redoc",
+            "/openapi.json",
+        )
         business = [p for p in paths if p not in _META and not p.startswith("/api/v1/docs")]
         self.assertTrue(business, "expected at least the worker routes")
         for path in business:

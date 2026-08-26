@@ -42,9 +42,7 @@ class StoredResponse:
 class IdempotencyStore(Protocol):
     def lookup(self, scope: str, key: str) -> StoredResponse | None: ...
 
-    def save(
-        self, scope: str, key: str, response: StoredResponse
-    ) -> None: ...
+    def save(self, scope: str, key: str, response: StoredResponse) -> None: ...
 
 
 class InMemoryIdempotencyStore:

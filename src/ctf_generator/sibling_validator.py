@@ -133,4 +133,3 @@ def _merge_replay_report(
 ) -> None:
     report.errors.extend([f"{replay_name}: {error}" for error in replay_report.errors])
     report.logs.extend([f"[{replay_name}]\n{log}" for log in replay_report.logs])
-

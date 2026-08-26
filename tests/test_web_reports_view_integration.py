@@ -38,9 +38,7 @@ def _post_snapshot(client, url: str):
     """POST a freeze with the page's CSRF token, not following the redirect."""
     page = client.get(url)
     token = ws.extract_csrf(page.text)
-    return client.post(
-        url, data={"csrf_token": token}, follow_redirects=False
-    )
+    return client.post(url, data={"csrf_token": token}, follow_redirects=False)
 
 
 @unittest.skipUnless(_ENABLED, _SKIP_REASON)
@@ -84,9 +82,7 @@ class VersionReportsWebTests(unittest.TestCase):
             ws.login(client, ws.EVE)  # player: no flat build:read / eval:read
             slug, vno = ws.seed_published_version(db, "sqli", "SQLi")
             for kind in ("validation", "build", "eval"):
-                r = client.get(
-                    f"/app/challenge-definitions/{slug}/versions/{vno}/reports/{kind}"
-                )
+                r = client.get(f"/app/challenge-definitions/{slug}/versions/{vno}/reports/{kind}")
                 self.assertEqual(r.status_code, 403, r.text)
 
     def test_freeze_unknown_version_is_404(self) -> None:

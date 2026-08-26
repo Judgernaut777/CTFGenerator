@@ -81,46 +81,32 @@ class SqlAlchemyLedgerSubmissionRepository:
         caller that already resolved the scope does not pay for a re-resolve;
         each defaults to resolving on demand for any other caller."""
         if competition_uuid is None:
-            competition_uuid = _resolve.competition_uuid(
-                self._session, submission.competition_id
-            )
+            competition_uuid = _resolve.competition_uuid(self._session, submission.competition_id)
         if team_uuid is None:
-            team_uuid = _resolve.team_uuid(
-                self._session, competition_uuid, submission.team_name
-            )
+            team_uuid = _resolve.team_uuid(self._session, competition_uuid, submission.team_name)
         if version_uuid is None:
             version_uuid = _resolve.version_uuid(
                 self._session, submission.definition_slug, submission.version_no
             )
-        user_uuid = _resolve.user_uuid_optional(
-            self._session, submission.submitter_email
-        )
-        row = submission_to_orm(
-            submission, competition_uuid, team_uuid, version_uuid, user_uuid
-        )
+        user_uuid = _resolve.user_uuid_optional(self._session, submission.submitter_email)
+        row = submission_to_orm(submission, competition_uuid, team_uuid, version_uuid, user_uuid)
         self._session.add(row)
         self._session.flush()
 
     @staticmethod
     def _map(row) -> LedgerSubmission:
         sub, comp_slug, team_name, def_slug, version_no, email = row
-        return submission_from_orm(
-            sub, comp_slug, team_name, def_slug, version_no, email
-        )
+        return submission_from_orm(sub, comp_slug, team_name, def_slug, version_no, email)
 
     def get(self, submission_id: str) -> LedgerSubmission | None:
         try:
             key = _as_uuid(submission_id)
         except (ValueError, AttributeError, TypeError):
             return None  # malformed id is a clean miss, not a persistence error
-        row = self._session.execute(
-            _hydrate_query().where(SubmissionRow.id == key)
-        ).one_or_none()
+        row = self._session.execute(_hydrate_query().where(SubmissionRow.id == key)).one_or_none()
         return self._map(row) if row is not None else None
 
-    def list_for_team(
-        self, competition_id: str, team_name: str
-    ) -> list[LedgerSubmission]:
+    def list_for_team(self, competition_id: str, team_name: str) -> list[LedgerSubmission]:
         rows = self._session.execute(
             _hydrate_query()
             .where(Competition.slug == competition_id, Team.name == team_name)

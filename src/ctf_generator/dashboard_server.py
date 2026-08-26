@@ -92,7 +92,9 @@ _HTML_CSP = (
 )
 
 
-def _json_response(status: int, payload: object, cookies: dict[str, str] | None = None) -> DashboardResponse:
+def _json_response(
+    status: int, payload: object, cookies: dict[str, str] | None = None
+) -> DashboardResponse:
     return DashboardResponse(
         status=status,
         body=json.dumps(payload, sort_keys=True),
@@ -143,7 +145,9 @@ class AuthConfig:
         salt: bytes | None = None,
     ) -> AuthConfig:
         salt = salt if salt is not None else secrets.token_bytes(16)
-        password_hash = hashlib.pbkdf2_hmac("sha256", password.encode("utf-8"), salt, pbkdf2_iterations)
+        password_hash = hashlib.pbkdf2_hmac(
+            "sha256", password.encode("utf-8"), salt, pbkdf2_iterations
+        )
         return cls(
             admin_username=admin_username,
             password_hash=password_hash,
@@ -253,14 +257,11 @@ TokenFactory = Callable[[], str]
 
 
 class SessionStore(Protocol):
-    def new_token(self) -> str:
-        ...
+    def new_token(self) -> str: ...
 
-    def create(self, session: Session) -> None:
-        ...
+    def create(self, session: Session) -> None: ...
 
-    def get(self, token: str) -> Session | None:
-        ...
+    def get(self, token: str) -> Session | None: ...
 
     def rotate(self, old_token: str, *, now: datetime, ttl_seconds: int) -> Session | None:
         """Replace ``old_token`` with a freshly-issued token for the same
@@ -275,8 +276,7 @@ class SessionStore(Protocol):
         live session."""
         ...
 
-    def delete(self, token: str) -> None:
-        ...
+    def delete(self, token: str) -> None: ...
 
 
 class InMemorySessionStore:
@@ -447,7 +447,9 @@ def _handle_public(
     return _json_response(200, {"feed": redacted})
 
 
-def _html_response(status: int, html: str, cookies: dict[str, str] | None = None) -> DashboardResponse:
+def _html_response(
+    status: int, html: str, cookies: dict[str, str] | None = None
+) -> DashboardResponse:
     return DashboardResponse(
         status=status,
         body=html,
@@ -561,18 +563,14 @@ def _route_admin_body(
     path = request.path
 
     if path == "/" and method == "GET":
-        progress = {
-            team_id: asdict(team) for team_id, team in service.progress().items()
-        }
+        progress = {team_id: asdict(team) for team_id, team in service.progress().items()}
         return 200, {
             "progress": progress,
             "leaderboard": service.leaderboard(as_of=now).to_mapping(),
         }
 
     if path == "/api/progress" and method == "GET":
-        progress = {
-            team_id: asdict(team) for team_id, team in service.progress().items()
-        }
+        progress = {team_id: asdict(team) for team_id, team in service.progress().items()}
         return 200, {"progress": progress}
 
     if path == "/api/leaderboard" and method == "GET":

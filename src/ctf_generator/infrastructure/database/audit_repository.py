@@ -73,9 +73,9 @@ class SqlAlchemyAuditRepository:
                 tuple_(AuditEventRow.occurred_at, AuditEventRow.id)
                 < tuple_(cursor.occurred_at, uuid.UUID(cursor.audit_event_id))
             )
-        stmt = stmt.order_by(
-            AuditEventRow.occurred_at.desc(), AuditEventRow.id.desc()
-        ).limit(limit + 1)
+        stmt = stmt.order_by(AuditEventRow.occurred_at.desc(), AuditEventRow.id.desc()).limit(
+            limit + 1
+        )
 
         rows = list(self._session.scalars(stmt))
         has_more = len(rows) > limit

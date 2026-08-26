@@ -69,9 +69,7 @@ class TokenStoreTests(unittest.TestCase):
         self.assertIsNone(self.store.load())
 
     def test_save_then_load_round_trips(self) -> None:
-        self.store.save(
-            Session(api_url="http://h", token="secret", expires_at="2030", subject="a")
-        )
+        self.store.save(Session(api_url="http://h", token="secret", expires_at="2030", subject="a"))
         loaded = self.store.load()
         self.assertIsNotNone(loaded)
         self.assertEqual(loaded.token, "secret")
@@ -346,9 +344,10 @@ class EntryDispatchTests(unittest.TestCase):
         # Simulate httpx / the [cli] extra being absent: importing the platform
         # module raises ImportError -> a clean install hint + rc 1, no traceback.
         stderr = io.StringIO()
-        with mock.patch.dict(
-            "sys.modules", {"ctf_generator.interfaces.cli.platform": None}
-        ), mock.patch("sys.stderr", stderr):
+        with (
+            mock.patch.dict("sys.modules", {"ctf_generator.interfaces.cli.platform": None}),
+            mock.patch("sys.stderr", stderr),
+        ):
             code = entry.main(["auth", "whoami"])
         self.assertEqual(code, 1)
         self.assertIn("ctf-generator[cli]", stderr.getvalue())

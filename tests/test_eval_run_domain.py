@@ -50,8 +50,13 @@ class EvalRunAggregateTests(unittest.TestCase):
 
     def test_succeeded_carries_advisory_result(self) -> None:
         run = _pending(
-            status="succeeded", completed_at=_DONE, solved=True, steps=3,
-            success_dropped=False, step_delta=1, blended_score=71.0,
+            status="succeeded",
+            completed_at=_DONE,
+            solved=True,
+            steps=3,
+            success_dropped=False,
+            step_delta=1,
+            blended_score=71.0,
             notes=("did a thing",),
         )
         self.assertTrue(run.is_terminal)
@@ -125,9 +130,7 @@ class SanitizerTests(unittest.TestCase):
         self.assertIn("[redacted]", _sanitize_text(planted))
         # Multi-word flags + provider keys are also redacted (defense in depth).
         self.assertNotIn("ctf{", _sanitize_text("x ctf{multi word flag} y"))
-        self.assertNotIn(
-            "sk-ant-", _sanitize_text("boom sk-ant-api03-DEADbeef1234567890abcd")
-        )
+        self.assertNotIn("sk-ant-", _sanitize_text("boom sk-ant-api03-DEADbeef1234567890abcd"))
         notes = _sanitize_notes(("clean note", "ctf{another_flag}"))
         for note in notes:
             self.assertNotIn("ctf{", note)

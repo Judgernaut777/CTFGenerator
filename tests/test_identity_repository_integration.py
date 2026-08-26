@@ -298,9 +298,7 @@ class MembershipRepositoryIntegrationTests(unittest.TestCase):
             comp = _seed_competition(db)
             self._seed_people(db, comp, with_team=None)
             with db.session_scope() as s:
-                SqlAlchemyMembershipRepository(s).add(
-                    Membership("player@x.io", comp, "organizer")
-                )
+                SqlAlchemyMembershipRepository(s).add(Membership("player@x.io", comp, "organizer"))
             with db.session_scope() as s:
                 got = SqlAlchemyMembershipRepository(s).get("player@x.io", comp)
         self.assertEqual(got.role, "organizer")
@@ -314,9 +312,7 @@ class MembershipRepositoryIntegrationTests(unittest.TestCase):
             with db.session_scope() as s:
                 SqlAlchemyUserRepository(s).add(User("Alice@X.io", "Alice"))
             with db.session_scope() as s:
-                SqlAlchemyMembershipRepository(s).add(
-                    Membership("alice@x.io", comp, "player")
-                )
+                SqlAlchemyMembershipRepository(s).add(Membership("alice@x.io", comp, "player"))
             with db.session_scope() as s:
                 repo = SqlAlchemyMembershipRepository(s)
                 got = repo.get("ALICE@X.IO", comp)
@@ -332,9 +328,7 @@ class MembershipRepositoryIntegrationTests(unittest.TestCase):
             with db.session_scope() as s:
                 SqlAlchemyUserRepository(s).add(User("player@x.io", "Player"))
                 SqlAlchemyTeamRepository(s).add(Team(comp_b, "Red"))
-                SqlAlchemyMembershipRepository(s).add(
-                    Membership("player@x.io", comp_a, "player")
-                )
+                SqlAlchemyMembershipRepository(s).add(Membership("player@x.io", comp_a, "player"))
             with self.assertRaises(LookupError):
                 with db.session_scope() as s:
                     SqlAlchemyMembershipRepository(s).update(
@@ -346,9 +340,7 @@ class MembershipRepositoryIntegrationTests(unittest.TestCase):
             comp = _seed_competition(db)
             with self.assertRaises(LookupError):
                 with db.session_scope() as s:
-                    SqlAlchemyMembershipRepository(s).add(
-                        Membership("ghost@x.io", comp, "player")
-                    )
+                    SqlAlchemyMembershipRepository(s).add(Membership("ghost@x.io", comp, "player"))
 
     def test_add_missing_competition_raises_lookuperror(self) -> None:
         with _migrated_database() as (db, _url):
@@ -482,9 +474,7 @@ class MembershipRepositoryIntegrationTests(unittest.TestCase):
                 m.add(Membership("u2@x.io", comp_a, "player"))
                 m.add(Membership("u1@x.io", comp_b, "observer"))
             with db.session_scope() as s:
-                members_a = SqlAlchemyMembershipRepository(s).list_for_competition(
-                    comp_a
-                )
+                members_a = SqlAlchemyMembershipRepository(s).list_for_competition(comp_a)
         self.assertEqual(len(members_a), 2)
         self.assertTrue(all(isinstance(x, Membership) for x in members_a))
         self.assertEqual(
@@ -515,9 +505,7 @@ class IdentityConstraintTests(unittest.TestCase):
                 SqlAlchemyTeamRepository(s).add(Team("comp-b", "Red"))
             with db.session_scope() as s:
                 user_id = s.scalars(
-                    sa.select(UserRow.id).where(
-                        sa.func.lower(UserRow.email) == "player@x.io"
-                    )
+                    sa.select(UserRow.id).where(sa.func.lower(UserRow.email) == "player@x.io")
                 ).one()
                 comp_a_id = s.execute(
                     sa.text("SELECT id FROM competitions WHERE slug = :slug"),
@@ -544,9 +532,7 @@ class IdentityConstraintTests(unittest.TestCase):
                 SqlAlchemyUserRepository(s).add(User("player@x.io", "Player"))
             with db.session_scope() as s:
                 user_id = s.scalars(
-                    sa.select(UserRow.id).where(
-                        sa.func.lower(UserRow.email) == "player@x.io"
-                    )
+                    sa.select(UserRow.id).where(sa.func.lower(UserRow.email) == "player@x.io")
                 ).one()
                 comp_id = s.execute(
                     sa.text("SELECT id FROM competitions WHERE slug = :slug"),
@@ -591,14 +577,10 @@ class IdentityConstraintTests(unittest.TestCase):
             comp = _seed_competition(db)
             with db.session_scope() as s:
                 SqlAlchemyUserRepository(s).add(User("player@x.io", "Player"))
-                SqlAlchemyMembershipRepository(s).add(
-                    Membership("player@x.io", comp, "player")
-                )
+                SqlAlchemyMembershipRepository(s).add(Membership("player@x.io", comp, "player"))
             with self.assertRaises(IntegrityError):
                 with db.session_scope() as s:
-                    s.execute(
-                        sa.text("DELETE FROM users WHERE lower(email) = 'player@x.io'")
-                    )
+                    s.execute(sa.text("DELETE FROM users WHERE lower(email) = 'player@x.io'"))
 
     def test_fk_restrict_blocks_deleting_referenced_team(self) -> None:
         with _migrated_database() as (db, _url):

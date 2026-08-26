@@ -160,9 +160,7 @@ def migrate(schema_id: str, data: dict) -> dict:
             # document as current (that would be data corruption). Every minor
             # bump must register a migration (an identity fn suffices when the
             # change is purely additive).
-            raise SchemaError(
-                f"no migration registered from {schema_id} {version} toward {cur}"
-            )
+            raise SchemaError(f"no migration registered from {schema_id} {version} toward {cur}")
         to_version, fn = step
         doc = fn(doc)
         # Re-validate after each step so a mis-registered migration whose

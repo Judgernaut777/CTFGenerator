@@ -139,9 +139,7 @@ def competition_to_orm(
     ``competition_challenges`` normalization.
     """
     if config.default_scoring is not None:
-        raise NotImplementedError(
-            "default_scoring persistence lands with competition_challenges"
-        )
+        raise NotImplementedError("default_scoring persistence lands with competition_challenges")
 
     if existing is None:
         return Competition(
@@ -344,9 +342,7 @@ def challenge_version_to_orm(
     )
 
 
-def challenge_version_from_orm(
-    row: ChallengeVersionRow, definition_slug: str
-) -> ChallengeVersion:
+def challenge_version_from_orm(row: ChallengeVersionRow, definition_slug: str) -> ChallengeVersion:
     """Map an ORM ``ChallengeVersion`` row back to a domain object.
 
     ``definition_slug`` is the owning definition's business id (read by the
@@ -369,9 +365,7 @@ def challenge_version_from_orm(
     )
 
 
-def challenge_build_to_orm(
-    build: ChallengeBuild, version_uuid: uuid.UUID
-) -> ChallengeBuildRow:
+def challenge_build_to_orm(build: ChallengeBuild, version_uuid: uuid.UUID) -> ChallengeBuildRow:
     """Map a domain ``ChallengeBuild`` onto a fresh ORM row (insert-only).
 
     ``version_uuid`` is the materialized version's surrogate id, resolved by the
@@ -450,9 +444,7 @@ def eval_run_apply_update(row: EvalRunRow, eval_run: EvalRun) -> EvalRunRow:
     return row
 
 
-def eval_run_from_orm(
-    row: EvalRunRow, definition_slug: str, version_no: int
-) -> EvalRun:
+def eval_run_from_orm(row: EvalRunRow, definition_slug: str, version_no: int) -> EvalRun:
     """Map an ORM ``EvalRun`` row back to the domain. The parent
     ``(definition_slug, version_no)`` are read by the repository via a join.
     NULL ``notes`` becomes an empty tuple."""
@@ -663,9 +655,7 @@ def score_event_to_orm(
         type=event.type,
         ts=event.ts,
         payload=dict(event.payload),
-        submission_id=(
-            _as_uuid(event.submission_id) if event.submission_id is not None else None
-        ),
+        submission_id=(_as_uuid(event.submission_id) if event.submission_id is not None else None),
         solve_id=_as_uuid(event.solve_id) if event.solve_id is not None else None,
     )
 
@@ -736,13 +726,11 @@ def job_to_orm(
     ):
         if getattr(job, _field) is not None:
             raise ValueError(
-                f"a freshly enqueued job must not carry {_field}, got "
-                f"{getattr(job, _field)!r}"
+                f"a freshly enqueued job must not carry {_field}, got {getattr(job, _field)!r}"
             )
     if job.attempt_count != 0:
         raise ValueError(
-            f"a freshly enqueued job must have attempt_count 0, got "
-            f"{job.attempt_count!r}"
+            f"a freshly enqueued job must have attempt_count 0, got {job.attempt_count!r}"
         )
     return JobRow(
         id=_as_uuid(job.job_id),
@@ -816,9 +804,7 @@ def job_from_orm(
     )
 
 
-def job_transition_to_orm(
-    transition: JobTransition, job_uuid: uuid.UUID
-) -> JobTransitionRow:
+def job_transition_to_orm(transition: JobTransition, job_uuid: uuid.UUID) -> JobTransitionRow:
     return JobTransitionRow(
         job_id=job_uuid,
         from_status=transition.from_status,
@@ -862,9 +848,7 @@ def worker_to_orm(worker: Worker, existing: WorkerRow | None = None) -> WorkerRo
     side effect."""
     if existing is None:
         if worker.trust_state != "pending":
-            raise ValueError(
-                f"only pending workers can be registered, got {worker.trust_state!r}"
-            )
+            raise ValueError(f"only pending workers can be registered, got {worker.trust_state!r}")
         # A freshly registered worker is pending with none of the trust/drain/
         # quarantine/heartbeat overlays set -- fail loud rather than silently
         # drop a caller-supplied operational stamp on the insert path.
@@ -933,9 +917,7 @@ def worker_credential_to_orm(
     )
 
 
-def worker_credential_from_orm(
-    row: WorkerCredentialRow, worker_name: str
-) -> WorkerCredential:
+def worker_credential_from_orm(row: WorkerCredentialRow, worker_name: str) -> WorkerCredential:
     for scope in row.scopes:
         if scope not in VALID_CREDENTIAL_SCOPES:
             raise ValueError(f"unmappable credential scope from store: {scope!r}")
@@ -977,9 +959,7 @@ def auth_credential_to_orm(
     return existing
 
 
-def auth_credential_from_orm(
-    row: AuthCredentialRow, user_email: str
-) -> AuthCredential:
+def auth_credential_from_orm(row: AuthCredentialRow, user_email: str) -> AuthCredential:
     """Map an ORM credential row back to a domain ``AuthCredential``.
     ``user_email`` is read by the repository (the row carries only the surrogate
     ``user_id``). Fail loud on a stored hash that is not a valid encoded hash
@@ -994,9 +974,7 @@ def auth_credential_from_orm(
     )
 
 
-def auth_session_to_orm(
-    session: AuthSession, user_uuid: uuid.UUID
-) -> AuthSessionRow:
+def auth_session_to_orm(session: AuthSession, user_uuid: uuid.UUID) -> AuthSessionRow:
     """Insert-only (the single legal mutation -- the revocation stamp -- is
     applied by the repository directly on the row)."""
     return AuthSessionRow(
@@ -1005,11 +983,7 @@ def auth_session_to_orm(
         token_hash=session.token_hash,
         issued_at=to_utc(session.issued_at),
         expires_at=to_utc(session.expires_at),
-        rotated_from=(
-            _as_uuid(session.rotated_from)
-            if session.rotated_from is not None
-            else None
-        ),
+        rotated_from=(_as_uuid(session.rotated_from) if session.rotated_from is not None else None),
         revoked_at=to_utc(session.revoked_at),
     )
 
@@ -1023,9 +997,7 @@ def auth_session_from_orm(row: AuthSessionRow, user_email: str) -> AuthSession:
         token_hash=row.token_hash,
         issued_at=to_utc(row.issued_at),
         expires_at=to_utc(row.expires_at),
-        rotated_from=(
-            str(row.rotated_from) if row.rotated_from is not None else None
-        ),
+        rotated_from=(str(row.rotated_from) if row.rotated_from is not None else None),
         revoked_at=to_utc(row.revoked_at),
     )
 
@@ -1139,9 +1111,7 @@ def quota_reservation_to_orm(reservation: QuotaReservation) -> QuotaReservationR
     repository directly on the row). A fresh reservation must be ``held`` with
     no ``released_at`` -- fail loud rather than insert an inconsistent header."""
     if reservation.state != "held":
-        raise ValueError(
-            f"only held reservations can be inserted, got {reservation.state!r}"
-        )
+        raise ValueError(f"only held reservations can be inserted, got {reservation.state!r}")
     if reservation.released_at is not None:
         raise ValueError("a fresh reservation must not carry released_at")
     return QuotaReservationRow(
@@ -1331,9 +1301,7 @@ def runtime_resource_to_orm(
     return existing
 
 
-def runtime_resource_from_orm(
-    row: RuntimeResourceRow, worker_name: str
-) -> RuntimeResource:
+def runtime_resource_from_orm(row: RuntimeResourceRow, worker_name: str) -> RuntimeResource:
     if row.kind not in VALID_RUNTIME_RESOURCE_KINDS:
         raise ValueError(f"unmappable runtime-resource kind from store: {row.kind!r}")
     if row.state not in VALID_RESOURCE_STATES:
@@ -1396,9 +1364,7 @@ def health_observation_to_orm(
     )
 
 
-def health_observation_from_orm(
-    row: HealthObservationRow, worker_name: str
-) -> HealthObservation:
+def health_observation_from_orm(row: HealthObservationRow, worker_name: str) -> HealthObservation:
     if row.observed_state not in VALID_OBSERVED_STATES:
         raise ValueError(
             f"unmappable observation observed_state from store: {row.observed_state!r}"
@@ -1415,9 +1381,7 @@ def health_observation_from_orm(
     )
 
 
-def instance_event_to_orm(
-    event: InstanceEvent, instance_uuid: uuid.UUID
-) -> InstanceEventRow:
+def instance_event_to_orm(event: InstanceEvent, instance_uuid: uuid.UUID) -> InstanceEventRow:
     return InstanceEventRow(
         instance_id=instance_uuid,
         from_state=event.from_state,

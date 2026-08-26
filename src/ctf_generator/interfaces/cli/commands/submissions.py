@@ -36,9 +36,7 @@ _COLUMNS = [
 def _submit(args: argparse.Namespace) -> int:
     answer = args.answer if args.answer is not None else os.environ.get(_ANSWER_ENV)
     if not answer:
-        raise CliError(
-            f"an answer is required: pass --answer or set {_ANSWER_ENV}"
-        )
+        raise CliError(f"an answer is required: pass --answer or set {_ANSWER_ENV}")
     body: dict[str, object] = {
         "team": args.team,
         "definition_slug": args.definition_slug,
@@ -86,9 +84,7 @@ def add_parser(areas: argparse._SubParsersAction) -> None:
     submit.add_argument("--team", required=True)
     submit.add_argument("--definition-slug", dest="definition_slug", required=True)
     submit.add_argument("--version-no", dest="version_no", type=int, required=True)
-    submit.add_argument(
-        "--answer", default=None, help=f"Candidate flag (or set {_ANSWER_ENV})"
-    )
+    submit.add_argument("--answer", default=None, help=f"Candidate flag (or set {_ANSWER_ENV})")
     submit.add_argument("--instance-seed", dest="instance_seed", default=None)
     add_idempotency_option(submit)
     add_global_options(submit)

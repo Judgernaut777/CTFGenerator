@@ -259,9 +259,7 @@ def families_for_mode(mode: str) -> list[Family]:
 
 def families_for_category(category: str) -> list[Family]:
     return [
-        f
-        for f in sorted(_REGISTRY.values(), key=lambda fam: fam.name)
-        if f.category == category
+        f for f in sorted(_REGISTRY.values(), key=lambda fam: fam.name) if f.category == category
     ]
 
 
@@ -395,9 +393,7 @@ register(
         compose_service_markers=("worker:", "redis"),
         difficulties=("easy", "medium", "hard"),
         cve_driven=False,
-        llm_brief=_FAMILY_BRIEF.get(
-            "web_business_logic_tenant_export", "A security challenge."
-        ),
+        llm_brief=_FAMILY_BRIEF.get("web_business_logic_tenant_export", "A security challenge."),
         scoring_hints=ScoringHints(
             has_worker=True,
             has_queue=True,
@@ -537,32 +533,47 @@ _FAMILY_META: dict[str, dict] = {
     # web_business_logic_tenant_export is registered explicitly above with its
     # metadata inline (it is not in the module loop below).
     "network_lateral_pivot": dict(
-        maintenance_status="beta", isolation_level="container", required_ports=(8080,),
-        expected_memory_mb=384, cve_fidelity_support=("contextualized", "inspired", "simulated"),
+        maintenance_status="beta",
+        isolation_level="container",
+        required_ports=(8080,),
+        expected_memory_mb=384,
+        cve_fidelity_support=("contextualized", "inspired", "simulated"),
     ),
     "cloud_metadata_ssrf": dict(
-        maintenance_status="beta", isolation_level="container", required_ports=(8080, 9000),
-        expected_memory_mb=384, cve_fidelity_support=("contextualized", "inspired", "simulated"),
+        maintenance_status="beta",
+        isolation_level="container",
+        required_ports=(8080, 9000),
+        expected_memory_mb=384,
+        cve_fidelity_support=("contextualized", "inspired", "simulated"),
     ),
     "forensics_incident_triage": dict(
-        maintenance_status="beta", isolation_level="artifact", expected_memory_mb=128,
+        maintenance_status="beta",
+        isolation_level="artifact",
+        expected_memory_mb=128,
     ),
     "crypto_token_forgery": dict(
-        maintenance_status="experimental", isolation_level="container", required_ports=(8080,),
+        maintenance_status="experimental",
+        isolation_level="container",
+        required_ports=(8080,),
         cve_fidelity_support=("contextualized", "inspired", "simulated"),
     ),
     "binary_heap_exploit": dict(
         # Raw-TCP service on a seed-randomized ephemeral port (rng.randrange),
         # so required_ports stays empty per the "seed-varied" convention.
-        maintenance_status="experimental", isolation_level="raw_tcp", expected_memory_mb=128,
+        maintenance_status="experimental",
+        isolation_level="raw_tcp",
+        expected_memory_mb=128,
     ),
     "scada_ics_modbus_takeover": dict(
         # PLC/HMI ports are seed-randomized (rng.randrange 5020-5030 / 8090-8099),
         # so they are ephemeral -- required_ports stays empty.
-        maintenance_status="experimental", isolation_level="container",
+        maintenance_status="experimental",
+        isolation_level="container",
     ),
     "mobile_insecure_storage": dict(
-        maintenance_status="experimental", isolation_level="artifact", expected_memory_mb=128,
+        maintenance_status="experimental",
+        isolation_level="artifact",
+        expected_memory_mb=128,
     ),
 }
 

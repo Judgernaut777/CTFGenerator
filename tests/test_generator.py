@@ -87,9 +87,7 @@ class MetaBlockTests(unittest.TestCase):
     def test_variant_json_carries_meta_block(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             output = self._create(temp_dir, seed="meta-seed")
-            variant = json.loads(
-                (output / "private/variant.json").read_text(encoding="utf-8")
-            )
+            variant = json.loads((output / "private/variant.json").read_text(encoding="utf-8"))
             meta = variant["meta"]
             self.assertEqual(meta["generator_version"], __version__)
             self.assertEqual(meta["spec_version"], SPEC_VERSION)
@@ -104,23 +102,17 @@ class MetaBlockTests(unittest.TestCase):
             self.assertIn(f'generator_version: "{__version__}"', spec)
             self.assertIn(f'spec_version: "{SPEC_VERSION}"', spec)
             self.assertIn('seed: "meta-seed"', spec)
-            self.assertIn(
-                'family: "web_business_logic_tenant_export"', spec
-            )
+            self.assertIn('family: "web_business_logic_tenant_export"', spec)
 
     def test_meta_block_is_seed_deterministic(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             first = self._create(temp_dir, seed="stable")
             first_yaml = (first / "challenge.yaml").read_text(encoding="utf-8")
-            first_variant = (first / "private/variant.json").read_text(
-                encoding="utf-8"
-            )
+            first_variant = (first / "private/variant.json").read_text(encoding="utf-8")
 
             second = self._create(temp_dir, seed="stable")
             second_yaml = (second / "challenge.yaml").read_text(encoding="utf-8")
-            second_variant = (second / "private/variant.json").read_text(
-                encoding="utf-8"
-            )
+            second_variant = (second / "private/variant.json").read_text(encoding="utf-8")
 
             self.assertEqual(first_yaml, second_yaml)
             self.assertEqual(first_variant, second_variant)

@@ -167,13 +167,9 @@ class BuildMaterializationService:
         ``ChallengeBuild`` without writing a duplicate row or overwriting bytes.
         """
         with self._database.session_scope() as session:
-            version = SqlAlchemyChallengeVersionRepository(session).get(
-                definition_slug, version_no
-            )
+            version = SqlAlchemyChallengeVersionRepository(session).get(definition_slug, version_no)
         if version is None:
-            raise LookupError(
-                f"challenge version not found: {definition_slug!r} v{version_no}"
-            )
+            raise LookupError(f"challenge version not found: {definition_slug!r} v{version_no}")
         if version.state != "published":
             raise ValueError(
                 "only a published version can be materialized "
@@ -208,9 +204,7 @@ class BuildMaterializationService:
         # Re-materializing the SAME version is still idempotent (same spec_sha256
         # + same content -> same build_sha256).
         content_hash = hashlib.sha256(tar_bytes).hexdigest()
-        build_sha256 = hashlib.sha256(
-            f"{version.spec_sha256}:{content_hash}".encode()
-        ).hexdigest()
+        build_sha256 = hashlib.sha256(f"{version.spec_sha256}:{content_hash}".encode()).hexdigest()
         key = _storage_key(content_hash)
 
         manifest_bytes = public_files.get("public/manifest.json")

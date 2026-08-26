@@ -125,7 +125,12 @@ class SnapshotCveSourceTests(unittest.TestCase):
         source = SnapshotCveSource()
         records = source.fetch(keyword="log4j")
         self.assertTrue(records)
-        self.assertTrue(any("Log4j" in r.description or "Log4j" in " ".join(r.affected_products) for r in records))
+        self.assertTrue(
+            any(
+                "Log4j" in r.description or "Log4j" in " ".join(r.affected_products)
+                for r in records
+            )
+        )
 
     def test_fetch_respects_limit(self) -> None:
         source = SnapshotCveSource()
@@ -202,12 +207,8 @@ class NvdCveSourceTests(unittest.TestCase):
         self.assertIn("CWE-502", record.cwe_ids)
         self.assertIn("CWE-400", record.cwe_ids)
         self.assertIn("log4j", record.description.lower())
-        self.assertEqual(
-            record.affected_products, ["cpe:2.3:a:apache:log4j:2.14.1:*:*:*:*:*:*:*"]
-        )
-        self.assertIn(
-            "https://nvd.nist.gov/vuln/detail/CVE-2021-44228", record.references
-        )
+        self.assertEqual(record.affected_products, ["cpe:2.3:a:apache:log4j:2.14.1:*:*:*:*:*:*:*"])
+        self.assertIn("https://nvd.nist.gov/vuln/detail/CVE-2021-44228", record.references)
         # CWE-400 maps to "network" before CWE-502 (no hint) is consulted --
         # classification takes the first CWE with a known hint.
         self.assertIn(record.category, CATEGORIES)

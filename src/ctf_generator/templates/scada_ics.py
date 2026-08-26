@@ -86,9 +86,7 @@ REQUIRED_FILES: tuple[str, ...] = (
 # different services, so validate-runtime reads this manifest instead of
 # injecting --base-url. Empty args => invoke the generated solver/healthcheck
 # with their own per-instance-correct defaults (PLC port / hmi-base-url).
-_RUNTIME_MANIFEST = json.dumps(
-    {"health": {"args": []}, "solve": {"args": []}}, indent=2
-) + "\n"
+_RUNTIME_MANIFEST = json.dumps({"health": {"args": []}, "solve": {"args": []}}, indent=2) + "\n"
 
 
 # --- Variant (per-instance derived data) -------------------------------------
@@ -555,7 +553,7 @@ def _plc_server(v: Variant) -> str:
 
 # --- hmi_app.py (rendered service source) --------------------------------------
 
-_HMI_APP_TEMPLATE = '''from __future__ import annotations
+_HMI_APP_TEMPLATE = """from __future__ import annotations
 
 import json
 import os
@@ -635,7 +633,7 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
-'''
+"""
 
 
 def _hmi_app(v: Variant) -> str:
@@ -1095,7 +1093,9 @@ def _solver(v: Variant, spec: ChallengeSpec) -> str:
     text = text.replace("__MALICIOUS_SETPOINT__", str(v.malicious_setpoint))
     text = text.replace("__FLAG_REG_START__", str(v.flag_reg_start))
     text = text.replace("__FLAG_REG_COUNT__", str(v.flag_reg_count))
-    text = text.replace("__ENGINEER_SUBNET_PREFIX__", v.engineer_subnet.split("/")[0].rsplit(".", 1)[0] + ".")
+    text = text.replace(
+        "__ENGINEER_SUBNET_PREFIX__", v.engineer_subnet.split("/")[0].rsplit(".", 1)[0] + "."
+    )
     text = text.replace("__ATTACKER_PREFIX__", attacker_prefix)
     text = text.replace("__DEFAULT_MODE__", default_mode)
     return text
@@ -1147,7 +1147,7 @@ def _variant_json(spec: ChallengeSpec, v: Variant) -> str:
 
 
 def _healthcheck(v: Variant) -> str:
-    return f'''from __future__ import annotations
+    return f"""from __future__ import annotations
 
 import argparse
 import json
@@ -1167,4 +1167,4 @@ def main():
 
 if __name__ == "__main__":
     sys.exit(main())
-'''
+"""

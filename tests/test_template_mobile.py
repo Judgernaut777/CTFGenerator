@@ -148,9 +148,7 @@ class BundleContentTests(unittest.TestCase):
         files = mobile.render(spec, random.Random(spec.seed))  # noqa: S311 -- seeded RNG for deterministic challenge generation; not for secrets
         variant = json.loads(files["private/variant.json"])
         key_hex = variant["credentials"]["hardcoded_xor_key_hex"]
-        source = files[
-            "public/app/src/main/java/com/acmemobile/vault/CryptoVault.java"
-        ]
+        source = files["public/app/src/main/java/com/acmemobile/vault/CryptoVault.java"]
         self.assertIn(key_hex, source)
 
     def test_shared_prefs_is_valid_xml_and_decrypts_to_flag(self) -> None:
@@ -190,9 +188,7 @@ class BundleContentTests(unittest.TestCase):
         spec = _spec()
         files = mobile.render(spec, random.Random(spec.seed))  # noqa: S311 -- seeded RNG for deterministic challenge generation; not for secrets
         variant = json.loads(files["private/variant.json"])
-        source = files[
-            "public/app/src/main/java/com/acmemobile/vault/LoginActivity.java"
-        ]
+        source = files["public/app/src/main/java/com/acmemobile/vault/LoginActivity.java"]
         self.assertIn(variant["credentials"]["debug_user"], source)
         self.assertIn(variant["credentials"]["debug_password"], source)
 

@@ -343,4 +343,3 @@ class ChallengeValueSnapshot:
             "solve_count": self.solve_count,
             "computed_at": self.computed_at.isoformat(),
         }
-

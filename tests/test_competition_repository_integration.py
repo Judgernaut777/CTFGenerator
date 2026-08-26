@@ -135,9 +135,7 @@ class CompetitionRepositoryIntegrationTests(unittest.TestCase):
     def test_get_missing_returns_none(self) -> None:
         with _migrated_database() as (db, _url):
             with db.session_scope() as s:
-                self.assertIsNone(
-                    SqlAlchemyCompetitionRepository(s).get("does-not-exist")
-                )
+                self.assertIsNone(SqlAlchemyCompetitionRepository(s).get("does-not-exist"))
 
     def test_list_returns_all_as_domain_objects(self) -> None:
         a = _sample_config("comp-a")
@@ -152,9 +150,7 @@ class CompetitionRepositoryIntegrationTests(unittest.TestCase):
 
         self.assertEqual(len(all_configs), 2)
         self.assertTrue(all(isinstance(c, CompetitionConfig) for c in all_configs))
-        self.assertEqual(
-            {c.competition_id for c in all_configs}, {"comp-a", "comp-b"}
-        )
+        self.assertEqual({c.competition_id for c in all_configs}, {"comp-a", "comp-b"})
 
     def test_update_changes_mutable_preserves_immutable(self) -> None:
         cfg = _sample_config()
@@ -168,8 +164,7 @@ class CompetitionRepositoryIntegrationTests(unittest.TestCase):
                 with engine.connect() as conn:
                     before = conn.execute(
                         sa.text(
-                            "SELECT id, created_at, status FROM competitions "
-                            "WHERE slug = :slug"
+                            "SELECT id, created_at, status FROM competitions WHERE slug = :slug"
                         ),
                         {"slug": cfg.competition_id},
                     ).one()
@@ -187,14 +182,11 @@ class CompetitionRepositoryIntegrationTests(unittest.TestCase):
                     SqlAlchemyCompetitionRepository(s).update(updated)
 
                 with db.session_scope() as s:
-                    fetched = SqlAlchemyCompetitionRepository(s).get(
-                        cfg.competition_id
-                    )
+                    fetched = SqlAlchemyCompetitionRepository(s).get(cfg.competition_id)
                 with engine.connect() as conn:
                     after = conn.execute(
                         sa.text(
-                            "SELECT id, created_at, status FROM competitions "
-                            "WHERE slug = :slug"
+                            "SELECT id, created_at, status FROM competitions WHERE slug = :slug"
                         ),
                         {"slug": cfg.competition_id},
                     ).one()
@@ -250,9 +242,7 @@ class CompetitionRepositoryIntegrationTests(unittest.TestCase):
                     raise RuntimeError("boom")  # aborts the unit of work
             # The add was rolled back with the scope -- nothing persisted.
             with db.session_scope() as s:
-                self.assertIsNone(
-                    SqlAlchemyCompetitionRepository(s).get(cfg.competition_id)
-                )
+                self.assertIsNone(SqlAlchemyCompetitionRepository(s).get(cfg.competition_id))
 
     def test_timezone_instant_preserved_as_utc(self) -> None:
         # A tz-aware datetime in a NON-UTC offset (+05:00).
@@ -274,9 +264,7 @@ class CompetitionRepositoryIntegrationTests(unittest.TestCase):
         # original +05:00 value and its UTC equivalent (both hold regardless of
         # the server's session TimeZone GUC -- instant equality is what matters).
         self.assertEqual(fetched.start_time, start)
-        self.assertEqual(
-            fetched.start_time, datetime(2026, 6, 1, 9, 0, tzinfo=UTC)
-        )
+        self.assertEqual(fetched.start_time, datetime(2026, 6, 1, 9, 0, tzinfo=UTC))
         # timestamptz always returns a tz-AWARE datetime (never naive); the exact
         # rendered offset depends on the session tz, so we don't pin it to UTC.
         self.assertIsNotNone(fetched.start_time.utcoffset())

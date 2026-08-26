@@ -1,2 +1,1 @@
 """Challenge template renderers."""
-

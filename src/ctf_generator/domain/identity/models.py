@@ -115,9 +115,7 @@ class Membership:
         _require_nonempty(self.user_email, "user_email")
         _require_nonempty(self.competition_id, "competition_id")
         if self.role not in VALID_ROLES:
-            raise ValueError(
-                f"role must be one of {sorted(VALID_ROLES)}, got {self.role!r}"
-            )
+            raise ValueError(f"role must be one of {sorted(VALID_ROLES)}, got {self.role!r}")
         # team_name is optional, but if present it must be a real name (a team
         # is keyed by (competition_id, name)); an empty string is not "unteamed"
         # -- that is ``None`` -- so reject it explicitly rather than silently.

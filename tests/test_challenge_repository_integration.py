@@ -299,16 +299,12 @@ class ChallengeVersionRepositoryTests(unittest.TestCase):
             self.assertEqual(published.state, "published")
             self.assertIsNotNone(published.published_at)
             with db.session_scope() as s:
-                SqlAlchemyChallengeVersionRepository(s).archive(
-                    "sql-injection", 1, _ARCHIVE_TS
-                )
+                SqlAlchemyChallengeVersionRepository(s).archive("sql-injection", 1, _ARCHIVE_TS)
             with db.session_scope() as s:
                 archived = SqlAlchemyChallengeVersionRepository(s).get("sql-injection", 1)
                 # archived_at is stamped (soft-archival convention, design §9).
                 archived_at = s.execute(
-                    sa.text(
-                        "SELECT archived_at FROM challenge_versions WHERE version_no = 1"
-                    )
+                    sa.text("SELECT archived_at FROM challenge_versions WHERE version_no = 1")
                 ).scalar_one()
         self.assertEqual(archived.state, "archived")
         # published_at is RETAINED through archival (provenance preserved).
@@ -336,9 +332,7 @@ class ChallengeVersionRepositoryTests(unittest.TestCase):
             _seed_def_and_draft(db)
             with self.assertRaises(ValueError):
                 with db.session_scope() as s:
-                    SqlAlchemyChallengeVersionRepository(s).archive(
-                        "sql-injection", 1, _ARCHIVE_TS
-                    )
+                    SqlAlchemyChallengeVersionRepository(s).archive("sql-injection", 1, _ARCHIVE_TS)
 
     def test_publish_none_timestamp_raises_valueerror(self) -> None:
         # A None timestamp is a clean ValueError, not a raw IntegrityError.
@@ -346,9 +340,7 @@ class ChallengeVersionRepositoryTests(unittest.TestCase):
             _seed_def_and_draft(db)
             with self.assertRaises(ValueError):
                 with db.session_scope() as s:
-                    SqlAlchemyChallengeVersionRepository(s).publish(
-                        "sql-injection", 1, None
-                    )
+                    SqlAlchemyChallengeVersionRepository(s).publish("sql-injection", 1, None)
 
     def test_get_by_spec_sha256_miss_returns_none(self) -> None:
         with _migrated_database() as (db, _url):
@@ -366,9 +358,7 @@ class ChallengeVersionRepositoryTests(unittest.TestCase):
             _seed_def_and_draft(db)
             _publish(db)
             with db.session_scope() as s:
-                SqlAlchemyChallengeVersionRepository(s).archive(
-                    "sql-injection", 1, _ARCHIVE_TS
-                )
+                SqlAlchemyChallengeVersionRepository(s).archive("sql-injection", 1, _ARCHIVE_TS)
             engine = sa.create_engine(url, future=True)
             try:
                 with self.assertRaises(DBAPIError):
@@ -388,9 +378,7 @@ class ChallengeVersionRepositoryTests(unittest.TestCase):
             _seed_def_and_draft(db)
             _publish(db)
             with db.session_scope() as s:
-                SqlAlchemyChallengeVersionRepository(s).archive(
-                    "sql-injection", 1, _ARCHIVE_TS
-                )
+                SqlAlchemyChallengeVersionRepository(s).archive("sql-injection", 1, _ARCHIVE_TS)
             engine = sa.create_engine(url, future=True)
             try:
                 with self.assertRaises(DBAPIError):
@@ -449,9 +437,7 @@ class ChallengeVersionRepositoryTests(unittest.TestCase):
             with self.assertRaises(IntegrityError):
                 with db.session_scope() as s:
                     def_id = s.execute(
-                        sa.text(
-                            "SELECT id FROM challenge_definitions WHERE slug='sql-injection'"
-                        )
+                        sa.text("SELECT id FROM challenge_definitions WHERE slug='sql-injection'")
                     ).scalar_one()
                     s.execute(
                         sa.text(
@@ -534,9 +520,7 @@ class ChallengeBuildRepositoryTests(unittest.TestCase):
                 repo.add(self._build(build_sha256="b1", generator_version="0.9.0"))
                 repo.add(self._build(build_sha256="b2", generator_version="0.9.1"))
             with db.session_scope() as s:
-                builds = SqlAlchemyChallengeBuildRepository(s).list_for_version(
-                    "sql-injection", 1
-                )
+                builds = SqlAlchemyChallengeBuildRepository(s).list_for_version("sql-injection", 1)
         self.assertEqual({b.build_sha256 for b in builds}, {"b1", "b2"})
 
     def test_trigger_blocks_build_update_and_delete(self) -> None:
@@ -558,8 +542,7 @@ class ChallengeBuildRepositoryTests(unittest.TestCase):
                     with engine.begin() as conn:
                         conn.execute(
                             sa.text(
-                                "DELETE FROM challenge_builds "
-                                "WHERE build_sha256 = 'build-hash-1'"
+                                "DELETE FROM challenge_builds WHERE build_sha256 = 'build-hash-1'"
                             )
                         )
                 # TRUNCATE must also be blocked (row triggers don't fire on it).
@@ -629,9 +612,7 @@ class ChallengePublicationRepositoryTests(unittest.TestCase):
                     )
                 )
             with db.session_scope() as s:
-                got = SqlAlchemyChallengePublicationRepository(s).get(
-                    "cup", "sql-injection", 1
-                )
+                got = SqlAlchemyChallengePublicationRepository(s).get("cup", "sql-injection", 1)
         self.assertIsInstance(got, ChallengePublication)
         self.assertEqual(got.initial_value, 400)
         self.assertEqual(got.decay_function, "linear")
@@ -698,9 +679,7 @@ class ChallengePublicationRepositoryTests(unittest.TestCase):
                         )
                     )
                 with db.session_scope() as s:
-                    got = SqlAlchemyChallengePublicationRepository(s).get(
-                        "cup", "sql-injection", 1
-                    )
+                    got = SqlAlchemyChallengePublicationRepository(s).get("cup", "sql-injection", 1)
                 with engine.connect() as conn:
                     after = conn.execute(
                         sa.text("SELECT id, created_at FROM competition_challenges")
@@ -759,9 +738,7 @@ class ChallengeConstraintTests(unittest.TestCase):
             with self.assertRaises(IntegrityError):
                 with db.session_scope() as s:
                     s.execute(
-                        sa.text(
-                            "DELETE FROM challenge_definitions WHERE slug='sql-injection'"
-                        )
+                        sa.text("DELETE FROM challenge_definitions WHERE slug='sql-injection'")
                     )
 
     def test_fk_restrict_blocks_deleting_version_with_build(self) -> None:
@@ -892,9 +869,7 @@ class ChallengeMigrationTests(unittest.TestCase):
                     self.assertIn(t, insp.get_table_names())
                 with engine.connect() as conn:
                     self.assertEqual(
-                        conn.execute(
-                            sa.text("SELECT version_num FROM alembic_version")
-                        ).scalar(),
+                        conn.execute(sa.text("SELECT version_num FROM alembic_version")).scalar(),
                         "0004_challenges",
                     )
                     # Both trigger functions exist after upgrade.
@@ -920,9 +895,7 @@ class ChallengeMigrationTests(unittest.TestCase):
                 command.downgrade(cfg, "base")
                 with engine.connect() as conn:
                     self.assertEqual(
-                        conn.execute(
-                            sa.text("SELECT count(*) FROM alembic_version")
-                        ).scalar(),
+                        conn.execute(sa.text("SELECT count(*) FROM alembic_version")).scalar(),
                         0,
                     )
             finally:

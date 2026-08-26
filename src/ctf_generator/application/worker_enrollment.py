@@ -151,9 +151,7 @@ class WorkerEnrollmentService:
             # for a pending or revoked worker.
             worker = SqlAlchemyWorkerRegistry(session).get(name)
             if worker is None or worker.trust_state != "trusted":
-                raise LookupError(
-                    f"worker {name!r} is not trusted; cannot rotate credential"
-                )
+                raise LookupError(f"worker {name!r} is not trusted; cannot rotate credential")
             credentials = SqlAlchemyWorkerCredentialRepository(session)
             active = credentials.get_active_for_worker(name)
             if active is not None:
@@ -183,9 +181,7 @@ class WorkerEnrollmentService:
         credential_id, secret = parsed
         presented_hash = _hash_secret(secret)
         with self._database.session_scope() as session:
-            credential = SqlAlchemyWorkerCredentialRepository(session).get(
-                credential_id
-            )
+            credential = SqlAlchemyWorkerCredentialRepository(session).get(credential_id)
             if credential is None:
                 # Burn the comparison anyway so a missing credential is not
                 # distinguishable by timing from a bad secret.
@@ -230,9 +226,7 @@ class WorkerEnrollmentService:
         # end up holding a live credential.
         worker = SqlAlchemyWorkerRegistry(session).get(name)
         if worker is None or worker.trust_state != "trusted":
-            raise LookupError(
-                f"worker {name!r} is not trusted; cannot issue credential"
-            )
+            raise LookupError(f"worker {name!r} is not trusted; cannot issue credential")
         credential_id = str(uuid.uuid4())
         secret = secrets.token_hex(32)  # 256-bit server-generated machine secret
         credential = WorkerCredential(

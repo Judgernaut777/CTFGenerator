@@ -116,7 +116,5 @@ class EvalResultProjector:
             # wedge as `pending` forever -- ``cancelled`` is terminal too, and
             # enqueue_idempotent would collide on the same key rather than re-queue,
             # so an unresolved run would be unrecoverable.
-            return EvalResultInput(
-                error=job.error_detail or f"eval job {job.status}"
-            )
+            return EvalResultInput(error=job.error_detail or f"eval job {job.status}")
         return None

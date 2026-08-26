@@ -88,9 +88,7 @@ def _authenticator() -> StubAuthenticator:
     return StubAuthenticator(
         {
             _ADMIN: principal_for("admin-user", {"admin"}, system_roles={"admin"}),
-            _SUPPORT: principal_for(
-                "support-user", {"support"}, system_roles={"support"}
-            ),
+            _SUPPORT: principal_for("support-user", {"support"}, system_roles={"support"}),
             _PLAYER: principal_for("player-user", {"player"}, team="Red"),
         }
     )
@@ -102,9 +100,7 @@ def _client_and_db():
         command.upgrade(_alembic_config(url), "head")
         db = Database(DatabaseConfig(url=url))
         try:
-            app = create_app(
-                ApiSettings(), database=db, authenticator=_authenticator()
-            )
+            app = create_app(ApiSettings(), database=db, authenticator=_authenticator())
             yield TestClient(app), db
         finally:
             db.dispose()
@@ -137,9 +133,7 @@ def _drive_to_dead_letter(db: Database, job: Job) -> None:
         with db.session_scope() as s:
             SqlAlchemyJobQueue(s).start(job.job_id, lease.lease_token, now)
         with db.session_scope() as s:
-            SqlAlchemyJobQueue(s).fail(
-                job.job_id, lease.lease_token, "transient", None, True, now
-            )
+            SqlAlchemyJobQueue(s).fail(job.job_id, lease.lease_token, "transient", None, True, now)
 
 
 @unittest.skipUnless(_ENABLED, _SKIP_REASON)
@@ -213,34 +207,24 @@ class MetricsEndpointTests(unittest.TestCase):
     def test_metrics_requires_admin_or_support(self) -> None:
         with _client_and_db() as (client, _db):
             self.assertEqual(
-                client.get(
-                    "/api/v1/system/metrics", headers=_auth(_ADMIN)
-                ).status_code,
+                client.get("/api/v1/system/metrics", headers=_auth(_ADMIN)).status_code,
                 200,
             )
             self.assertEqual(
-                client.get(
-                    "/api/v1/system/metrics", headers=_auth(_SUPPORT)
-                ).status_code,
+                client.get("/api/v1/system/metrics", headers=_auth(_SUPPORT)).status_code,
                 200,
             )
             # A contestant is denied.
             self.assertEqual(
-                client.get(
-                    "/api/v1/system/metrics", headers=_auth(_PLAYER)
-                ).status_code,
+                client.get("/api/v1/system/metrics", headers=_auth(_PLAYER)).status_code,
                 403,
             )
             # Unauthenticated is denied (metrics are not public).
-            self.assertEqual(
-                client.get("/api/v1/system/metrics").status_code, 401
-            )
+            self.assertEqual(client.get("/api/v1/system/metrics").status_code, 401)
 
     def test_metrics_are_secret_free(self) -> None:
         with _client_and_db() as (client, _db):
-            text = client.get(
-                "/api/v1/system/metrics", headers=_auth(_ADMIN)
-            ).text
+            text = client.get("/api/v1/system/metrics", headers=_auth(_ADMIN)).text
             for shape in ("ctf{", "sk-ant-", "postgres://", "postgresql://", "Bearer "):
                 self.assertNotIn(shape, text)
 
@@ -258,9 +242,7 @@ class MetricsAndReadinessNoDbTests(unittest.TestCase):
     exercises the read-model-failure / all-gauges-omitted + DB-down paths."""
 
     def _client(self) -> TestClient:
-        app = create_app(
-            ApiSettings(), database=None, authenticator=_authenticator()
-        )
+        app = create_app(ApiSettings(), database=None, authenticator=_authenticator())
         return TestClient(app)
 
     def test_metrics_with_no_database_is_200_not_500(self) -> None:

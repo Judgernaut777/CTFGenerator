@@ -114,9 +114,7 @@ def _solve_event(event: ScoreEvent) -> SolveEvent:
         team_id=event.team_name,
         challenge_id=_challenge_key(event.definition_slug, event.version_no),
         solved_at=solved_at,
-        submission_id=event.submission_id
-        or event.solve_id
-        or f"seq:{event.seq}",
+        submission_id=event.submission_id or event.solve_id or f"seq:{event.seq}",
     )
 
 
@@ -207,9 +205,7 @@ class ScoreProjector:
                 )
 
         challenges: dict[str, ChallengeScoringConfig] = {}
-        publications = SqlAlchemyChallengePublicationRepository(
-            session
-        ).list_for_competition(slug)
+        publications = SqlAlchemyChallengePublicationRepository(session).list_for_competition(slug)
         for pub in publications:
             key = _challenge_key(pub.definition_slug, pub.version_no)
             challenges[key] = ChallengeScoringConfig(
@@ -254,9 +250,7 @@ class ScoreProjector:
         if not seqs:
             return
         with self._database.session_scope() as session:
-            SqlAlchemyScoreProjectionQueue(session).fail(
-                seqs, self._sanitize_error(exc)
-            )
+            SqlAlchemyScoreProjectionQueue(session).fail(seqs, self._sanitize_error(exc))
 
     def _mark_transient(self, seqs: list[int], exc: Exception) -> None:
         """Bump the attempts counter for a transient failure, leaving the rows

@@ -79,7 +79,9 @@ class DockerEnvironmentControllerTests(unittest.TestCase):
 
         event = controller.quarantine_host("attacker-box", {"target": "attacker-box"})
 
-        self.assertEqual(calls[0], ["docker", "compose", "-p", "ctfgen-demo", "stop", "attacker-box"])
+        self.assertEqual(
+            calls[0], ["docker", "compose", "-p", "ctfgen-demo", "stop", "attacker-box"]
+        )
         self.assertEqual(event.kind, "quarantine_host")
         self.assertEqual(event.target, "attacker-box")
 
@@ -106,7 +108,9 @@ class DockerEnvironmentControllerTests(unittest.TestCase):
         self.assertEqual(controller.project_name, "ctfgen-invoice-drift")
 
     def test_failing_command_propagates_called_process_error(self) -> None:
-        def failing_runner(command: list[str], cwd: Path, timeout: int) -> subprocess.CompletedProcess[str]:
+        def failing_runner(
+            command: list[str], cwd: Path, timeout: int
+        ) -> subprocess.CompletedProcess[str]:
             raise subprocess.CalledProcessError(1, command, output="boom", stderr="bad")
 
         controller = DockerEnvironmentController(
@@ -147,10 +151,13 @@ class HttpEventSourceTests(unittest.TestCase):
         self.assertEqual(first[0].target, "recon_done")
         self.assertEqual(first[0].tick, 0)
         self.assertEqual(second, [])
-        self.assertEqual(calls, [
-            "http://127.0.0.1:8080/scenario/state",
-            "http://127.0.0.1:8080/scenario/state",
-        ])
+        self.assertEqual(
+            calls,
+            [
+                "http://127.0.0.1:8080/scenario/state",
+                "http://127.0.0.1:8080/scenario/state",
+            ],
+        )
 
     def test_poll_emits_events_list(self) -> None:
         body = (
@@ -263,7 +270,9 @@ class RunLiveScenarioTests(unittest.TestCase):
 
     def test_run_live_scenario_is_deterministic_across_runs(self) -> None:
         def make_runner(calls: list[list[str]]):
-            def runner(command: list[str], cwd: Path, timeout: int) -> subprocess.CompletedProcess[str]:
+            def runner(
+                command: list[str], cwd: Path, timeout: int
+            ) -> subprocess.CompletedProcess[str]:
                 calls.append(command)
                 return subprocess.CompletedProcess(command, 0, stdout="ok\n", stderr="")
 
@@ -281,7 +290,9 @@ class RunLiveScenarioTests(unittest.TestCase):
             enabled=True,
             triggers=[TriggerSpec(trigger_id="t1", condition="event:checkpoint_reached")],
             responses=[
-                ResponseSpec(response_id="r1", action="quarantine_host", payload={"target": "attacker"})
+                ResponseSpec(
+                    response_id="r1", action="quarantine_host", payload={"target": "attacker"}
+                )
             ],
         )
 
@@ -356,7 +367,9 @@ class RunLiveScenarioTests(unittest.TestCase):
         defender = ScriptedDefender(
             triggers=[TriggerSpec(trigger_id="t1", condition="time:+0s")],
             trigger_responses={
-                "t1": [ResponseSpec(response_id="r1", action="patch_route", payload={"target": "gw"})]
+                "t1": [
+                    ResponseSpec(response_id="r1", action="patch_route", payload={"target": "gw"})
+                ]
             },
         )
 
@@ -370,7 +383,9 @@ class RunLiveScenarioTests(unittest.TestCase):
             max_ticks=1,
         )
 
-        self.assertTrue(any(call[:4] == ["docker", "compose", "-p", "custom-project"] for call in calls))
+        self.assertTrue(
+            any(call[:4] == ["docker", "compose", "-p", "custom-project"] for call in calls)
+        )
 
 
 if __name__ == "__main__":

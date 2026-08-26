@@ -40,6 +40,4 @@ class TeamService:
 
     def list_for_competition(self, competition_id: str) -> list[Team]:
         with self._database.session_scope() as session:
-            return SqlAlchemyTeamRepository(session).list_for_competition(
-                competition_id
-            )
+            return SqlAlchemyTeamRepository(session).list_for_competition(competition_id)

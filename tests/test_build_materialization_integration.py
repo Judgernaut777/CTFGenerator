@@ -232,9 +232,7 @@ class BuildMaterializationTests(unittest.TestCase):
             self.assertEqual(first.build_sha256, second.build_sha256)
             self.assertEqual(first.storage_uri, second.storage_uri)
             with db.session_scope() as s:
-                builds = SqlAlchemyChallengeBuildRepository(s).list_for_version(
-                    _SLUG, 1
-                )
+                builds = SqlAlchemyChallengeBuildRepository(s).list_for_version(_SLUG, 1)
             self.assertEqual(len(builds), 1)
             # The stored bytes are identical across both runs.
             self.assertEqual(store.get(first.storage_uri), store.get(second.storage_uri))
@@ -263,9 +261,15 @@ class BuildMaterializationTests(unittest.TestCase):
                 for vno, (sd, sh) in enumerate(((d1, sha1), (d2, sha2)), start=1):
                     repo.add(
                         ChallengeVersion(
-                            definition_slug=_SLUG, version_no=vno, state="draft",
-                            family_version="1.0.0", seed=_SEED, spec_sha256=sh, spec=sd,
-                            spec_version=current_version(SPEC_SCHEMA), mode="red",
+                            definition_slug=_SLUG,
+                            version_no=vno,
+                            state="draft",
+                            family_version="1.0.0",
+                            seed=_SEED,
+                            spec_sha256=sh,
+                            spec=sd,
+                            spec_version=current_version(SPEC_SCHEMA),
+                            mode="red",
                         )
                     )
             with db.session_scope() as s:

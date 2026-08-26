@@ -22,9 +22,7 @@ from datetime import datetime
 
 # The closed set of report kinds. Single source of truth for the ORM CHECK and
 # the migration SQL (both render from this) and for the service dispatch.
-VALID_REPORT_TYPES = frozenset(
-    {"validation", "build", "competition_run", "eval"}
-)
+VALID_REPORT_TYPES = frozenset({"validation", "build", "competition_run", "eval"})
 
 # Report kinds keyed by a challenge VERSION (definition_slug + version_no) vs by a
 # COMPETITION. Used to validate a snapshot's scope columns.
@@ -45,9 +43,7 @@ def report_subject(
     the report kind."""
     if report_type in _VERSION_SCOPED:
         if not definition_slug or not isinstance(version_no, int):
-            raise ValueError(
-                f"{report_type!r} report needs definition_slug + version_no"
-            )
+            raise ValueError(f"{report_type!r} report needs definition_slug + version_no")
         return f"version:{definition_slug}:{version_no}"
     if report_type in _COMPETITION_SCOPED:
         if not competition_id:
@@ -87,8 +83,7 @@ class ReportSnapshot:
             raise ValueError("report_id must be a non-empty string")
         if self.report_type not in VALID_REPORT_TYPES:
             raise ValueError(
-                f"report_type must be one of {sorted(VALID_REPORT_TYPES)}, "
-                f"got {self.report_type!r}"
+                f"report_type must be one of {sorted(VALID_REPORT_TYPES)}, got {self.report_type!r}"
             )
         if not isinstance(self.subject, str) or not self.subject.strip():
             raise ValueError("subject must be a non-empty string")
@@ -104,6 +99,4 @@ class ReportSnapshot:
                     f"{self.report_type!r} snapshot needs definition_slug + version_no"
                 )
         if self.report_type in _COMPETITION_SCOPED and not self.competition_id:
-            raise ValueError(
-                f"{self.report_type!r} snapshot needs competition_id"
-            )
+            raise ValueError(f"{self.report_type!r} snapshot needs competition_id")

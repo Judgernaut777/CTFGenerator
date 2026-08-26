@@ -112,9 +112,7 @@ class LocalControlPlaneClient:
         retryable: bool,
         now: datetime,
     ) -> None:
-        self._jobs.fail(
-            token, job_id, lease_token, error_class, error_detail, retryable, now
-        )
+        self._jobs.fail(token, job_id, lease_token, error_class, error_detail, retryable, now)
 
     # -- instance facts --------------------------------------------------------
 
@@ -144,9 +142,7 @@ class LocalControlPlaneClient:
         _reservation, worker_name = self._scheduling.select_and_reserve(
             requirements=requirements,
             reservation_id=instance_id,
-            pooled_items=(
-                ReservationItem("platform", PLATFORM_SCOPE_KEY, "active_instances", 1),
-            ),
+            pooled_items=(ReservationItem("platform", PLATFORM_SCOPE_KEY, "active_instances", 1),),
             expires_at=expires_at,
             now=now,
         )

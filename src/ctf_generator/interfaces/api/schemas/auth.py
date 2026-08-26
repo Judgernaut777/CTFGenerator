@@ -21,9 +21,7 @@ from ..deps import Principal
 
 class LoginRequest(BaseModel):
     email: str = Field(min_length=1, description="Case-insensitive account email")
-    password: str = Field(
-        min_length=1, description="Local account password (never logged/echoed)"
-    )
+    password: str = Field(min_length=1, description="Local account password (never logged/echoed)")
 
 
 class TokenResponse(BaseModel):

@@ -86,9 +86,7 @@ def _seed_instance(
         ws.seed_published_version(db, "sqli", "SQLi")
     with db.session_scope() as s:
         reg = SqlAlchemyWorkerRegistry(s)
-        reg.add(
-            Worker("w1", "docker-rootless", ("x86_64",), ("launch_instance",), 4, "1")
-        )
+        reg.add(Worker("w1", "docker-rootless", ("x86_64",), ("launch_instance",), 4, "1"))
         reg.approve("w1")
         reg.heartbeat("w1", ws.NOW)
     with db.session_scope() as s:
@@ -112,19 +110,26 @@ def _seed_instance(
         if with_secrets:
             repo.record_credential(
                 InstanceCredential(
-                    instance_id=iid, name="ssh", secret_ref=_CRED_SECRET,
+                    instance_id=iid,
+                    name="ssh",
+                    secret_ref=_CRED_SECRET,
                     scopes=("shell",),
                 )
             )
             repo.record_runtime_resource(
                 RuntimeResource(
-                    instance_id=iid, kind="container", external_ref=_RESOURCE_HANDLE,
+                    instance_id=iid,
+                    kind="container",
+                    external_ref=_RESOURCE_HANDLE,
                     worker="w1",
                 )
             )
             repo.record_endpoint(
                 InstanceEndpoint(
-                    instance_id=iid, name="admin", host="10.0.0.5", port=9000,
+                    instance_id=iid,
+                    name="admin",
+                    host="10.0.0.5",
+                    port=9000,
                     protocol="https",
                     url=f"https://10.0.0.5:9000/?token={_INTERNAL_TOKEN}",
                     internal=True,
@@ -132,8 +137,13 @@ def _seed_instance(
             )
             repo.record_endpoint(
                 InstanceEndpoint(
-                    instance_id=iid, name="web", host="ctf.example.com", port=443,
-                    protocol="https", url=_PUBLIC_URL, internal=False,
+                    instance_id=iid,
+                    name="web",
+                    host="ctf.example.com",
+                    port=443,
+                    protocol="https",
+                    url=_PUBLIC_URL,
+                    internal=False,
                 )
             )
     return iid
@@ -235,9 +245,7 @@ class InstanceOpsWebTests(unittest.TestCase):
         # leaving the frozen row untouched.
         with ws.web_client() as (client, db, _svc):
             ws.login(client, ws.ALICE)
-            iid = _seed_instance(
-                db, ws.COMP_A, state="archived", desired_state="deleted"
-            )
+            iid = _seed_instance(db, ws.COMP_A, state="archived", desired_state="deleted")
             before = _generation(db, iid)
             for action in ("stop", "reset"):
                 _r, token = _csrf(client, f"/app/instances/{iid}")
@@ -290,9 +298,7 @@ class InstanceOpsWebTests(unittest.TestCase):
         with ws.web_client() as (client, db, _svc):
             ws.login(client, ws.ALICE)
             iid = _seed_instance(db, ws.COMP_A)
-            resp = client.post(
-                f"/app/instances/{iid}/stop", follow_redirects=False
-            )
+            resp = client.post(f"/app/instances/{iid}/stop", follow_redirects=False)
             self.assertEqual(resp.status_code, 403, resp.text)
             self.assertEqual(_desired_state(db, iid), "active")  # nothing performed
 

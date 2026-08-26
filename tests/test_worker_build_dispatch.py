@@ -75,7 +75,7 @@ def _tar_bytes(files: dict[str, bytes]) -> bytes:
 def _tiny_bundle() -> bytes:
     return _tar_bytes(
         {
-            "Dockerfile": b"FROM alpine:latest\nCMD [\"true\"]\n",
+            "Dockerfile": b'FROM alpine:latest\nCMD ["true"]\n',
             "services/app/app.py": f"# {_PLANTED_FLAG}\n".encode(),
             "private/solution.md": f"the flag is {_PLANTED_FLAG}\n".encode(),
         }
@@ -92,7 +92,9 @@ class _FakeRuntimeBackend:
 class _FakeBuildBackend:
     """Records build_image calls; returns a scripted digest or raises."""
 
-    def __init__(self, *, digest: str = "sha256:" + "ab" * 32, raises: Exception | None = None) -> None:
+    def __init__(
+        self, *, digest: str = "sha256:" + "ab" * 32, raises: Exception | None = None
+    ) -> None:
         self.digest = digest
         self.raises = raises
         self.calls: list[dict] = []
@@ -441,9 +443,7 @@ class BuildChallengeDispatchTests(unittest.TestCase):
         # construction generated content, that stderr can echo flag-adjacent
         # material. The persisted error_detail must NEVER forward it.
         data = _tiny_bundle()
-        secret_stderr = (
-            f"COPY failed: cat private/solution.md; the flag is {_PLANTED_FLAG}"
-        )
+        secret_stderr = f"COPY failed: cat private/solution.md; the flag is {_PLANTED_FLAG}"
         client = _FakeClient(bundle=_valid_bundle(data), claim_lease=_build_lease(_build_payload()))
         backend = _FakeBuildBackend(
             raises=DockerCommandError(("docker", "build", "."), 1, secret_stderr)
@@ -565,12 +565,15 @@ class StackHelperTests(unittest.TestCase):
 
         stack = (
             StackServiceImage(
-                service_name="edge", image_ref="ir-edge",
-                image_digest="sha256:" + "ee" * 32, depends_on=("internal",),
+                service_name="edge",
+                image_ref="ir-edge",
+                image_digest="sha256:" + "ee" * 32,
+                depends_on=("internal",),
                 is_primary=True,
             ),
             StackServiceImage(
-                service_name="internal", image_ref="ir-internal",
+                service_name="internal",
+                image_ref="ir-internal",
                 image_digest="sha256:" + "11" * 32,
             ),
         )
@@ -583,7 +586,8 @@ class StackHelperTests(unittest.TestCase):
 
         stack = tuple(
             StackServiceImage(
-                service_name=n, image_ref=f"ir-{n}",
+                service_name=n,
+                image_ref=f"ir-{n}",
                 image_digest="sha256:" + "aa" * 32,
             )
             for n in ("beta", "alpha", "gamma")

@@ -92,9 +92,11 @@ class CommandDispatchTests(unittest.TestCase):
             "CTFGEN_CONFIG": str(self.config_path),
         }
         out = io.StringIO()
-        with mock.patch.object(_common, "build_http_client", _fake_build), \
-                mock.patch.dict(os.environ, env), \
-                mock.patch("sys.stdout", out):
+        with (
+            mock.patch.object(_common, "build_http_client", _fake_build),
+            mock.patch.dict(os.environ, env),
+            mock.patch("sys.stdout", out),
+        ):
             code = platform.main(argv)
         return code, out.getvalue()
 
@@ -110,29 +112,49 @@ class CommandDispatchTests(unittest.TestCase):
     def test_competition_create_posts_exact_body(self) -> None:
         rec = _Recorder()
         rec.route(
-            "POST", "/api/v1/competitions", 201,
-            _resource("ctfgen.competition", {
-                "competition_id": "c1", "name": "Winter",
-                "start_time": "2026-01-01T00:00:00+00:00",
-                "end_time": "2026-01-02T00:00:00+00:00",
-                "scoring_start_time": None, "freeze_time": None,
-                "default_scoring": None,
-            }),
+            "POST",
+            "/api/v1/competitions",
+            201,
+            _resource(
+                "ctfgen.competition",
+                {
+                    "competition_id": "c1",
+                    "name": "Winter",
+                    "start_time": "2026-01-01T00:00:00+00:00",
+                    "end_time": "2026-01-02T00:00:00+00:00",
+                    "scoring_start_time": None,
+                    "freeze_time": None,
+                    "default_scoring": None,
+                },
+            ),
         )
-        code, out = self._run(rec, [
-            "competition", "create", "c1", "--name", "Winter",
-            "--start-time", "2026-01-01T00:00:00+00:00",
-            "--end-time", "2026-01-02T00:00:00+00:00",
-        ])
+        code, out = self._run(
+            rec,
+            [
+                "competition",
+                "create",
+                "c1",
+                "--name",
+                "Winter",
+                "--start-time",
+                "2026-01-01T00:00:00+00:00",
+                "--end-time",
+                "2026-01-02T00:00:00+00:00",
+            ],
+        )
         self.assertEqual(code, 0)
         req = rec.only()
         self.assertEqual(req.method, "POST")
         self.assertEqual(req.url.path, "/api/v1/competitions")
-        self.assertEqual(rec.body_of(req), {
-            "competition_id": "c1", "name": "Winter",
-            "start_time": "2026-01-01T00:00:00+00:00",
-            "end_time": "2026-01-02T00:00:00+00:00",
-        })
+        self.assertEqual(
+            rec.body_of(req),
+            {
+                "competition_id": "c1",
+                "name": "Winter",
+                "start_time": "2026-01-01T00:00:00+00:00",
+                "end_time": "2026-01-02T00:00:00+00:00",
+            },
+        )
         # A write carries an Idempotency-Key and the bearer.
         self.assertTrue(req.headers.get("Idempotency-Key"))
         self.assertEqual(req.headers.get("Authorization"), f"Bearer {_TOKEN}")
@@ -141,12 +163,22 @@ class CommandDispatchTests(unittest.TestCase):
     def test_competition_list_renders_table(self) -> None:
         rec = _Recorder()
         rec.route(
-            "GET", "/api/v1/competitions", 200,
-            _list_env("ctfgen.competition-list", [
-                {"competition_id": "c1", "name": "Winter",
-                 "start_time": "s", "end_time": "e",
-                 "scoring_start_time": None, "freeze_time": None},
-            ]),
+            "GET",
+            "/api/v1/competitions",
+            200,
+            _list_env(
+                "ctfgen.competition-list",
+                [
+                    {
+                        "competition_id": "c1",
+                        "name": "Winter",
+                        "start_time": "s",
+                        "end_time": "e",
+                        "scoring_start_time": None,
+                        "freeze_time": None,
+                    },
+                ],
+            ),
         )
         code, out = self._run(rec, ["competition", "list"])
         self.assertEqual(code, 0)
@@ -158,11 +190,15 @@ class CommandDispatchTests(unittest.TestCase):
     def test_competition_update_reads_etag_then_sends_if_match(self) -> None:
         rec = _Recorder()
         rec.route(
-            "GET", "/api/v1/competitions/c1", 200,
+            "GET",
+            "/api/v1/competitions/c1",
+            200,
             _resource("ctfgen.competition", {"competition_id": "c1", "name": "Old"}),
         )
         rec.route(
-            "PATCH", "/api/v1/competitions/c1", 200,
+            "PATCH",
+            "/api/v1/competitions/c1",
+            200,
             _resource("ctfgen.competition", {"competition_id": "c1", "name": "New"}),
         )
         # The GET reply must carry an ETag for the command to echo as If-Match.
@@ -179,10 +215,16 @@ class CommandDispatchTests(unittest.TestCase):
         def _fake_build(api_url, **kwargs):
             return httpx.Client(transport=transport, base_url=api_url)
 
-        env = {"CTFGEN_API_TOKEN": _TOKEN, "CTFGEN_API_URL": _BASE,
-               "CTFGEN_CONFIG": str(self.config_path)}
-        with mock.patch.object(_common, "build_http_client", _fake_build), \
-                mock.patch.dict(os.environ, env), mock.patch("sys.stdout", io.StringIO()):
+        env = {
+            "CTFGEN_API_TOKEN": _TOKEN,
+            "CTFGEN_API_URL": _BASE,
+            "CTFGEN_CONFIG": str(self.config_path),
+        }
+        with (
+            mock.patch.object(_common, "build_http_client", _fake_build),
+            mock.patch.dict(os.environ, env),
+            mock.patch("sys.stdout", io.StringIO()),
+        ):
             code = platform.main(["competition", "update", "c1", "--name", "New"])
         self.assertEqual(code, 0)
         patch = [r for r in rec.requests if r.method == "PATCH"][0]
@@ -193,11 +235,21 @@ class CommandDispatchTests(unittest.TestCase):
     def test_competition_scoreboard_show(self) -> None:
         rec = _Recorder()
         rec.route(
-            "GET", "/api/v1/competitions/c1/scoreboard", 200,
-            _list_env("ctfgen.scoreboard", [
-                {"rank": 1, "team_id": "Red", "score": 500,
-                 "solve_count": 1, "last_solve_at": "t"},
-            ]),
+            "GET",
+            "/api/v1/competitions/c1/scoreboard",
+            200,
+            _list_env(
+                "ctfgen.scoreboard",
+                [
+                    {
+                        "rank": 1,
+                        "team_id": "Red",
+                        "score": 500,
+                        "solve_count": 1,
+                        "last_solve_at": "t",
+                    },
+                ],
+            ),
         )
         code, out = self._run(rec, ["competition", "scoreboard", "c1"])
         self.assertEqual(code, 0)
@@ -210,18 +262,38 @@ class CommandDispatchTests(unittest.TestCase):
     def test_publication_attach_posts_to_competition(self) -> None:
         rec = _Recorder()
         rec.route(
-            "POST", "/api/v1/competitions/c1/publications", 201,
-            _resource("ctfgen.publication", {
-                "competition_id": "c1", "definition_slug": "d1", "version_no": 1,
-                "initial_value": 500, "minimum_value": 100, "decay_function": "static",
-                "decay": 0, "first_blood_enabled": True,
-                "first_blood_bonus_points": 0, "first_blood_bonus_percent": 0.0,
-            }),
+            "POST",
+            "/api/v1/competitions/c1/publications",
+            201,
+            _resource(
+                "ctfgen.publication",
+                {
+                    "competition_id": "c1",
+                    "definition_slug": "d1",
+                    "version_no": 1,
+                    "initial_value": 500,
+                    "minimum_value": 100,
+                    "decay_function": "static",
+                    "decay": 0,
+                    "first_blood_enabled": True,
+                    "first_blood_bonus_points": 0,
+                    "first_blood_bonus_percent": 0.0,
+                },
+            ),
         )
-        code, out = self._run(rec, [
-            "publication", "attach", "--competition-id", "c1",
-            "--definition-slug", "d1", "--version-no", "1",
-        ])
+        code, out = self._run(
+            rec,
+            [
+                "publication",
+                "attach",
+                "--competition-id",
+                "c1",
+                "--definition-slug",
+                "d1",
+                "--version-no",
+                "1",
+            ],
+        )
         self.assertEqual(code, 0)
         req = rec.only()
         self.assertEqual(req.url.path, "/api/v1/competitions/c1/publications")
@@ -235,10 +307,19 @@ class CommandDispatchTests(unittest.TestCase):
         # (slug before version_no) against a POST/reversed-path regression.
         rec = _Recorder()
         rec.route("DELETE", "/api/v1/competitions/c1/publications/d1/1", 204, None)
-        code, _ = self._run(rec, [
-            "publication", "detach", "--competition-id", "c1",
-            "--definition-slug", "d1", "--version-no", "1",
-        ])
+        code, _ = self._run(
+            rec,
+            [
+                "publication",
+                "detach",
+                "--competition-id",
+                "c1",
+                "--definition-slug",
+                "d1",
+                "--version-no",
+                "1",
+            ],
+        )
         self.assertEqual(code, 0)
         req = rec.requests[-1]
         self.assertEqual(req.method, "DELETE")
@@ -249,35 +330,78 @@ class CommandDispatchTests(unittest.TestCase):
     def test_submission_submit_sends_key_and_body_shape(self) -> None:
         rec = _Recorder()
         rec.route(
-            "POST", "/api/v1/competitions/c1/submissions", 201,
-            _resource("ctfgen.submission", {
-                "submission_id": "s1", "competition_id": "c1", "team": "Red",
-                "definition_slug": "d1", "version_no": 1, "submitted_at": "t",
-                "correct": True, "first_solve": True, "replay": False, "solve": None,
-            }),
+            "POST",
+            "/api/v1/competitions/c1/submissions",
+            201,
+            _resource(
+                "ctfgen.submission",
+                {
+                    "submission_id": "s1",
+                    "competition_id": "c1",
+                    "team": "Red",
+                    "definition_slug": "d1",
+                    "version_no": 1,
+                    "submitted_at": "t",
+                    "correct": True,
+                    "first_solve": True,
+                    "replay": False,
+                    "solve": None,
+                },
+            ),
         )
-        code, out = self._run(rec, [
-            "submission", "submit", "--competition-id", "c1", "--team", "Red",
-            "--definition-slug", "d1", "--version-no", "1", "--answer", "flag{x}",
-            "--idempotency-key", "pinned-123",
-        ])
+        code, out = self._run(
+            rec,
+            [
+                "submission",
+                "submit",
+                "--competition-id",
+                "c1",
+                "--team",
+                "Red",
+                "--definition-slug",
+                "d1",
+                "--version-no",
+                "1",
+                "--answer",
+                "flag{x}",
+                "--idempotency-key",
+                "pinned-123",
+            ],
+        )
         self.assertEqual(code, 0)
         req = rec.only()
         self.assertEqual(req.method, "POST")
         self.assertEqual(req.url.path, "/api/v1/competitions/c1/submissions")
         self.assertEqual(req.headers.get("Idempotency-Key"), "pinned-123")
-        self.assertEqual(rec.body_of(req), {
-            "team": "Red", "definition_slug": "d1", "version_no": 1, "answer": "flag{x}",
-        })
+        self.assertEqual(
+            rec.body_of(req),
+            {
+                "team": "Red",
+                "definition_slug": "d1",
+                "version_no": 1,
+                "answer": "flag{x}",
+            },
+        )
         self.assertIn("s1", out)
 
     def test_submission_submit_requires_answer(self) -> None:
         rec = _Recorder()
         # No route needed: it must fail BEFORE any HTTP call.
-        code, _ = self._run(rec, [
-            "submission", "submit", "--competition-id", "c1", "--team", "Red",
-            "--definition-slug", "d1", "--version-no", "1",
-        ])
+        code, _ = self._run(
+            rec,
+            [
+                "submission",
+                "submit",
+                "--competition-id",
+                "c1",
+                "--team",
+                "Red",
+                "--definition-slug",
+                "d1",
+                "--version-no",
+                "1",
+            ],
+        )
         self.assertEqual(code, 1)
         self.assertEqual(rec.requests, [])
 
@@ -288,24 +412,43 @@ class CommandDispatchTests(unittest.TestCase):
         # The canned payload deliberately CARRIES secret-ish keys; the table must
         # render only the public whitelist and never leak these values.
         rec.route(
-            "GET", "/api/v1/instances", 200,
-            _list_env("ctfgen.instance-list", [{
-                "instance_id": "i1", "competition_id": "c1", "team": "Red",
-                "definition_slug": "d1", "version_no": 1, "state": "running",
-                "desired_state": "running", "assigned_worker": "w1",
-                "expires_at": "t", "generation": 3,
-                "instance_seed": "SEED-SECRET-XYZ",
-                "secret_ref": "vault://SECRET-REF-XYZ",
-                "external_ref": "docker://EXTERNAL-REF-XYZ",
-            }]),
+            "GET",
+            "/api/v1/instances",
+            200,
+            _list_env(
+                "ctfgen.instance-list",
+                [
+                    {
+                        "instance_id": "i1",
+                        "competition_id": "c1",
+                        "team": "Red",
+                        "definition_slug": "d1",
+                        "version_no": 1,
+                        "state": "running",
+                        "desired_state": "running",
+                        "assigned_worker": "w1",
+                        "expires_at": "t",
+                        "generation": 3,
+                        "instance_seed": "SEED-SECRET-XYZ",
+                        "secret_ref": "vault://SECRET-REF-XYZ",
+                        "external_ref": "docker://EXTERNAL-REF-XYZ",
+                    }
+                ],
+            ),
         )
         code, out = self._run(rec, ["instance", "list"])
         self.assertEqual(code, 0)
         self.assertEqual(rec.requests[0].url.path, "/api/v1/instances")
         self.assertIn("i1", out)
         self.assertIn("running", out)
-        for secret in ("SEED-SECRET-XYZ", "SECRET-REF-XYZ", "EXTERNAL-REF-XYZ",
-                       "instance_seed", "secret_ref", "external_ref"):
+        for secret in (
+            "SEED-SECRET-XYZ",
+            "SECRET-REF-XYZ",
+            "EXTERNAL-REF-XYZ",
+            "instance_seed",
+            "secret_ref",
+            "external_ref",
+        ):
             self.assertNotIn(secret, out, f"secret {secret!r} leaked into output")
 
     def test_instance_request_posts_launch_body(self) -> None:
@@ -314,14 +457,30 @@ class CommandDispatchTests(unittest.TestCase):
         # architecture, capabilities vs required_capabilities, dropping worker_units).
         rec = _Recorder()
         rec.route(
-            "POST", "/api/v1/instances", 201,
+            "POST",
+            "/api/v1/instances",
+            201,
             _resource("ctfgen.instance", {"instance_id": "i9", "state": "requested"}),
         )
-        code, _ = self._run(rec, [
-            "instance", "request", "--competition-id", "c1", "--team", "Red",
-            "--definition-slug", "d1", "--version-no", "1",
-            "--worker-units", "2", "--capability", "gpu",
-        ])
+        code, _ = self._run(
+            rec,
+            [
+                "instance",
+                "request",
+                "--competition-id",
+                "c1",
+                "--team",
+                "Red",
+                "--definition-slug",
+                "d1",
+                "--version-no",
+                "1",
+                "--worker-units",
+                "2",
+                "--capability",
+                "gpu",
+            ],
+        )
         self.assertEqual(code, 0)
         req = rec.only()
         self.assertEqual(req.method, "POST")
@@ -339,7 +498,9 @@ class CommandDispatchTests(unittest.TestCase):
     def test_instance_delete_uses_post_not_http_delete(self) -> None:
         rec = _Recorder()
         rec.route(
-            "POST", "/api/v1/instances/i1/delete", 200,
+            "POST",
+            "/api/v1/instances/i1/delete",
+            200,
             _resource("ctfgen.instance", {"instance_id": "i1", "state": "deleting"}),
         )
         code, _ = self._run(rec, ["instance", "delete", "i1"])
@@ -354,12 +515,23 @@ class CommandDispatchTests(unittest.TestCase):
     def test_job_list_hits_dead_letter(self) -> None:
         rec = _Recorder()
         rec.route(
-            "GET", "/api/v1/jobs/dead-letter", 200,
-            _list_env("ctfgen.job-list", [{
-                "job_id": "j1", "job_type": "build", "status": "dead_letter",
-                "attempt_count": 3, "max_attempts": 3, "available_at": "t",
-                "error_class": "TimeoutError",
-            }]),
+            "GET",
+            "/api/v1/jobs/dead-letter",
+            200,
+            _list_env(
+                "ctfgen.job-list",
+                [
+                    {
+                        "job_id": "j1",
+                        "job_type": "build",
+                        "status": "dead_letter",
+                        "attempt_count": 3,
+                        "max_attempts": 3,
+                        "available_at": "t",
+                        "error_class": "TimeoutError",
+                    }
+                ],
+            ),
         )
         code, out = self._run(rec, ["job", "list"])
         self.assertEqual(code, 0)
@@ -372,7 +544,9 @@ class CommandDispatchTests(unittest.TestCase):
     def test_build_trigger_posts_version(self) -> None:
         rec = _Recorder()
         rec.route(
-            "POST", "/api/v1/challenge-definitions/d1/builds", 202,
+            "POST",
+            "/api/v1/challenge-definitions/d1/builds",
+            202,
             _resource("ctfgen.job", {"job_id": "j2", "status": "queued"}),
         )
         code, _ = self._run(rec, ["build", "trigger", "--slug", "d1", "--version-no", "2"])
@@ -387,7 +561,9 @@ class CommandDispatchTests(unittest.TestCase):
     def test_system_health_is_unauthenticated(self) -> None:
         rec = _Recorder()
         rec.route(
-            "GET", "/api/v1/system/health", 200,
+            "GET",
+            "/api/v1/system/health",
+            200,
             _resource("ctfgen.system-health", {"status": "ok"}),
         )
         code, out = self._run(rec, ["system", "health"])
@@ -408,18 +584,14 @@ class AreaRegistrationTests(unittest.TestCase):
     def test_every_area_registered_and_routes_through_dispatcher(self) -> None:
         parser = platform.build_parser()
         # Each area name resolves to a subparser with at least one verb.
-        area_action = next(
-            a for a in parser._actions if getattr(a, "dest", None) == "area"
-        )
+        area_action = next(a for a in parser._actions if getattr(a, "dest", None) == "area")
         registered = set(area_action.choices)
         self.assertIn("auth", registered)
         self.assertTrue(commands.AREA_NAMES <= registered)
 
         # entry.main routes every area's first token to platform.main.
         for area in sorted(commands.AREA_NAMES | {"auth"}):
-            with mock.patch(
-                "ctf_generator.interfaces.cli.platform.main", return_value=0
-            ) as pmain:
+            with mock.patch("ctf_generator.interfaces.cli.platform.main", return_value=0) as pmain:
                 code = entry.main([area, "list"])
             self.assertEqual(code, 0)
             pmain.assert_called_once_with([area, "list"])
@@ -430,9 +602,7 @@ class AreaRegistrationTests(unittest.TestCase):
         from ctf_generator.cli import build_parser as legacy_build_parser
 
         legacy = legacy_build_parser()
-        legacy_cmd = next(
-            a for a in legacy._actions if getattr(a, "dest", None) == "command"
-        )
+        legacy_cmd = next(a for a in legacy._actions if getattr(a, "dest", None) == "command")
         legacy_names = set(legacy_cmd.choices)
         self.assertEqual(entry._PLATFORM_AREAS & legacy_names, set())
 

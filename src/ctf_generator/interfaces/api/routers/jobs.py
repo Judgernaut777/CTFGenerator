@@ -55,7 +55,9 @@ def list_dead_letter(
     page = paginate(jobs, key=_job_sort_key, limit=limit, cursor=cursor)
     items = [job_to_list_item(j) for j in page.items]
     envelope = list_envelope(
-        JOB_LIST_SCHEMA, items, limit=clamp_limit(limit),
+        JOB_LIST_SCHEMA,
+        items,
+        limit=clamp_limit(limit),
         next_cursor=page.next_cursor,
     )
     return respond(200, envelope)

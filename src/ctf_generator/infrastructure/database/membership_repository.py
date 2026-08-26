@@ -56,9 +56,7 @@ class SqlAlchemyMembershipRepository:
             raise LookupError(f"competition not found: {competition_id!r}")
         return result
 
-    def _team_uuid(
-        self, competition_uuid: uuid.UUID, team_name: str
-    ) -> uuid.UUID:
+    def _team_uuid(self, competition_uuid: uuid.UUID, team_name: str) -> uuid.UUID:
         """Resolve a team by ``(competition, name)``. Scoping the lookup to the
         competition means a team from another competition simply isn't found --
         so a cross-competition placement fails here with a clear error rather
@@ -94,29 +92,24 @@ class SqlAlchemyMembershipRepository:
     def get(self, user_email: str, competition_id: str) -> Membership | None:
         """Fetch one membership by ``(user_email, competition_id)``, or ``None``.
         Returns ``None`` (not an error) if the user or competition is unknown."""
-        row = (
-            self._session.execute(
-                # Select the CANONICAL stored email (not the caller's argument) so
-                # the returned aggregate's identity matches what list_for_competition
-                # returns for the same row -- otherwise `get("A@X.io")` and the list
-                # path would yield non-equal frozen dataclasses for one membership.
-                select(MembershipRow, UserRow.email, TeamRow.name)
-                .join(UserRow, MembershipRow.user_id == UserRow.id)
-                .join(Competition, MembershipRow.competition_id == Competition.id)
-                .outerjoin(TeamRow, MembershipRow.team_id == TeamRow.id)
-                .where(
-                    func.lower(UserRow.email) == user_email.lower(),
-                    Competition.slug == competition_id,
-                )
+        row = self._session.execute(
+            # Select the CANONICAL stored email (not the caller's argument) so
+            # the returned aggregate's identity matches what list_for_competition
+            # returns for the same row -- otherwise `get("A@X.io")` and the list
+            # path would yield non-equal frozen dataclasses for one membership.
+            select(MembershipRow, UserRow.email, TeamRow.name)
+            .join(UserRow, MembershipRow.user_id == UserRow.id)
+            .join(Competition, MembershipRow.competition_id == Competition.id)
+            .outerjoin(TeamRow, MembershipRow.team_id == TeamRow.id)
+            .where(
+                func.lower(UserRow.email) == user_email.lower(),
+                Competition.slug == competition_id,
             )
-            .one_or_none()
-        )
+        ).one_or_none()
         if row is None:
             return None
         membership_row, canonical_email, team_name = row
-        return membership_from_orm(
-            membership_row, canonical_email, competition_id, team_name
-        )
+        return membership_from_orm(membership_row, canonical_email, competition_id, team_name)
 
     def list_for_competition(self, competition_id: str) -> list[Membership]:
         """Return every membership in the given competition as domain objects
@@ -164,15 +157,12 @@ class SqlAlchemyMembershipRepository:
         ).one_or_none()
         if row is None:
             raise LookupError(
-                f"membership not found: {membership.user_email!r} "
-                f"in {membership.competition_id!r}"
+                f"membership not found: {membership.user_email!r} in {membership.competition_id!r}"
             )
         team_uuid = (
             self._team_uuid(competition_uuid, membership.team_name)
             if membership.team_name is not None
             else None
         )
-        membership_to_orm(
-            membership, user_uuid, competition_uuid, team_uuid, existing=row
-        )
+        membership_to_orm(membership, user_uuid, competition_uuid, team_uuid, existing=row)
         self._session.flush()

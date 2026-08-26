@@ -127,9 +127,7 @@ class RecoveryDrillTests(unittest.TestCase):
 
     def test_drill_measures_positive_rto_under_slo_and_restores_rows(self) -> None:
         proc = _run_drill("--keep")
-        self.assertEqual(
-            proc.returncode, 0, f"drill failed:\n{proc.stdout}\n{proc.stderr}"
-        )
+        self.assertEqual(proc.returncode, 0, f"drill failed:\n{proc.stdout}\n{proc.stderr}")
         out = proc.stdout
 
         # RTO is a genuine positive wall-clock number, under the (default 30min) SLO.
@@ -144,22 +142,16 @@ class RecoveryDrillTests(unittest.TestCase):
         # (row parity via verify.py, not merely the drill's own say-so).
         target_db = self._parse(out, "RECOVERED_TARGET_DB")
         self._dbs.append(target_db)
-        url = make_url(_TEST_URL).set(database=target_db).render_as_string(
-            hide_password=False
-        )
+        url = make_url(_TEST_URL).set(database=target_db).render_as_string(hide_password=False)
         db = Database(DatabaseConfig(url=url))
         try:
             report = verify_restore(db)
             self.assertTrue(report.passed, report.summary())
             with db.session_scope() as s:
-                events = int(
-                    s.execute(sa.text("SELECT count(*) FROM score_events")).scalar_one()
-                )
+                events = int(s.execute(sa.text("SELECT count(*) FROM score_events")).scalar_one())
                 comps = [
                     r[0]
-                    for r in s.execute(
-                        sa.text("SELECT slug FROM competitions ORDER BY slug")
-                    ).all()
+                    for r in s.execute(sa.text("SELECT slug FROM competitions ORDER BY slug")).all()
                 ]
         finally:
             db.dispose()

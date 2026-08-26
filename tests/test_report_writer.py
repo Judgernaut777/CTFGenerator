@@ -17,9 +17,7 @@ from ctf_generator.scoreboard import compute_scoreboard
 from ctf_generator.sibling_validator import SiblingValidationReport
 from ctf_generator.validator import ValidationReport
 
-FILENAME_PATTERN = re.compile(
-    r"^\d{8}T\d{6}Z-[a-z0-9-]+-[a-z0-9._-]*-[0-9a-f]{8}(?:-\d+)?\.json$"
-)
+FILENAME_PATTERN = re.compile(r"^\d{8}T\d{6}Z-[a-z0-9-]+-[a-z0-9._-]*-[0-9a-f]{8}(?:-\d+)?\.json$")
 
 
 class BuildReportTests(unittest.TestCase):
@@ -275,14 +273,22 @@ class SerializeAdversarialDeltaTests(unittest.TestCase):
             triggers_fired=["t1"],
             responses_applied=[
                 ScenarioResponseRecord(
-                    tick=1, role="defender", response_id="r1", action="rotate_credential", target="api"
+                    tick=1,
+                    role="defender",
+                    response_id="r1",
+                    action="rotate_credential",
+                    target="api",
                 )
             ],
             attacker_blocked=["probe"],
-            final_state=ScenarioState(tick=5, checkpoints={"c1"}, flags={"f": "v"}, fired_triggers={"t1"}),
+            final_state=ScenarioState(
+                tick=5, checkpoints={"c1"}, flags={"f": "v"}, fired_triggers={"t1"}
+            ),
         )
         baseline = AgentEvalReport(profile="writeup_replay", solved=True, steps=2, elapsed_ticks=2)
-        adversarial = AgentEvalReport(profile="writeup_replay", solved=False, steps=6, elapsed_ticks=6)
+        adversarial = AgentEvalReport(
+            profile="writeup_replay", solved=False, steps=6, elapsed_ticks=6
+        )
         report = AdversarialDeltaReport(
             challenge_path="/tmp/chal",  # noqa: S108 -- path fixture for report serialization; never touched on disk
             profile="writeup_replay",
@@ -315,7 +321,12 @@ class SerializeAdversarialDeltaTests(unittest.TestCase):
         from ctf_generator.agent_eval import AdversarialDeltaReport, AgentEvalReport
         from ctf_generator.scenario import ScenarioRunReport
 
-        scenario_report = ScenarioRunReport(challenge_path="/tmp/chal", ticks_run=0, final_state=None)  # noqa: S108 -- path fixture for report serialization; never touched on disk
+        # Path fixture only; never touched on disk (S108 suppressed).
+        scenario_report = ScenarioRunReport(
+            challenge_path="/tmp/chal",  # noqa: S108 -- path fixture, never touched
+            ticks_run=0,
+            final_state=None,
+        )
         report = AdversarialDeltaReport(
             challenge_path="/tmp/chal",  # noqa: S108 -- path fixture for report serialization; never touched on disk
             profile="one_shot_prompt",

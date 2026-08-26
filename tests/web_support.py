@@ -200,9 +200,7 @@ def seed_published_version(
 def attach_publication(db: Database, cid: str, slug: str, version_no: int) -> None:
     """Attach a published ``(slug, version_no)`` to a competition's catalog."""
     PublicationService(db).attach(
-        ChallengePublication(
-            competition_id=cid, definition_slug=slug, version_no=version_no
-        )
+        ChallengePublication(competition_id=cid, definition_slug=slug, version_no=version_no)
     )
 
 

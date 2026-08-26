@@ -65,9 +65,7 @@ KNOWN_ISOLATION_LEVELS = frozenset({"container", "raw_tcp", "artifact"})
 # allowed as an effective-bundle member; ``docker-compose.yml`` orchestrates the
 # services and ``.env.example`` documents its environment.
 _ALLOWED_ROOTS = frozenset({"public", "private", "services", "tests", "detection"})
-_ALLOWED_TOPLEVEL_FILES = frozenset(
-    {"challenge.yaml", "docker-compose.yml", ".env.example"}
-)
+_ALLOWED_TOPLEVEL_FILES = frozenset({"challenge.yaml", "docker-compose.yml", ".env.example"})
 
 # A concrete flag token (``ctf{...}`` with an alphanumeric/underscore/hyphen
 # body). Deliberately excludes the ``ctf{...}`` *format placeholder* (dots), so a
@@ -201,7 +199,7 @@ def _extract_variant_flags(rendered: dict[str, RenderedFile | str | bytes]) -> s
         return flags
 
     def _to_str(value: RenderedFile | str | bytes) -> str:
-        if hasattr(value, 'content'):  # RenderedFile
+        if hasattr(value, "content"):  # RenderedFile
             return value.decode(errors="replace")
         if isinstance(value, bytes):
             return value.decode("utf-8", errors="replace")
@@ -233,7 +231,7 @@ def _check_private_leak(rendered: dict[str, RenderedFile | str | bytes]) -> list
 
     # Normalize content to bytes for comparison
     def _to_bytes(value: RenderedFile | str | bytes) -> bytes:
-        if hasattr(value, 'content'):  # RenderedFile
+        if hasattr(value, "content"):  # RenderedFile
             return value.content
         if isinstance(value, str):
             return value.encode("utf-8")
@@ -248,8 +246,7 @@ def _check_private_leak(rendered: dict[str, RenderedFile | str | bytes]) -> list
             issues.append(
                 LintIssue(
                     "PRIVATE_CONTENT_IN_PUBLIC",
-                    f"public file {pub_path!r} is byte-identical to private file "
-                    f"{priv_path!r}",
+                    f"public file {pub_path!r} is byte-identical to private file {priv_path!r}",
                 )
             )
 
@@ -257,7 +254,7 @@ def _check_private_leak(rendered: dict[str, RenderedFile | str | bytes]) -> list
     # file must not appear verbatim in any public file.
     # Extract flag tokens as bytes for comparison
     def _to_str(value: RenderedFile | str | bytes) -> str:
-        if hasattr(value, 'content'):  # RenderedFile
+        if hasattr(value, "content"):  # RenderedFile
             # Always return str for flag token searching, even for binary files
             return value.decode(errors="replace", force_str=True)
         if isinstance(value, bytes):
@@ -273,8 +270,7 @@ def _check_private_leak(rendered: dict[str, RenderedFile | str | bytes]) -> list
                 issues.append(
                     LintIssue(
                         "PRIVATE_CONTENT_IN_PUBLIC",
-                        f"public file {pub_path!r} leaks the private flag token "
-                        f"{secret!r}",
+                        f"public file {pub_path!r} leaks the private flag token {secret!r}",
                     )
                 )
     return issues
@@ -296,9 +292,7 @@ def lint_family(family: Family, *, sample_seed: str = _DEFAULT_SAMPLE_SEED) -> l
     try:
         raw_rendered = dict(family.render(spec, rng, None))
     except Exception as exc:  # noqa: BLE001 - a broken renderer is a finding
-        issues.append(
-            LintIssue("RENDER_FAILED", f"render() raised {type(exc).__name__}: {exc}")
-        )
+        issues.append(LintIssue("RENDER_FAILED", f"render() raised {type(exc).__name__}: {exc}"))
         return issues
 
     # Normalize to RenderedFile for consistent byte-level checks
@@ -349,7 +343,9 @@ def _families_imported_by_source(source: str) -> list[str]:
     return hits
 
 
-def lint_renderer_module(module: Any, *, sample_seed: str = _DEFAULT_SAMPLE_SEED) -> list[LintIssue]:
+def lint_renderer_module(
+    module: Any, *, sample_seed: str = _DEFAULT_SAMPLE_SEED
+) -> list[LintIssue]:
     """Lint a renderer *module*: the family it adapts to (a-d) plus the
     circular-import contract (e). A module that cannot be adapted is reported as
     a ``MODULE_INTERFACE`` error rather than raising."""

@@ -112,9 +112,7 @@ def _reserved(db, dimension, scope_type="platform", scope_key=None) -> int:
         scope_key = PLATFORM_SCOPE_KEY
     with db.session_scope() as s:
         return (
-            SqlAlchemyQuotaPolicyRepository(s)
-            .get(scope_type, scope_key, dimension)
-            .reserved_value
+            SqlAlchemyQuotaPolicyRepository(s).get(scope_type, scope_key, dimension).reserved_value
         )
 
 
@@ -160,9 +158,7 @@ class QuotaReserveReleaseTests(unittest.TestCase):
     def test_release_missing_is_noop(self) -> None:
         with _migrated_database() as (db, _url):
             with db.session_scope() as s:
-                self.assertFalse(
-                    SqlAlchemyQuotaLedger(s).release(str(uuid.uuid4()), _NOW)
-                )
+                self.assertFalse(SqlAlchemyQuotaLedger(s).release(str(uuid.uuid4()), _NOW))
 
     def test_all_or_nothing_rollback(self) -> None:
         # cpu_millis pool has room; memory_mb pool is exhausted -> the whole
@@ -210,9 +206,7 @@ class QuotaReserveReleaseTests(unittest.TestCase):
                 worker_key="w1",
                 expires_at=_NOW + timedelta(hours=1),
                 ceilings=(
-                    CeilingRequirement(
-                        "platform", PLATFORM_SCOPE_KEY, "max_runtime_seconds", 3600
-                    ),
+                    CeilingRequirement("platform", PLATFORM_SCOPE_KEY, "max_runtime_seconds", 3600),
                 ),
             )
             with db.session_scope() as s:
@@ -225,9 +219,7 @@ class QuotaReserveReleaseTests(unittest.TestCase):
                 worker_key="w1",
                 expires_at=_NOW + timedelta(hours=1),
                 ceilings=(
-                    CeilingRequirement(
-                        "platform", PLATFORM_SCOPE_KEY, "max_runtime_seconds", 3601
-                    ),
+                    CeilingRequirement("platform", PLATFORM_SCOPE_KEY, "max_runtime_seconds", 3601),
                 ),
             )
             with self.assertRaises(QuotaExceededError):
@@ -272,9 +264,7 @@ class QuotaReactivateRenewTests(unittest.TestCase):
             self.assertEqual(_reserved(db, "active_instances"), 0)
 
             with db.session_scope() as s:
-                reheld = SqlAlchemyQuotaLedger(s).reactivate(
-                    rid, _NOW + timedelta(hours=2), _NOW
-                )
+                reheld = SqlAlchemyQuotaLedger(s).reactivate(rid, _NOW + timedelta(hours=2), _NOW)
             self.assertEqual(reheld.state, "held")
             self.assertIsNone(reheld.released_at)
             self.assertEqual(_reserved(db, "active_instances"), 2)
@@ -285,9 +275,7 @@ class QuotaReactivateRenewTests(unittest.TestCase):
             rid = str(uuid.uuid4())
             self._reserve(db, rid, amount=2)
             with db.session_scope() as s:
-                reheld = SqlAlchemyQuotaLedger(s).reactivate(
-                    rid, _NOW + timedelta(hours=2), _NOW
-                )
+                reheld = SqlAlchemyQuotaLedger(s).reactivate(rid, _NOW + timedelta(hours=2), _NOW)
             self.assertEqual(reheld.state, "held")
             # A still-held reservation is returned unchanged -- no re-increment.
             self.assertEqual(_reserved(db, "active_instances"), 2)
@@ -488,10 +476,7 @@ class QuotaGuardTests(unittest.TestCase):
             with self.assertRaises(ProgrammingError):
                 with db.session_scope() as s:
                     s.execute(
-                        sa.text(
-                            "DELETE FROM resource_quotas "
-                            "WHERE dimension = 'active_instances'"
-                        )
+                        sa.text("DELETE FROM resource_quotas WHERE dimension = 'active_instances'")
                     )
 
     def test_delete_never_referenced_quota_allowed(self) -> None:
@@ -502,10 +487,7 @@ class QuotaGuardTests(unittest.TestCase):
             _seed_quota(db, "active_instances", 5)
             with db.session_scope() as s:
                 s.execute(
-                    sa.text(
-                        "DELETE FROM resource_quotas "
-                        "WHERE dimension = 'active_instances'"
-                    )
+                    sa.text("DELETE FROM resource_quotas WHERE dimension = 'active_instances'")
                 )
             with db.session_scope() as s:
                 self.assertIsNone(
@@ -536,10 +518,7 @@ class QuotaGuardTests(unittest.TestCase):
             with self.assertRaises(IntegrityError):
                 with db.session_scope() as s:
                     s.execute(
-                        sa.text(
-                            "DELETE FROM resource_quotas "
-                            "WHERE dimension = 'active_instances'"
-                        )
+                        sa.text("DELETE FROM resource_quotas WHERE dimension = 'active_instances'")
                     )
 
     def test_update_raising_reserved_above_limit_rejected(self) -> None:
