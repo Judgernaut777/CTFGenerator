@@ -135,6 +135,92 @@ class RenderedFileContractTests(unittest.TestCase):
         )
 
 
+class StrictTypeRejectionTests(unittest.TestCase):
+    """Reviewer follow-up: bytearray/memoryview/int/None raise TypeError."""
+
+    def setUp(self) -> None:
+        self._registry_snapshot = dict(families._REGISTRY)
+
+    def tearDown(self) -> None:
+        families._REGISTRY.clear()
+        families._REGISTRY.update(self._registry_snapshot)
+
+    def test_from_value_rejects_non_str_bytes(self) -> None:
+        from ctf_generator.families import RenderedFile
+
+        for bad in (bytearray(b"x"), memoryview(b"x"), 42, None, [b"x"]):
+            with self.assertRaises(TypeError):
+                RenderedFile.from_value(bad)  # type: ignore[arg-type]
+
+    def test_normalize_renderer_output_rejects_mutable_buffers(self) -> None:
+        from ctf_generator.families import normalize_renderer_output
+
+        for bad in (bytearray(b"x"), memoryview(b"x"), None):
+            with self.assertRaises(TypeError):
+                normalize_renderer_output({"public/x.bin": bad})  # type: ignore[dict-item]
+
+    def test_write_build_rejects_bad_value_kinds(self) -> None:
+        spec = default_spec(seed="bin-seed-9", title="Reject", difficulty="medium",
+                            family="tenant_export")
+        for bad in (bytearray(b"x"), memoryview(b"x"), 7, None):
+            with tempfile.TemporaryDirectory() as tmp:
+                with self.assertRaises(TypeError):
+                    build.write_build(
+                        build_dir=Path(tmp) / "out",
+                        files={"public/evidence/sample.bin": bad},  # type: ignore[dict-item]
+                        spec=spec,
+                    )
+
+    def _make_family(self, name: str, render):
+        return sdk.Family(
+            name=name, category="web", modes=("red",),
+            render=render, required_files=("challenge.yaml", "public/description.md")
+        )
+
+
+class BinaryFlagTokenLeakTests(unittest.TestCase):
+    """Reviewer follow-up: flag token embedded inside binary public bytes is caught."""
+
+    FLAG = "ctf{binary_token_leak}"
+
+    def setUp(self) -> None:
+        self._registry_snapshot = dict(families._REGISTRY)
+
+    def tearDown(self) -> None:
+        families._REGISTRY.clear()
+        families._REGISTRY.update(self._registry_snapshot)
+
+    def test_flag_token_inside_binary_public_is_detected(self) -> None:
+        payload = b"\x00\x01HEADER" + self.FLAG.encode("utf-8") + b"\xff\xfe"
+
+        def render(spec, rng, cve_record=None):
+            return {
+                "public/evidence/token.bin": payload,
+                "private/answer.txt": f"flag: {self.FLAG}\n",
+            }
+
+        fam = sdk.Family(
+            name="probe_binary_token_leak", category="web", modes=("red",),
+            render=render,
+            required_files=("challenge.yaml", "public/evidence/token.bin"),
+        )
+        families.register(fam)
+        spec = default_spec(seed="bin-seed-10", title="TokenLeak",
+                            difficulty="medium", family=fam.name)
+        findings = lint.lint_family(fam, sample_seed=spec.seed)
+        codes = {getattr(f, "code", str(f)) for f in findings}
+        self.assertTrue(
+            any("PRIVATE" in str(c).upper() or "LEAK" in str(c).upper() for c in codes),
+            f"expected a private-leak finding, got: {codes}",
+        )
+
+    def _make_family(self, name: str, render):
+        return sdk.Family(
+            name=name, category="web", modes=("red",),
+            render=render, required_files=("challenge.yaml", "public/description.md")
+        )
+
+
 class ManifestBinaryIntegrityTests(unittest.TestCase):
     """Task A2: Manifests hash real bytes (not re-encoded text)."""
 
