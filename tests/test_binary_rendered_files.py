@@ -12,11 +12,9 @@ import json
 import tempfile
 import unittest
 from pathlib import Path
-from typing import Any
 from unittest import mock
 
 from ctf_generator import build, families, generator, sdk
-from ctf_generator.models import ChallengeSpec
 from ctf_generator.sdk import lint
 from ctf_generator.spec_generator import default_spec
 
@@ -557,7 +555,7 @@ class TextFamilyCompatibilityTests(unittest.TestCase):
         """All 8 built-in families generate and validate cleanly."""
         for name in families.family_names():
             with self.subTest(family=name):
-                fam = families.get(name)
+                families.get(name)  # existence + retrieval check
                 spec = default_spec(seed=f"compat-{name}", title="Compat", difficulty="medium", family=name)
                 with tempfile.TemporaryDirectory() as tmp:
                     out = Path(tmp) / "chal"
@@ -574,7 +572,7 @@ class TextFamilyCompatibilityTests(unittest.TestCase):
         """Each built-in family produces byte-identical output for same seed."""
         for name in families.family_names():
             with self.subTest(family=name):
-                fam = families.get(name)
+                families.get(name)  # existence + retrieval check
                 seed = f"compat-seed-{name}"
                 spec = default_spec(seed=seed, title="Compat", difficulty="medium", family=name)
 
