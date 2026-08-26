@@ -43,7 +43,7 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 
 from .. import build, schema
-from ..families import Family
+from ..families import Family, RenderedFile, normalize_renderer_output
 from ..models import ChallengeSpec, ScenarioSpec
 
 if TYPE_CHECKING:  # pragma: no cover
@@ -121,7 +121,7 @@ def _sample_spec(family: Family, seed: str) -> ChallengeSpec:
     )
 
 
-def _effective_paths(rendered: dict[str, str], spec: ChallengeSpec) -> set[str]:
+def _effective_paths(rendered: dict[str, "RenderedFile | str"], spec: ChallengeSpec) -> set[str]:
     """The full on-disk path set a build would publish: the renderer output plus
     the files ``generator.create_challenge`` injects (``challenge.yaml`` always;
     ``private/scenario_timeline.json`` when the scenario is enabled)."""
@@ -170,7 +170,7 @@ def _check_metadata(family: Family) -> list[LintIssue]:
     return issues
 
 
-def _check_paths(rendered: dict[str, str]) -> list[LintIssue]:
+def _check_paths(rendered: dict[str, "RenderedFile | str"]) -> list[LintIssue]:
     issues: list[LintIssue] = []
     for rel in rendered:
         try:
@@ -193,12 +193,21 @@ def _check_paths(rendered: dict[str, str]) -> list[LintIssue]:
     return issues
 
 
-def _extract_variant_flags(rendered: dict[str, str]) -> set[str]:
+def _extract_variant_flags(rendered: dict[str, "RenderedFile | str | bytes"]) -> set[str]:
     """Pull declared flag value(s) out of a ``private/variant.json`` if present."""
     flags: set[str] = set()
-    raw = rendered.get("private/variant.json")
-    if not raw:
+    raw_val = rendered.get("private/variant.json")
+    if not raw_val:
         return flags
+
+    def _to_str(value: "RenderedFile | str | bytes") -> str:
+        if hasattr(value, 'content'):  # RenderedFile
+            return value.decode(errors="replace")
+        if isinstance(value, bytes):
+            return value.decode("utf-8", errors="replace")
+        return value
+
+    raw = _to_str(raw_val)
 
     def _walk(node: Any) -> None:
         if isinstance(node, dict):
@@ -217,20 +226,24 @@ def _extract_variant_flags(rendered: dict[str, str]) -> set[str]:
     return flags
 
 
-def _check_private_leak(rendered: dict[str, str]) -> list[LintIssue]:
+def _check_private_leak(rendered: dict[str, "RenderedFile | str | bytes"]) -> list[LintIssue]:
     issues: list[LintIssue] = []
     private = {p: c for p, c in rendered.items() if p.startswith("private/")}
     public = {p: c for p, c in rendered.items() if p.startswith("public/")}
 
-    # (c1) exact-content leak: identical bytes under private/ and public/ -- the
-    # invariant test_no_private_content_leaks_into_public enforces on the golden
-    # baseline, applied here to a freshly rendered bundle.
-    def _digest(text: str) -> str:
-        return hashlib.sha256(text.encode("utf-8")).hexdigest()
+    # Normalize content to bytes for comparison
+    def _to_bytes(value: "RenderedFile | str | bytes") -> bytes:
+        if hasattr(value, 'content'):  # RenderedFile
+            return value.content
+        if isinstance(value, str):
+            return value.encode("utf-8")
+        return value  # bytes
 
-    private_hashes = {_digest(c): p for p, c in private.items()}
+    # (c1) exact-content leak: identical bytes under private/ and public/
+    private_hashes = {hashlib.sha256(_to_bytes(c)).hexdigest(): p for p, c in private.items()}
     for pub_path, pub_content in public.items():
-        priv_path = private_hashes.get(_digest(pub_content))
+        pub_hash = hashlib.sha256(_to_bytes(pub_content)).hexdigest()
+        priv_path = private_hashes.get(pub_hash)
         if priv_path is not None:
             issues.append(
                 LintIssue(
@@ -241,15 +254,22 @@ def _check_private_leak(rendered: dict[str, str]) -> list[LintIssue]:
             )
 
     # (c2) flag-token leak: any concrete flag token that appears in a private
-    # file must not appear verbatim in any public file (a description leaking the
-    # answer). Secrets are the variant.json flag(s) plus flag tokens scanned from
-    # private files.
-    secrets: set[str] = _extract_variant_flags(rendered)
+    # file must not appear verbatim in any public file.
+    # Extract flag tokens as bytes for comparison
+    def _to_str(value: "RenderedFile | str | bytes") -> str:
+        if hasattr(value, 'content'):  # RenderedFile
+            # Always return str for flag token searching, even for binary files
+            return value.decode(errors="replace", force_str=True)
+        if isinstance(value, bytes):
+            return value.decode("utf-8", errors="replace")
+        return value
+
+    secrets: set[str] = _extract_variant_flags({k: _to_str(v) for k, v in rendered.items()})
     for content in private.values():
-        secrets.update(_FLAG_RE.findall(content))
+        secrets.update(_FLAG_RE.findall(_to_str(content)))
     for secret in sorted(secrets):
         for pub_path, pub_content in public.items():
-            if secret and secret in pub_content:
+            if secret and secret in _to_str(pub_content):
                 issues.append(
                     LintIssue(
                         "PRIVATE_CONTENT_IN_PUBLIC",
@@ -274,12 +294,15 @@ def lint_family(family: Family, *, sample_seed: str = _DEFAULT_SAMPLE_SEED) -> l
     spec = _sample_spec(family, sample_seed)
     rng = random.Random(_seed_int(sample_seed))  # noqa: S311 - deterministic render seeding, not crypto
     try:
-        rendered = dict(family.render(spec, rng, None))
+        raw_rendered = dict(family.render(spec, rng, None))
     except Exception as exc:  # noqa: BLE001 - a broken renderer is a finding
         issues.append(
             LintIssue("RENDER_FAILED", f"render() raised {type(exc).__name__}: {exc}")
         )
         return issues
+
+    # Normalize to RenderedFile for consistent byte-level checks
+    rendered = normalize_renderer_output(raw_rendered)
 
     issues.extend(_check_paths(rendered))
     issues.extend(_check_private_leak(rendered))

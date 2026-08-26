@@ -16,12 +16,13 @@ releases; the `sdk` facade is the contract.
 from ctf_generator.sdk import Family, ScoringHints, register
 
 def render(spec, rng, cve_record=None):
-    # Return {relative_path: text}. Emit only under public/ private/ services/
+    # Return {relative_path: text|bytes}. Emit only under public/ private/ services/
     # tests/ detection/ or the top-level docker-compose.yml / .env.example.
     # challenge.yaml is injected by the generator -- do NOT emit it.
     return {
         "public/description.md": "...",
         "private/solution.md": "...",
+        "public/evidence.bin": b"\x00\x01\x02\xff\xfe\xfd",  # exact binary bytes
         "docker-compose.yml": "...",
     }
 
@@ -30,6 +31,13 @@ register(Family(
     render=render, required_files=("challenge.yaml", "public/description.md", ...),
 ))
 ```
+
+All renderer output values are normalized through ``RenderedFile.from_value()``:
+* ``str`` → UTF-8 encoded bytes (``is_binary=False``)
+* ``bytes`` → preserved exactly (``is_binary=True``)
+
+The generator and build layer both carry exact bytes; manifests hash the on-disk
+bytes, and linting compares byte-level for private-leak detection.
 
 Exported: the registry + family record (`Family`, `FamilyRenderer`,
 `ScoringHints`, `DefaultSpecBuilder`, `register`/`get`/`is_registered`/

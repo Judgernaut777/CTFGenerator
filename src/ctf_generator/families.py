@@ -15,6 +15,104 @@ from .validator import REQUIRED_FILES
 if TYPE_CHECKING:
     from .cve_source import CveRecord
 
+
+# --- Binary-safe RenderedFile value -------------------------------------------
+#
+# Allows renderer families to return either text (str) or exact binary bytes
+# while preserving a stable public authoring type. The generator normalizes
+# everything to RenderedFile at the single choke point (build.write_build).
+
+
+@dataclass(frozen=True)
+class RenderedFile:
+    """A rendered file carrying exact binary content with text/binary distinction.
+
+    This is the **single authoritative type** for renderer output. Families may
+    return ``str`` or ``bytes``; the SDK normalizes to ``RenderedFile`` before
+    the build layer writes to disk and hashes for manifests.
+
+    Use ``RenderedFile.from_value()`` to normalize str/bytes inputs.
+    Use ``.decode()`` to get back str (UTF-8) or raw bytes.
+    """
+
+    content: bytes
+    #: True when the original value was bytes (binary file); False when it was
+    #: str (text file). Preserved so linters and tooling can make policy
+    #: decisions without re-scanning content.
+    is_binary: bool
+
+    @classmethod
+    def from_value(cls, value: str | bytes) -> RenderedFile:
+        """Normalize a str or bytes value into a RenderedFile.
+
+        Args:
+            value: str (UTF-8 text) or bytes (exact binary payload).
+
+        Returns:
+            RenderedFile with content as UTF-8 bytes and is_binary flag set.
+
+        Raises:
+            TypeError: if value is not str or bytes.
+        """
+        if isinstance(value, bytes):
+            return cls(content=value, is_binary=True)
+        if isinstance(value, str):
+            return cls(content=value.encode("utf-8"), is_binary=False)
+        raise TypeError(
+            f"RenderedFile.from_value() expects str or bytes, got {type(value).__name__}"
+        )
+
+    def decode(self, *, errors: str = "strict", force_str: bool = False) -> str | bytes:
+        """Return the original-style value.
+
+        For text files (is_binary=False), returns the decoded UTF-8 str.
+        For binary files (is_binary=True), returns the raw bytes unchanged,
+        unless force_str=True, in which case it decodes with the given
+        error handling (useful for flag token scanning).
+
+        Args:
+            errors: Error handling for UTF-8 decode on text files. Passed to
+                ``bytes.decode()``. Default "strict". Use "replace" to tolerate
+                invalid UTF-8 in binary files that are treated as text.
+            force_str: If True, always return str (decoding binary with
+                replacement characters). Default False.
+
+        Returns:
+            str for text files, bytes for binary files (or str if force_str=True).
+
+        Raises:
+            UnicodeDecodeError: if a text file contains invalid UTF-8 and
+                errors="strict" (default).
+        """
+        if self.is_binary and not force_str:
+            return self.content
+        return self.content.decode("utf-8", errors=errors)
+
+    def __repr__(self) -> str:  # pragma: no cover - trivial
+        kind = "binary" if self.is_binary else "text"
+        return f"RenderedFile({kind}, {len(self.content)} bytes)"
+
+
+def normalize_renderer_output(
+    rendered: dict[str, str | bytes],
+) -> dict[str, RenderedFile]:
+    """Normalize a renderer's {path: str|bytes} mapping to {path: RenderedFile}.
+
+    This is the **single normalization seam** for renderer output. Call it once
+    in the generator before passing to build.write_build.
+
+    Args:
+        rendered: Mapping from relative path to str (text) or bytes (binary).
+
+    Returns:
+        Mapping from relative path to RenderedFile.
+
+    Raises:
+        TypeError: if any value is not str or bytes.
+    """
+    return {path: RenderedFile.from_value(content) for path, content in rendered.items()}
+
+
 # --- Scoring hints ------------------------------------------------------------
 
 
@@ -43,7 +141,7 @@ class FamilyRenderer(Protocol):
         spec: ChallengeSpec,
         rng: random.Random,
         cve_record: "CveRecord | None" = None,
-    ) -> dict[str, str]: ...
+    ) -> dict[str, str | bytes]: ...
 
 
 DefaultSpecBuilder = Callable[..., ChallengeSpec]

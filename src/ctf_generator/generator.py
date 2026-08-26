@@ -7,6 +7,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 from . import build, families
+from .families import normalize_renderer_output, RenderedFile
 from .models import ChallengeSpec
 from .spec_generator import default_spec
 from .yaml_writer import dump_yaml
@@ -32,12 +33,14 @@ def create_challenge(
         spec = default_spec(seed=seed, title=title, difficulty=difficulty, family=family)
 
     rng = random.Random(_seed_int(spec.seed))
-    files = dict(families.get(spec.family).render(spec, rng, cve_record))
+    raw_files = dict(families.get(spec.family).render(spec, rng, cve_record))
+    # Normalize renderer output (str|bytes -> RenderedFile) at the single seam.
+    norm_files = normalize_renderer_output(raw_files)
     spec_mapping = spec.to_mapping()
-    files["challenge.yaml"] = dump_yaml(spec_mapping)
+    norm_files["challenge.yaml"] = RenderedFile.from_value(dump_yaml(spec_mapping))
 
     if spec.scenario.enabled:
-        files["private/scenario_timeline.json"] = (
+        norm_files["private/scenario_timeline.json"] = RenderedFile.from_value(
             json.dumps(spec.scenario.to_mapping(), indent=2, sort_keys=True) + "\n"
         )
 
@@ -49,7 +52,7 @@ def create_challenge(
     ).hexdigest()
     return build.write_build(
         output_dir,
-        files,
+        norm_files,
         meta=build.BuildMeta(
             family=spec.family,
             seed=spec.seed,

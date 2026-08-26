@@ -35,6 +35,7 @@ from dataclasses import dataclass
 from pathlib import Path, PurePosixPath
 
 from . import __version__
+from .families import RenderedFile
 from .models import SPEC_VERSION
 
 # --- Limits -------------------------------------------------------------------
@@ -274,18 +275,31 @@ def _build_manifests(build_root: Path, meta: BuildMeta) -> None:
 
 def write_build(
     final_dir: Path,
-    files: dict[str, str],
+    files: dict[str, "RenderedFile | str | bytes"],
     *,
     meta: BuildMeta,
     force: bool = False,
 ) -> Path:
     """Validate, write, and atomically publish a challenge build.
 
-    ``files`` maps renderer-supplied relative paths to text content. Writes into
-    a temporary sibling directory, generates manifests, then atomically replaces
-    ``final_dir``. On any failure the partial build is moved to
-    ``<final_dir>.ctfgen-failed`` for diagnosis and the error is re-raised.
+    ``files`` maps renderer-supplied relative paths to RenderedFile objects
+    (carrying exact binary content), or directly to str (UTF-8 text) or bytes
+    (exact binary payload). Str/bytes inputs are normalized to RenderedFile
+    internally. Writes into a temporary sibling directory, generates manifests,
+    then atomically replaces ``final_dir``. On any failure the partial build is
+    moved to ``<final_dir>.ctfgen-failed`` for diagnosis and the error is
+    re-raised.
     """
+    # Normalize str/bytes inputs to RenderedFile
+    norm_files: dict[str, "RenderedFile"] = {}
+    for rel, val in files.items():
+        if isinstance(val, RenderedFile):
+            norm_files[rel] = val
+        elif isinstance(val, (str, bytes)):
+            norm_files[rel] = RenderedFile.from_value(val)
+        else:
+            raise TypeError(f"Expected RenderedFile, str, or bytes for {rel!r}, got {type(val).__name__}")
+    
     final = Path(final_dir)
     _reject_dangerous_output_root(final)
 
@@ -324,25 +338,25 @@ def write_build(
         # Collision detection is case-insensitive so two paths that differ only
         # in case (which collide on a case-insensitive filesystem) are rejected
         # rather than silently clobbering each other.
-        normalized: dict[str, str] = {}
+        normalized: dict[str, "RenderedFile"] = {}
         seen_casefold: set[str] = set()
-        for rel, content in files.items():
+        for rel, rf in norm_files.items():
             norm = validate_relative_path(rel)
             cf = norm.casefold()
             if cf in seen_casefold:
                 raise DuplicatePathError(f"duplicate renderer path after normalization: {norm!r}")
             seen_casefold.add(cf)
-            normalized[norm] = content
+            normalized[norm] = rf
 
         if len(normalized) > MAX_FILE_COUNT:
             raise BuildLimitError(f"file count {len(normalized)} exceeds limit {MAX_FILE_COUNT}")
 
         total = 0
-        for norm, content in normalized.items():
+        for norm, rf in normalized.items():
             target = tmp / norm
             target.parent.mkdir(parents=True, exist_ok=True)
             _assert_within(tmp_real, target)
-            data = content.encode("utf-8")
+            data = rf.content  # RenderedFile already carries exact bytes
             total += len(data)
             if total > MAX_TOTAL_BYTES:
                 raise BuildLimitError(

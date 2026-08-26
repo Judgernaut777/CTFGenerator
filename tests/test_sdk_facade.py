@@ -18,6 +18,7 @@ class FacadeExportsTests(unittest.TestCase):
         expected = {
             "Family",
             "FamilyRenderer",
+            "RenderedFile",
             "ScoringHints",
             "DefaultSpecBuilder",
             "register",
@@ -52,6 +53,7 @@ class FacadeExportsTests(unittest.TestCase):
             "load_entry_point_families",
             "bootstrap_family_plugins",
             "ENTRY_POINT_GROUP",
+            "normalize_renderer_output",
         }
         self.assertEqual(expected, set(sdk.__all__))
         for name in expected:
@@ -65,6 +67,7 @@ class FacadeIdentityTests(unittest.TestCase):
     def test_registry_and_family_record_identity(self) -> None:
         self.assertIs(sdk.Family, _families.Family)
         self.assertIs(sdk.FamilyRenderer, _families.FamilyRenderer)
+        self.assertIs(sdk.RenderedFile, _families.RenderedFile)
         self.assertIs(sdk.ScoringHints, _families.ScoringHints)
         self.assertIs(sdk.register, _families.register)
         self.assertIs(sdk.get, _families.get)
@@ -72,6 +75,7 @@ class FacadeIdentityTests(unittest.TestCase):
         self.assertIs(sdk.family_names, _families.family_names)
         self.assertIs(sdk.families_for_mode, _families.families_for_mode)
         self.assertIs(sdk.families_for_category, _families.families_for_category)
+        self.assertIs(sdk.normalize_renderer_output, _families.normalize_renderer_output)
 
     def test_spec_value_type_identity(self) -> None:
         self.assertIs(sdk.ChallengeSpec, _models.ChallengeSpec)

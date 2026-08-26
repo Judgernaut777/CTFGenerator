@@ -47,12 +47,14 @@ from ..families import (
     DefaultSpecBuilder,
     Family,
     FamilyRenderer,
+    RenderedFile,
     ScoringHints,
     families_for_category,
     families_for_mode,
     family_names,
     get,
     is_registered,
+    normalize_renderer_output,
     register,
 )
 
@@ -97,6 +99,7 @@ __all__ = [
     # registry + family record
     "Family",
     "FamilyRenderer",
+    "RenderedFile",
     "ScoringHints",
     "DefaultSpecBuilder",
     "register",
@@ -137,4 +140,6 @@ __all__ = [
     "load_entry_point_families",
     "bootstrap_family_plugins",
     "ENTRY_POINT_GROUP",
+    # renderer normalization
+    "normalize_renderer_output",
 ]
