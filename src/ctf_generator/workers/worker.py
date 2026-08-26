@@ -267,7 +267,7 @@ def _safe_extract_bundle(data: bytes, dest: Path) -> None:
                 )
         # Every member is validated above: regular files only, no absolute/..
         # paths, resolved inside dest_root, total size capped.
-        tar.extractall(dest_root, members=members)  # nosec B202
+        tar.extractall(dest_root, members=members)  # nosec B202 -- members validated above (regular files only, resolved in dest_root, size-capped)  # noqa: S202
 
 
 def _select_build_context(bundle_root: Path) -> Path:

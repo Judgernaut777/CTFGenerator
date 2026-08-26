@@ -119,14 +119,15 @@ class UrllibHTTPClient:
         if json_body is not None:
             data = json.dumps(json_body).encode("utf-8")
             req_headers.setdefault("Content-Type", "application/json")
-        request = urllib.request.Request(url, data=data, headers=req_headers, method=method)
+        # Scheme is validated against an http/https allowlist below before opening.
+        request = urllib.request.Request(url, data=data, headers=req_headers, method=method)  # noqa: S310 -- scheme allowlisted before urlopen
         # Only http(s) schemes reach the network layer; anything else
         # (file:, ftp:, custom handlers) is rejected before opening.
         if request.type not in ("http", "https"):
             raise ValueError(f"unsupported URL scheme: {url!r}")
         try:
             # Scheme allowlisted to http/https above.
-            with urllib.request.urlopen(request, timeout=timeout) as response:  # nosec B310
+            with urllib.request.urlopen(request, timeout=timeout) as response:  # nosec B310 -- scheme allowlisted above  # noqa: S310
                 body = response.read().decode("utf-8", errors="replace")
                 return HTTPResponse(
                     status=response.status, body=body, headers=dict(response.headers)

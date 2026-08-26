@@ -837,13 +837,14 @@ class NvdFetcher(Protocol):
 def _default_nvd_fetcher(url: str, headers: dict[str, str], timeout: int) -> bytes:
     import urllib.request
 
-    request = urllib.request.Request(url, headers=headers)
+    # Scheme is validated against an http/https allowlist below before opening.
+    request = urllib.request.Request(url, headers=headers)  # noqa: S310 -- scheme allowlisted before urlopen
     # Only http(s) schemes reach the network layer; anything else
     # (file:, ftp:, custom handlers) is rejected before opening.
     if request.type not in ("http", "https"):
         raise ValueError(f"unsupported URL scheme: {url!r}")
     # Scheme allowlisted to http/https above.
-    with urllib.request.urlopen(request, timeout=timeout) as response:  # nosec B310
+    with urllib.request.urlopen(request, timeout=timeout) as response:  # nosec B310 -- scheme allowlisted above  # noqa: S310
         return response.read()
 
 

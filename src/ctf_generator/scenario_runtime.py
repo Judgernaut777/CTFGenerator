@@ -54,13 +54,14 @@ Fetcher = Callable[[str, int], str]
 
 def _urllib_fetch(url: str, timeout: int) -> str:
     """Default ``Fetcher``: a plain stdlib GET, returned as decoded text."""
-    request = Request(url)
+    # Scheme is validated against an http/https allowlist below before opening.
+    request = Request(url)  # noqa: S310 -- scheme allowlisted before urlopen
     # Only http(s) schemes reach the network layer; anything else
     # (file:, ftp:, custom handlers) is rejected before opening.
     if request.type not in ("http", "https"):
         raise ValueError(f"unsupported URL scheme: {url!r}")
     # Scheme allowlisted to http/https above.
-    with urlopen(request, timeout=timeout) as response:  # nosec B310
+    with urlopen(request, timeout=timeout) as response:  # nosec B310 -- scheme allowlisted above  # noqa: S310
         return response.read().decode("utf-8", errors="replace")
 
 
