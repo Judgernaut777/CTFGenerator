@@ -124,7 +124,11 @@ def _slug(text: str) -> str:
 
 def _discriminator(result: dict) -> str:
     encoded = json.dumps(result, sort_keys=True, default=str).encode()
-    return hashlib.sha1(encoded).hexdigest()[:8]  # noqa: S324 -- non-security discriminator for report filenames, not a digest of secrets
+    # SHA-1 is used only as a short non-cryptographic discriminator for report
+    # filenames; no security property is claimed, so usedforsecurity=False
+    # marks it explicitly for FIPS/crypto-audit tooling.
+    # Non-crypto content discriminator for filenames.
+    return hashlib.sha1(encoded, usedforsecurity=False).hexdigest()[:8]  # nosec B324
 
 
 def serialize_validation(report: ValidationReport) -> dict:

@@ -245,7 +245,11 @@ def policy_to_run_flags(
         # this is the container's ONLY writable path, so a root:root tmpfs would
         # leave a uid-65534 process with nowhere to write. noexec/nosuid/nodev is
         # defence in depth against dropping an executable payload here.
-        f"/tmp:rw,size={policy.tmpfs_mb}m,mode=1770,uid={non_root_uid},"  # noqa: S108
+        # A docker --tmpfs mount spec (a container path), not a host temp file:
+        # B108 does not apply because this is the in-container writable path
+        # mandated by the sandbox policy (read-only rootfs; see comment above).
+        # Container path for --tmpfs, not a host temp file.
+        f"/tmp:rw,size={policy.tmpfs_mb}m,mode=1770,uid={non_root_uid},"  # nosec B108
         f"gid={non_root_uid},noexec,nosuid,nodev",
         # Resource envelope. --memory-swap == --memory disables swap (no swap
         # escape past the memory cap). --cpus from milli-cpus. --pids-limit caps

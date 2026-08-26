@@ -265,7 +265,9 @@ def _safe_extract_bundle(data: bytes, dest: Path) -> None:
                     f"build bundle exceeds the {MAX_BUILD_BUNDLE_BYTES}-byte "
                     "extraction ceiling; refusing to extract"
                 )
-        tar.extractall(dest_root, members=members)  # noqa: S202 - validated above
+        # Every member is validated above: regular files only, no absolute/..
+        # paths, resolved inside dest_root, total size capped.
+        tar.extractall(dest_root, members=members)  # nosec B202
 
 
 def _select_build_context(bundle_root: Path) -> Path:

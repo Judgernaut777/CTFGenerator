@@ -119,9 +119,14 @@ class UrllibHTTPClient:
         if json_body is not None:
             data = json.dumps(json_body).encode("utf-8")
             req_headers.setdefault("Content-Type", "application/json")
-        request = urllib.request.Request(url, data=data, headers=req_headers, method=method)  # noqa: S310 -- URL supplied by trusted eval harness configuration
+        request = urllib.request.Request(url, data=data, headers=req_headers, method=method)
+        # Only http(s) schemes reach the network layer; anything else
+        # (file:, ftp:, custom handlers) is rejected before opening.
+        if request.type not in ("http", "https"):
+            raise ValueError(f"unsupported URL scheme: {url!r}")
         try:
-            with urllib.request.urlopen(request, timeout=timeout) as response:  # noqa: S310 -- see above; eval target URLs are operator-provided
+            # Scheme allowlisted to http/https above.
+            with urllib.request.urlopen(request, timeout=timeout) as response:  # nosec B310
                 body = response.read().decode("utf-8", errors="replace")
                 return HTTPResponse(
                     status=response.status, body=body, headers=dict(response.headers)
