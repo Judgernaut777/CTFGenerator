@@ -62,7 +62,7 @@ def _scenario_enabled(challenge_yaml_text: str) -> bool:
     return False
 
 
-def _resolve_family(spec_text: str | None) -> "Family | None":
+def _resolve_family(spec_text: str | None) -> Family | None:
     """Resolve the registered ``Family`` a rendered challenge.yaml declares.
 
     Returns ``None`` (never raises) whenever resolution isn't possible: no
@@ -95,7 +95,7 @@ class ValidationReport:
 
 
 def _validate_against_family(
-    challenge_path: Path, family: "Family", report: ValidationReport
+    challenge_path: Path, family: Family, report: ValidationReport
 ) -> None:
     for relative in family.required_files:
         path = challenge_path / relative

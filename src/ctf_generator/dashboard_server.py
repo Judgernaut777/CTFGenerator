@@ -27,10 +27,11 @@ from __future__ import annotations
 import hashlib
 import json
 import secrets
+from collections.abc import Callable
 from dataclasses import asdict, dataclass, field
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
-from typing import Callable, Protocol
+from typing import Protocol
 from urllib.parse import parse_qsl, urlsplit
 
 from . import dashboard_ui
@@ -69,8 +70,8 @@ class DashboardResponse:
 
 SESSION_COOKIE = "ctfgen_session"
 CSRF_HEADER = "X-CSRF-Token"
-PUBLIC_TOKEN_HEADER = "X-Public-Token"
-PUBLIC_TOKEN_QUERY = "token"
+PUBLIC_TOKEN_HEADER = "X-Public-Token"  # noqa: S105 -- HTTP header name constant, not a credential
+PUBLIC_TOKEN_QUERY = "token"  # noqa: S105 -- query-parameter name constant, not a credential
 
 
 # Defense-in-depth headers sent on every response. The dashboard escapes all
@@ -140,7 +141,7 @@ class AuthConfig:
         session_ttl_seconds: int = 900,
         pbkdf2_iterations: int = 600_000,
         salt: bytes | None = None,
-    ) -> "AuthConfig":
+    ) -> AuthConfig:
         salt = salt if salt is not None else secrets.token_bytes(16)
         password_hash = hashlib.pbkdf2_hmac("sha256", password.encode("utf-8"), salt, pbkdf2_iterations)
         return cls(
@@ -169,13 +170,13 @@ class AuthConfig:
     @classmethod
     def from_users(
         cls,
-        users: "list[tuple[str, str]]",
+        users: list[tuple[str, str]],
         *,
         public_token: str | None = None,
         session_ttl_seconds: int = 900,
         pbkdf2_iterations: int = 600_000,
         salt: bytes | None = None,
-    ) -> "AuthConfig":
+    ) -> AuthConfig:
         """Build a multi-admin config from ``(username, password)`` pairs.
 
         Each admin gets its own PBKDF2 hash. A per-user random salt is used
@@ -325,7 +326,7 @@ Clock = Callable[[], datetime]
 
 
 def _default_clock() -> datetime:
-    return datetime.now(timezone.utc)
+    return datetime.now(UTC)
 
 
 # --- Dispatch ------------------------------------------------------------------

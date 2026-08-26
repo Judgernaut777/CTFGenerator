@@ -109,7 +109,7 @@ class Variant:
 def render(
     spec: ChallengeSpec,
     rng: random.Random,
-    cve_record: "CveRecord | None" = None,
+    cve_record: CveRecord | None = None,
 ) -> dict[str, str]:
     variant = _variant(rng)
     is_blue = spec.mode == "blue"
@@ -477,7 +477,7 @@ def _description(
     spec: ChallengeSpec,
     v: Variant,
     is_blue: bool,
-    cve_record: "CveRecord | None",
+    cve_record: CveRecord | None,
 ) -> str:
     cve_note = ""
     if cve_record is not None:

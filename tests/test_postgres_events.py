@@ -30,7 +30,7 @@ class FakeCursor:
     without touching a real database.
     """
 
-    def __init__(self, connection: "FakeConnection") -> None:
+    def __init__(self, connection: FakeConnection) -> None:
         self._connection = connection
         self.executed: list[tuple[str, tuple]] = []
         self._pending_result: list[tuple] | tuple | None = None

@@ -657,7 +657,7 @@ class ServeHelperTests(unittest.TestCase):
     def test_build_serve_auth_uses_given_public_token(self) -> None:
         from ctf_generator.cli import _build_serve_auth
 
-        args = argparse_namespace(admin_user="admin", admin_password="hunter2", public_token="fixed-token")
+        args = argparse_namespace(admin_user="admin", admin_password="hunter2", public_token="fixed-token")  # noqa: S106 -- fake credentials for CLI auth assembly test
         auth = _build_serve_auth(args)
         self.assertEqual(auth.admin_username, "admin")
         self.assertEqual(auth.public_token, "fixed-token")

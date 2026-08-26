@@ -59,14 +59,14 @@ class RenderShapeTests(unittest.TestCase):
 
     def test_render_emits_every_required_file_red(self) -> None:
         spec = _spec(mode="red")
-        files = network.render(spec, random.Random(spec.seed))
+        files = network.render(spec, random.Random(spec.seed))  # noqa: S311 -- seeded RNG for deterministic challenge generation; not for secrets
         self.assertEqual(set(files), self._non_challenge_yaml_required_files())
         for path, content in files.items():
             self.assertTrue(content, f"{path} was emitted empty")
 
     def test_render_emits_every_required_file_purple(self) -> None:
         spec = _spec(mode="purple")
-        files = network.render(spec, random.Random(spec.seed))
+        files = network.render(spec, random.Random(spec.seed))  # noqa: S311 -- seeded RNG for deterministic challenge generation; not for secrets
         self.assertEqual(set(files), self._non_challenge_yaml_required_files())
         for path, content in files.items():
             self.assertTrue(content, f"{path} was emitted empty")
@@ -74,12 +74,12 @@ class RenderShapeTests(unittest.TestCase):
     def test_render_all_supported_modes(self) -> None:
         for mode in network.MODES:
             spec = _spec(mode=mode)
-            files = network.render(spec, random.Random(spec.seed))
+            files = network.render(spec, random.Random(spec.seed))  # noqa: S311 -- seeded RNG for deterministic challenge generation; not for secrets
             self.assertEqual(set(files), self._non_challenge_yaml_required_files())
 
     def test_compose_markers_present(self) -> None:
         spec = _spec(mode="red")
-        files = network.render(spec, random.Random(spec.seed))
+        files = network.render(spec, random.Random(spec.seed))  # noqa: S311 -- seeded RNG for deterministic challenge generation; not for secrets
         compose = files["docker-compose.yml"]
         for marker in network.COMPOSE_MARKERS:
             self.assertIn(marker, compose)
@@ -88,34 +88,34 @@ class RenderShapeTests(unittest.TestCase):
 class DeterminismTests(unittest.TestCase):
     def test_deterministic_same_seed_red(self) -> None:
         spec = _spec(mode="red")
-        first = network.render(spec, random.Random("shared-seed"))
-        second = network.render(spec, random.Random("shared-seed"))
+        first = network.render(spec, random.Random("shared-seed"))  # noqa: S311 -- seeded RNG for deterministic challenge generation; not for secrets
+        second = network.render(spec, random.Random("shared-seed"))  # noqa: S311 -- seeded RNG for deterministic challenge generation; not for secrets
         self.assertEqual(first, second)
 
     def test_deterministic_per_mode(self) -> None:
         for mode in network.MODES:
             spec = _spec(mode=mode)
-            first = network.render(spec, random.Random("shared-seed-2"))
-            second = network.render(spec, random.Random("shared-seed-2"))
+            first = network.render(spec, random.Random("shared-seed-2"))  # noqa: S311 -- seeded RNG for deterministic challenge generation; not for secrets
+            second = network.render(spec, random.Random("shared-seed-2"))  # noqa: S311 -- seeded RNG for deterministic challenge generation; not for secrets
             self.assertEqual(first, second)
 
     def test_deterministic_with_cve_record(self) -> None:
         spec = _spec(mode="red", cve_refs=["CVE-2099-00001"])
         record = _cve_record()
-        first = network.render(spec, random.Random("cve-seed"), cve_record=record)
-        second = network.render(spec, random.Random("cve-seed"), cve_record=record)
+        first = network.render(spec, random.Random("cve-seed"), cve_record=record)  # noqa: S311 -- seeded RNG for deterministic challenge generation; not for secrets
+        second = network.render(spec, random.Random("cve-seed"), cve_record=record)  # noqa: S311 -- seeded RNG for deterministic challenge generation; not for secrets
         self.assertEqual(first, second)
 
     def test_different_seed_changes_output(self) -> None:
         spec = _spec(mode="red")
-        a = network.render(spec, random.Random("seed-a"))
-        b = network.render(spec, random.Random("seed-b"))
+        a = network.render(spec, random.Random("seed-a"))  # noqa: S311 -- seeded RNG for deterministic challenge generation; not for secrets
+        b = network.render(spec, random.Random("seed-b"))  # noqa: S311 -- seeded RNG for deterministic challenge generation; not for secrets
         self.assertNotEqual(a, b)
 
     def test_cve_record_affects_description_but_not_determinism(self) -> None:
         spec = _spec(mode="red")
-        without_cve = network.render(spec, random.Random("seed-x"))
-        with_cve = network.render(spec, random.Random("seed-x"), cve_record=_cve_record())
+        without_cve = network.render(spec, random.Random("seed-x"))  # noqa: S311 -- seeded RNG for deterministic challenge generation; not for secrets
+        with_cve = network.render(spec, random.Random("seed-x"), cve_record=_cve_record())  # noqa: S311 -- seeded RNG for deterministic challenge generation; not for secrets
         self.assertNotEqual(
             without_cve["public/description.md"], with_cve["public/description.md"]
         )
@@ -127,7 +127,7 @@ class VariantJsonTests(unittest.TestCase):
         import json
 
         spec = _spec(mode="red")
-        files = network.render(spec, random.Random(spec.seed))
+        files = network.render(spec, random.Random(spec.seed))  # noqa: S311 -- seeded RNG for deterministic challenge generation; not for secrets
         variant = json.loads(files["private/variant.json"])
         self.assertIn("flag", variant)
         self.assertTrue(variant["flag"].startswith("ctf{"))
@@ -140,7 +140,7 @@ class VariantJsonTests(unittest.TestCase):
         import json
 
         spec = _spec(mode="red")
-        files = network.render(spec, random.Random(spec.seed))
+        files = network.render(spec, random.Random(spec.seed))  # noqa: S311 -- seeded RNG for deterministic challenge generation; not for secrets
         variant = json.loads(files["private/variant.json"])
         flag = variant["flag"]
         self.assertIn(flag, files["services/internal/app.py"])
@@ -152,13 +152,13 @@ class VariantJsonTests(unittest.TestCase):
 class PurpleModeContentTests(unittest.TestCase):
     def test_purple_adds_blue_team_material(self) -> None:
         spec = _spec(mode="purple")
-        files = network.render(spec, random.Random(spec.seed))
+        files = network.render(spec, random.Random(spec.seed))  # noqa: S311 -- seeded RNG for deterministic challenge generation; not for secrets
         self.assertIn("Blue-team", files["public/description.md"])
         self.assertIn("Blue-team detection guidance", files["private/detection_notes.md"])
 
     def test_red_omits_purple_only_section(self) -> None:
         spec = _spec(mode="red")
-        files = network.render(spec, random.Random(spec.seed))
+        files = network.render(spec, random.Random(spec.seed))  # noqa: S311 -- seeded RNG for deterministic challenge generation; not for secrets
         self.assertNotIn("Blue-team objective", files["public/description.md"])
 
 
@@ -170,16 +170,16 @@ class ModeDifferentiationTests(unittest.TestCase):
         for mode in network.MODES:
             with self.subTest(mode=mode):
                 spec = _spec(mode=mode)
-                first = network.render(spec, random.Random("mode-loop-seed"))
-                second = network.render(spec, random.Random("mode-loop-seed"))
+                first = network.render(spec, random.Random("mode-loop-seed"))  # noqa: S311 -- seeded RNG for deterministic challenge generation; not for secrets
+                second = network.render(spec, random.Random("mode-loop-seed"))  # noqa: S311 -- seeded RNG for deterministic challenge generation; not for secrets
                 self.assertEqual(set(first), required)
                 for path, content in first.items():
                     self.assertTrue(content, f"{path} was emitted empty for mode={mode}")
                 self.assertEqual(first, second, f"non-deterministic render for mode={mode}")
 
     def test_purple_description_differs_from_red(self) -> None:
-        red = network.render(_spec(mode="red"), random.Random(_spec().seed))
-        purple = network.render(_spec(mode="purple"), random.Random(_spec().seed))
+        red = network.render(_spec(mode="red"), random.Random(_spec().seed))  # noqa: S311 -- seeded RNG for deterministic challenge generation; not for secrets
+        purple = network.render(_spec(mode="purple"), random.Random(_spec().seed))  # noqa: S311 -- seeded RNG for deterministic challenge generation; not for secrets
         self.assertNotEqual(
             red["public/description.md"], purple["public/description.md"]
         )
@@ -188,8 +188,8 @@ class ModeDifferentiationTests(unittest.TestCase):
         self.assertNotIn("detection-writeup-submitted", red["public/description.md"])
 
     def test_purple_private_deliverable_differs_from_red(self) -> None:
-        red = network.render(_spec(mode="red"), random.Random(_spec().seed))
-        purple = network.render(_spec(mode="purple"), random.Random(_spec().seed))
+        red = network.render(_spec(mode="red"), random.Random(_spec().seed))  # noqa: S311 -- seeded RNG for deterministic challenge generation; not for secrets
+        purple = network.render(_spec(mode="purple"), random.Random(_spec().seed))  # noqa: S311 -- seeded RNG for deterministic challenge generation; not for secrets
         # The private solution write-up is a genuinely different deliverable
         # in purple mode: it adds grading notes for the detection narrative.
         self.assertNotEqual(
@@ -210,8 +210,8 @@ class ModeDifferentiationTests(unittest.TestCase):
 
     def test_purple_checkpoints_add_detection_writeup_requirement(self) -> None:
         spec = _spec()
-        red = network.render(_spec(mode="red"), random.Random(spec.seed))
-        purple = network.render(_spec(mode="purple"), random.Random(spec.seed))
+        red = network.render(_spec(mode="red"), random.Random(spec.seed))  # noqa: S311 -- seeded RNG for deterministic challenge generation; not for secrets
+        purple = network.render(_spec(mode="purple"), random.Random(spec.seed))  # noqa: S311 -- seeded RNG for deterministic challenge generation; not for secrets
         red_yaml = red["private/checkpoints.yaml"]
         purple_yaml = purple["private/checkpoints.yaml"]
         self.assertNotIn("detection-writeup-submitted", red_yaml)
@@ -235,7 +235,7 @@ class ModeDifferentiationTests(unittest.TestCase):
         # Regression guard: red mode must not regress now that purple mode
         # has mode-conditional branches added throughout the same helpers.
         spec = _spec(mode="red")
-        files = network.render(spec, random.Random(spec.seed))
+        files = network.render(spec, random.Random(spec.seed))  # noqa: S311 -- seeded RNG for deterministic challenge generation; not for secrets
         self.assertNotIn("Blue-team", files["public/description.md"])
         self.assertNotIn("Blue-team", files["private/solution.md"])
         self.assertNotIn("detection-writeup-submitted", files["private/checkpoints.yaml"])
@@ -253,7 +253,7 @@ class PerInstanceVulnClassTests(unittest.TestCase):
     vulnerability classes, and the adaptive solver handles any of them."""
 
     def _render_for_seed(self, seed: str, mode: str = "red") -> dict[str, str]:
-        return network.render(_spec(mode=mode, seed=seed), random.Random(seed))
+        return network.render(_spec(mode=mode, seed=seed), random.Random(seed))  # noqa: S311 -- seeded RNG for deterministic challenge generation; not for secrets
 
     def _seed_for_class(self, vuln_class: str) -> str:
         for i in range(500):

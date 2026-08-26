@@ -25,6 +25,7 @@ from __future__ import annotations
 
 import json
 import time
+from datetime import UTC
 from typing import Any, Protocol
 
 from ctf_generator.events import Clock, Event
@@ -67,9 +68,9 @@ def _default_clock() -> float:
 
 
 def _format_ts(epoch_seconds: float) -> str:
-    from datetime import datetime, timezone
+    from datetime import datetime
 
-    return datetime.fromtimestamp(epoch_seconds, tz=timezone.utc).isoformat()
+    return datetime.fromtimestamp(epoch_seconds, tz=UTC).isoformat()
 
 
 class Cursor(Protocol):
@@ -149,7 +150,7 @@ class PostgresEventStore:
 
     def _get_connection(self) -> Connection:
         if self._connection is None:
-            assert self._dsn is not None
+            assert self._dsn is not None  # noqa: S101 -- internal invariant; connection built from dsn in __init__
             self._connection = _connect_psycopg(self._dsn)
         return self._connection
 

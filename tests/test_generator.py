@@ -7,12 +7,12 @@ from dataclasses import replace
 from pathlib import Path
 
 from ctf_generator import __version__
+from ctf_generator.cve_source import SnapshotCveSource
 from ctf_generator.generator import (
     create_challenge,
     create_challenge_from_cve,
     seed_to_int,
 )
-from ctf_generator.spec_generator import default_spec
 from ctf_generator.models import (
     SPEC_VERSION,
     ChallengeSpec,
@@ -20,7 +20,7 @@ from ctf_generator.models import (
     ScenarioSpec,
     TriggerSpec,
 )
-from ctf_generator.cve_source import SnapshotCveSource
+from ctf_generator.spec_generator import default_spec
 from ctf_generator.validator import validate_challenge
 
 

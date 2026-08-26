@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import unittest
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 
 from ctf_generator.events import Event
 from ctf_generator.models import (
@@ -38,8 +38,8 @@ def _competition(**overrides: object) -> CompetitionConfig:
     defaults: dict[str, object] = dict(
         competition_id="comp-1",
         name="Test Comp",
-        start_time=datetime(2026, 1, 1, tzinfo=timezone.utc),
-        end_time=datetime(2026, 1, 2, tzinfo=timezone.utc),
+        start_time=datetime(2026, 1, 1, tzinfo=UTC),
+        end_time=datetime(2026, 1, 2, tzinfo=UTC),
     )
     defaults.update(overrides)
     return CompetitionConfig(**defaults)  # type: ignore[arg-type]
@@ -222,7 +222,7 @@ class TimeDecayEngineTests(unittest.TestCase):
     def test_uses_scoring_start_time_when_set(self) -> None:
         engine = TimeDecayEngine()
         challenge = _challenge(initial_value=500, minimum_value=100)
-        scoring_start = datetime(2026, 1, 1, 12, tzinfo=timezone.utc)
+        scoring_start = datetime(2026, 1, 1, 12, tzinfo=UTC)
         competition = _competition(scoring_start_time=scoring_start)
 
         # Before scoring_start_time (but after start_time): still initial.
@@ -234,7 +234,7 @@ class TimeDecayEngineTests(unittest.TestCase):
     def test_freeze_time_caps_effective_clock(self) -> None:
         engine = TimeDecayEngine()
         challenge = _challenge(initial_value=500, minimum_value=100)
-        freeze = datetime(2026, 1, 1, 12, tzinfo=timezone.utc)  # exact midpoint
+        freeze = datetime(2026, 1, 1, 12, tzinfo=UTC)  # exact midpoint
         competition = _competition(freeze_time=freeze)
 
         at_freeze = engine.challenge_value(challenge, 0, competition, freeze)
@@ -246,7 +246,7 @@ class TimeDecayEngineTests(unittest.TestCase):
 
     def test_degenerate_zero_length_window_returns_initial_value(self) -> None:
         engine = TimeDecayEngine()
-        same = datetime(2026, 1, 1, tzinfo=timezone.utc)
+        same = datetime(2026, 1, 1, tzinfo=UTC)
         challenge = _challenge(initial_value=500, minimum_value=100)
         competition = _competition(start_time=same, end_time=same)
 
@@ -373,41 +373,41 @@ class ValidateCompetitionConfigTests(unittest.TestCase):
 
     def test_end_before_start_is_an_error(self) -> None:
         competition = _competition(
-            start_time=datetime(2026, 1, 2, tzinfo=timezone.utc),
-            end_time=datetime(2026, 1, 1, tzinfo=timezone.utc),
+            start_time=datetime(2026, 1, 2, tzinfo=UTC),
+            end_time=datetime(2026, 1, 1, tzinfo=UTC),
         )
         errors = validate_competition_config(competition)
         self.assertTrue(any("end_time" in e for e in errors))
 
     def test_end_equals_start_is_an_error(self) -> None:
-        same = datetime(2026, 1, 1, tzinfo=timezone.utc)
+        same = datetime(2026, 1, 1, tzinfo=UTC)
         competition = _competition(start_time=same, end_time=same)
         errors = validate_competition_config(competition)
         self.assertTrue(any("end_time" in e for e in errors))
 
     def test_scoring_start_time_outside_window_is_an_error(self) -> None:
         competition = _competition(
-            scoring_start_time=datetime(2025, 12, 31, tzinfo=timezone.utc)
+            scoring_start_time=datetime(2025, 12, 31, tzinfo=UTC)
         )
         errors = validate_competition_config(competition)
         self.assertTrue(any("scoring_start_time" in e for e in errors))
 
     def test_scoring_start_time_after_end_is_an_error(self) -> None:
         competition = _competition(
-            scoring_start_time=datetime(2026, 1, 3, tzinfo=timezone.utc)
+            scoring_start_time=datetime(2026, 1, 3, tzinfo=UTC)
         )
         errors = validate_competition_config(competition)
         self.assertTrue(any("scoring_start_time" in e for e in errors))
 
     def test_scoring_start_time_within_window_is_fine(self) -> None:
         competition = _competition(
-            scoring_start_time=datetime(2026, 1, 1, 6, tzinfo=timezone.utc)
+            scoring_start_time=datetime(2026, 1, 1, 6, tzinfo=UTC)
         )
         self.assertEqual(validate_competition_config(competition), [])
 
     def test_freeze_time_outside_window_is_an_error(self) -> None:
         competition = _competition(
-            freeze_time=datetime(2025, 12, 31, tzinfo=timezone.utc)
+            freeze_time=datetime(2025, 12, 31, tzinfo=UTC)
         )
         errors = validate_competition_config(competition)
         self.assertTrue(any("freeze_time" in e for e in errors))

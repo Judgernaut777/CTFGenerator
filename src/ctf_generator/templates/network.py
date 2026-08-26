@@ -139,7 +139,7 @@ class Variant:
 def render(
     spec: ChallengeSpec,
     rng: random.Random,
-    cve_record: "CveRecord | None" = None,
+    cve_record: CveRecord | None = None,
 ) -> dict[str, str]:
     variant = _variant(rng)
 
@@ -578,7 +578,7 @@ if __name__ == "__main__":
 # --- public/description.md --------------------------------------------------------
 
 
-def _description(spec: ChallengeSpec, v: Variant, cve_record: "CveRecord | None") -> str:
+def _description(spec: ChallengeSpec, v: Variant, cve_record: CveRecord | None) -> str:
     cve_line = ""
     if cve_record is not None:
         cve_line = (

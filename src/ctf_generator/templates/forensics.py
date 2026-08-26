@@ -160,7 +160,7 @@ class Variant:
 def render(
     spec: ChallengeSpec,
     rng: random.Random,
-    cve_record: "CveRecord | None" = None,
+    cve_record: CveRecord | None = None,
 ) -> dict[str, str]:
     variant = _variant(rng, cve_record)
 
@@ -208,7 +208,7 @@ def _token_hex(rng: random.Random, byte_count: int) -> str:
 
 
 def _select_cve(
-    rng: random.Random, cve_record: "CveRecord | None"
+    rng: random.Random, cve_record: CveRecord | None
 ) -> tuple[str, list[str], str]:
     if cve_record is not None:
         return cve_record.cve_id, list(cve_record.cwe_ids), cve_record.description
@@ -241,7 +241,7 @@ def _exploit_signature(cwe_ids: list[str], attacker_ip: str, dropped_filename: s
     return "/admin/console;/login.jsp?cmd=whoami", "generic-rce"
 
 
-def _variant(rng: random.Random, cve_record: "CveRecord | None") -> Variant:
+def _variant(rng: random.Random, cve_record: CveRecord | None) -> Variant:
     incident_id = f"INC-{rng.randrange(1000, 9999)}"
     analyst_handle = rng.choice(_ANALYST_HANDLES)
     victim_host = rng.choice(_VICTIM_HOSTS)
@@ -311,7 +311,7 @@ def _bump(base_time: str, seconds: int) -> str:
 def _access_log(rng: random.Random, v: Variant) -> str:
     lines: list[str] = []
     decoy_ip_pool = [f"192.0.2.{rng.randrange(2, 254)}" for _ in range(3)]
-    for offset, (ip, path) in enumerate(zip(decoy_ip_pool, _DECOY_SCAN_PATHS)):
+    for offset, (ip, path) in enumerate(zip(decoy_ip_pool, _DECOY_SCAN_PATHS, strict=False)):  # decoy pool intentionally shorter than path list; extras ignored by design
         ts = _bump(v.base_time, -600 + offset * 5)
         lines.append(
             f'{ip} - - [{ts}] "GET {path} HTTP/1.1" 404 154 "-" "Mozilla/5.0 (compatible; scanbot/2.1)"'

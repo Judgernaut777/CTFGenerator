@@ -15,35 +15,39 @@ import os
 import unittest
 import uuid
 from contextlib import contextmanager
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 
 try:  # heavy deps are optional; guard so import never fails the host suite
     import sqlalchemy as sa
-    from sqlalchemy.engine import make_url
-    from sqlalchemy.exc import IntegrityError
     from alembic import command
     from alembic.config import Config as AlembicConfig
+    from sqlalchemy.engine import make_url
+    from sqlalchemy.exc import IntegrityError
 
     from ctf_generator.domain.challenges.models import CompetitionConfig
     from ctf_generator.domain.identity.models import Membership, Team, User
-    from ctf_generator.infrastructure.database.config import DatabaseConfig
-    from ctf_generator.infrastructure.database.session import Database
-    from ctf_generator.infrastructure.database.models import (
-        Membership as MembershipRow,
-        Team as TeamRow,
-        User as UserRow,
-    )
     from ctf_generator.infrastructure.database.competition_repository import (
         SqlAlchemyCompetitionRepository,
     )
-    from ctf_generator.infrastructure.database.user_repository import (
-        SqlAlchemyUserRepository,
+    from ctf_generator.infrastructure.database.config import DatabaseConfig
+    from ctf_generator.infrastructure.database.membership_repository import (
+        SqlAlchemyMembershipRepository,
     )
+    from ctf_generator.infrastructure.database.models import (
+        Membership as MembershipRow,
+    )
+    from ctf_generator.infrastructure.database.models import (
+        Team as TeamRow,
+    )
+    from ctf_generator.infrastructure.database.models import (
+        User as UserRow,
+    )
+    from ctf_generator.infrastructure.database.session import Database
     from ctf_generator.infrastructure.database.team_repository import (
         SqlAlchemyTeamRepository,
     )
-    from ctf_generator.infrastructure.database.membership_repository import (
-        SqlAlchemyMembershipRepository,
+    from ctf_generator.infrastructure.database.user_repository import (
+        SqlAlchemyUserRepository,
     )
 
     _IMPORT_ERROR: str | None = None
@@ -78,7 +82,7 @@ def _isolated_database():
         admin.dispose()
 
 
-def _alembic_config(url) -> "AlembicConfig":
+def _alembic_config(url) -> AlembicConfig:
     cfg = AlembicConfig(os.path.join(_REPO_ROOT, "alembic.ini"))
     cfg.set_main_option("script_location", os.path.join(_REPO_ROOT, "alembic"))
     cfg.set_main_option("sqlalchemy.url", str(url))
@@ -97,8 +101,8 @@ def _migrated_database():
             db.dispose()
 
 
-def _competition(competition_id: str = "spring-ctf-2026") -> "CompetitionConfig":
-    start = datetime(2026, 6, 1, 9, 0, tzinfo=timezone.utc)
+def _competition(competition_id: str = "spring-ctf-2026") -> CompetitionConfig:
+    start = datetime(2026, 6, 1, 9, 0, tzinfo=UTC)
     return CompetitionConfig(
         competition_id=competition_id,
         name=f"Competition {competition_id}",

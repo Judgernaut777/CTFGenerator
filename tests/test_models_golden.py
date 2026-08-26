@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import unittest
+from dataclasses import FrozenInstanceError
 from datetime import datetime
 
 from ctf_generator.models import (
@@ -246,7 +247,7 @@ class SubmissionAndSolveEventTests(unittest.TestCase):
             submitted_at=datetime(2026, 1, 1),
             correct=True,
         )
-        with self.assertRaises(Exception):
+        with self.assertRaises(FrozenInstanceError):
             submission.correct = False  # type: ignore[misc]
 
 

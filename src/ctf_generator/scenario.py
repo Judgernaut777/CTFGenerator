@@ -564,7 +564,7 @@ def _default_defender_from_spec(spec: ScenarioSpec) -> Agent | None:
         return None
     mapping: dict[str, list[ResponseSpec]] = {
         trigger.trigger_id: [response]
-        for trigger, response in zip(spec.triggers, spec.responses)
+        for trigger, response in zip(spec.triggers, spec.responses, strict=True)  # lengths checked equal above
     }
     return ScriptedDefender(spec.triggers, mapping)
 

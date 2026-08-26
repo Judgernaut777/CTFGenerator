@@ -195,7 +195,6 @@ def _log_events(rng: random.Random, v: Variant, *, reveal_flag: bool = True) -> 
     """
     base_minute = rng.randrange(0, 600)
     events: list[dict] = []
-    t = base_minute
 
     def ts(minute_offset: int) -> str:
         total = base_minute + minute_offset
@@ -204,7 +203,7 @@ def _log_events(rng: random.Random, v: Variant, *, reveal_flag: bool = True) -> 
 
     benign_registers = [reg for reg in range(10, 15) if reg != v.setpoint_reg]
     step = 0
-    for i in range(rng.randrange(4, 6)):
+    for _i in range(rng.randrange(4, 6)):
         reg = rng.choice(benign_registers) if benign_registers else v.setpoint_reg
         value = rng.randrange(100, v.safe_limit - 20)
         events.append(
@@ -268,7 +267,7 @@ def _log_events(rng: random.Random, v: Variant, *, reveal_flag: bool = True) -> 
         }
     )
     step += 1
-    for i in range(rng.randrange(2, 4)):
+    for _i in range(rng.randrange(2, 4)):
         reg = rng.choice(benign_registers) if benign_registers else v.setpoint_reg
         value = rng.randrange(100, v.safe_limit - 20)
         events.append(
@@ -300,7 +299,7 @@ def _evidence_log(rng: random.Random, v: Variant, *, reveal_flag: bool = True) -
 def render(
     spec: ChallengeSpec,
     rng: random.Random,
-    cve_record: "CveRecord | None" = None,
+    cve_record: CveRecord | None = None,
 ) -> dict[str, str]:
     v = _variant(rng)
     log_rng = random.Random(rng.getrandbits(64))
@@ -656,7 +655,7 @@ def _hmi_app(v: Variant) -> str:
 # --- public/description.md -----------------------------------------------------
 
 
-def _cve_blurb(cve_record: "CveRecord | None") -> str:
+def _cve_blurb(cve_record: CveRecord | None) -> str:
     if cve_record is None:
         return (
             "This scenario is modeled on the ICS protocol auth-bypass advisory "
@@ -721,7 +720,7 @@ would have detected it in the log.
     return ""
 
 
-def _description(spec: ChallengeSpec, v: Variant, cve_record: "CveRecord | None") -> str:
+def _description(spec: ChallengeSpec, v: Variant, cve_record: CveRecord | None) -> str:
     return f"""# {spec.title}
 
 {_cve_blurb(cve_record)}

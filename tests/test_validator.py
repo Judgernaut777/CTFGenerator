@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import json
 import random
 import tempfile
 import unittest
@@ -243,7 +242,7 @@ class GenericFallbackTests(unittest.TestCase):
             path = Path(temp_dir) / "a-file"
             path.write_text("not a directory", encoding="utf-8")
             report = validate_challenge(path)
-            self.assertEqual(report.errors, ["%s is not a directory" % path])
+            self.assertEqual(report.errors, [f"{path} is not a directory"])
 
 
 class ScenarioSoftCheckTests(unittest.TestCase):

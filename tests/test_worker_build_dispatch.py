@@ -130,7 +130,7 @@ class _FakeBuildBackend:
 @dataclass
 class _FakeClient:
     bundle: BuildBundle | None
-    token: str = "ctfw1.cred.secret"
+    token: str = "ctfw1.cred.secret"  # noqa: S105 -- fake bearer token in test double, not a real credential
     completed: list = field(default_factory=list)
     failed: list = field(default_factory=list)
     claim_lease: JobLease | None = None
@@ -181,7 +181,7 @@ def _build_lease(payload: dict) -> JobLease:
         required_capabilities=("build_challenge",),
         payload=payload,
     )
-    return JobLease(job=job, lease_token="lease-1", lease_expires_at=_NOW)
+    return JobLease(job=job, lease_token="lease-1", lease_expires_at=_NOW)  # noqa: S106 -- synthetic lease token for test double
 
 
 def _worker(client, build_backend) -> Worker:

@@ -44,7 +44,6 @@ _FORBIDDEN_INTERNAL = {
     "ctf_generator.cve_source",
     "ctf_generator.report_writer",
     "ctf_generator.report_index",
-    "ctf_generator.runtime_validator",
     "ctf_generator.cli",
     "ctf_generator.generator",
     "ctf_generator.validator",

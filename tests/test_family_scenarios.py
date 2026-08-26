@@ -15,7 +15,8 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from ctf_generator import families, scenario as sc
+from ctf_generator import families
+from ctf_generator import scenario as sc
 from ctf_generator.agent_eval import HTTPResponse, _ScenarioDefendedHTTPClient
 from ctf_generator.cli import _scenario_spec_from_mapping
 from ctf_generator.generator import create_challenge

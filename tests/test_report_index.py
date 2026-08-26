@@ -1,16 +1,15 @@
 from __future__ import annotations
 
-import json
 import tempfile
 import unittest
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 
 from ctf_generator import cli, report_index, report_writer
 
 
 def _envelope(command, identifier, result, status="passed", timestamp=None, commit="abcdef1234567890"):
-    ts = timestamp or datetime(2026, 7, 3, 14, 25, 30, tzinfo=timezone.utc)
+    ts = timestamp or datetime(2026, 7, 3, 14, 25, 30, tzinfo=UTC)
     return report_writer.build_report(
         command,
         {"type": "challenge", "identifier": identifier},
@@ -101,14 +100,14 @@ class LoadIndexTests(unittest.TestCase):
                 d,
                 _envelope(
                     "score", "later", {"total": 1.0},
-                    timestamp=datetime(2026, 7, 3, 20, 0, 0, tzinfo=timezone.utc),
+                    timestamp=datetime(2026, 7, 3, 20, 0, 0, tzinfo=UTC),
                 ),
             )
             report_writer.write_report(
                 d,
                 _envelope(
                     "score", "earlier", {"total": 2.0},
-                    timestamp=datetime(2026, 7, 3, 8, 0, 0, tzinfo=timezone.utc),
+                    timestamp=datetime(2026, 7, 3, 8, 0, 0, tzinfo=UTC),
                 ),
             )
             index = report_index.load_index(d)

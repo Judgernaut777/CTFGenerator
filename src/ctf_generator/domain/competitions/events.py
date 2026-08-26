@@ -24,7 +24,7 @@ from __future__ import annotations
 import threading
 import time
 from dataclasses import dataclass, field
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from typing import Protocol
 
 
@@ -68,7 +68,7 @@ def _default_clock() -> float:
 
 
 def _format_ts(epoch_seconds: float) -> str:
-    return datetime.fromtimestamp(epoch_seconds, tz=timezone.utc).isoformat()
+    return datetime.fromtimestamp(epoch_seconds, tz=UTC).isoformat()
 
 
 def _event_to_dict(event: Event) -> dict:

@@ -121,7 +121,7 @@ def _sample_spec(family: Family, seed: str) -> ChallengeSpec:
     )
 
 
-def _effective_paths(rendered: dict[str, "RenderedFile | str"], spec: ChallengeSpec) -> set[str]:
+def _effective_paths(rendered: dict[str, RenderedFile | str], spec: ChallengeSpec) -> set[str]:
     """The full on-disk path set a build would publish: the renderer output plus
     the files ``generator.create_challenge`` injects (``challenge.yaml`` always;
     ``private/scenario_timeline.json`` when the scenario is enabled)."""
@@ -170,7 +170,7 @@ def _check_metadata(family: Family) -> list[LintIssue]:
     return issues
 
 
-def _check_paths(rendered: dict[str, "RenderedFile | str"]) -> list[LintIssue]:
+def _check_paths(rendered: dict[str, RenderedFile | str]) -> list[LintIssue]:
     issues: list[LintIssue] = []
     for rel in rendered:
         try:
@@ -193,14 +193,14 @@ def _check_paths(rendered: dict[str, "RenderedFile | str"]) -> list[LintIssue]:
     return issues
 
 
-def _extract_variant_flags(rendered: dict[str, "RenderedFile | str | bytes"]) -> set[str]:
+def _extract_variant_flags(rendered: dict[str, RenderedFile | str | bytes]) -> set[str]:
     """Pull declared flag value(s) out of a ``private/variant.json`` if present."""
     flags: set[str] = set()
     raw_val = rendered.get("private/variant.json")
     if not raw_val:
         return flags
 
-    def _to_str(value: "RenderedFile | str | bytes") -> str:
+    def _to_str(value: RenderedFile | str | bytes) -> str:
         if hasattr(value, 'content'):  # RenderedFile
             return value.decode(errors="replace")
         if isinstance(value, bytes):
@@ -226,13 +226,13 @@ def _extract_variant_flags(rendered: dict[str, "RenderedFile | str | bytes"]) ->
     return flags
 
 
-def _check_private_leak(rendered: dict[str, "RenderedFile | str | bytes"]) -> list[LintIssue]:
+def _check_private_leak(rendered: dict[str, RenderedFile | str | bytes]) -> list[LintIssue]:
     issues: list[LintIssue] = []
     private = {p: c for p, c in rendered.items() if p.startswith("private/")}
     public = {p: c for p, c in rendered.items() if p.startswith("public/")}
 
     # Normalize content to bytes for comparison
-    def _to_bytes(value: "RenderedFile | str | bytes") -> bytes:
+    def _to_bytes(value: RenderedFile | str | bytes) -> bytes:
         if hasattr(value, 'content'):  # RenderedFile
             return value.content
         if isinstance(value, str):
@@ -256,7 +256,7 @@ def _check_private_leak(rendered: dict[str, "RenderedFile | str | bytes"]) -> li
     # (c2) flag-token leak: any concrete flag token that appears in a private
     # file must not appear verbatim in any public file.
     # Extract flag tokens as bytes for comparison
-    def _to_str(value: "RenderedFile | str | bytes") -> str:
+    def _to_str(value: RenderedFile | str | bytes) -> str:
         if hasattr(value, 'content'):  # RenderedFile
             # Always return str for flag token searching, even for binary files
             return value.decode(errors="replace", force_str=True)

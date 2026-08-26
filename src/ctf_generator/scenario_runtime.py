@@ -32,8 +32,8 @@ test suite.
 from __future__ import annotations
 
 import json
+from collections.abc import Callable
 from pathlib import Path
-from typing import Callable
 from urllib.error import HTTPError, URLError
 from urllib.request import Request, urlopen
 

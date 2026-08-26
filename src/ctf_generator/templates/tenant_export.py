@@ -1,12 +1,11 @@
 from __future__ import annotations
 
-import random
 import json
+import random
 from dataclasses import dataclass
 
 from ctf_generator.models import ChallengeSpec
 from ctf_generator.yaml_writer import dump_yaml
-
 
 # Per-instance vulnerability CLASSES. Regeneration draws one seed-first, so a
 # writeup for one class does NOT solve a differently-classed sibling:

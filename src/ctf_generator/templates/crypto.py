@@ -116,7 +116,7 @@ class Variant:
 def render(
     spec: ChallengeSpec,
     rng: random.Random,
-    cve_record: "CveRecord | None" = None,
+    cve_record: CveRecord | None = None,
 ) -> dict[str, str]:
     variant = _variant(rng)
     login_route = f"/api/{variant.login_noun}"
@@ -445,7 +445,7 @@ def _description(
     login_route: str,
     whoami_route: str,
     admin_route: str,
-    cve_record: "CveRecord | None",
+    cve_record: CveRecord | None,
 ) -> str:
     cve_note = ""
     if cve_record is not None:

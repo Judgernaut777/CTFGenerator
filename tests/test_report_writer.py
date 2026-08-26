@@ -5,7 +5,7 @@ import re
 import subprocess
 import tempfile
 import unittest
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 from unittest import mock
 
@@ -17,7 +17,6 @@ from ctf_generator.scoreboard import compute_scoreboard
 from ctf_generator.sibling_validator import SiblingValidationReport
 from ctf_generator.validator import ValidationReport
 
-
 FILENAME_PATTERN = re.compile(
     r"^\d{8}T\d{6}Z-[a-z0-9-]+-[a-z0-9._-]*-[0-9a-f]{8}(?:-\d+)?\.json$"
 )
@@ -25,7 +24,7 @@ FILENAME_PATTERN = re.compile(
 
 class BuildReportTests(unittest.TestCase):
     def test_build_report_shape_and_determinism(self) -> None:
-        ts = datetime(2026, 7, 3, 14, 25, 30, tzinfo=timezone.utc)
+        ts = datetime(2026, 7, 3, 14, 25, 30, tzinfo=UTC)
         subject = {"type": "challenge", "identifier": "my-challenge"}
         result = {"errors": [], "warnings": ["w"]}
 
@@ -89,7 +88,7 @@ class GitCommitTests(unittest.TestCase):
 
 class WriteReportTests(unittest.TestCase):
     def _report(self) -> dict:
-        ts = datetime(2026, 7, 3, 14, 25, 30, tzinfo=timezone.utc)
+        ts = datetime(2026, 7, 3, 14, 25, 30, tzinfo=UTC)
         return report_writer.build_report(
             "score",
             {"type": "challenge", "identifier": "my-challenge"},
@@ -149,13 +148,13 @@ class SerializeTests(unittest.TestCase):
         report = ReplayReport(
             errors=["a-solver-vs-b: command failed"],
             logs=["$ solver\nno flag"],
-            solver_dir=Path("/tmp/sibling-a"),
-            target_dir=Path("/tmp/sibling-b"),
+            solver_dir=Path("/tmp/sibling-a"),  # noqa: S108 -- path fixture for serializer round-trip; never touched on disk
+            target_dir=Path("/tmp/sibling-b"),  # noqa: S108 -- path fixture for serializer round-trip; never touched on disk
             success=False,
         )
         result = report_writer.serialize_replay(report)
-        self.assertEqual(result["solver_dir"], "/tmp/sibling-a")
-        self.assertEqual(result["target_dir"], "/tmp/sibling-b")
+        self.assertEqual(result["solver_dir"], "/tmp/sibling-a")  # noqa: S108 -- path fixture for serializer round-trip; never touched on disk
+        self.assertEqual(result["target_dir"], "/tmp/sibling-b")  # noqa: S108 -- path fixture for serializer round-trip; never touched on disk
         self.assertFalse(result["success"])
         json.dumps(result)  # must not raise
 
@@ -166,13 +165,13 @@ class SerializeTests(unittest.TestCase):
 
     def test_serialize_siblings_paths_are_json_safe(self) -> None:
         report = SiblingValidationReport(
-            sibling_a=Path("/tmp/a"),
-            sibling_b=Path("/tmp/b"),
+            sibling_a=Path("/tmp/a"),  # noqa: S108 -- path fixture for serializer round-trip; never touched on disk
+            sibling_b=Path("/tmp/b"),  # noqa: S108 -- path fixture for serializer round-trip; never touched on disk
             changed_tokens=["routes.x"],
         )
         result = report_writer.serialize_siblings(report)
-        self.assertEqual(result["sibling_a"], "/tmp/a")
-        self.assertEqual(result["sibling_b"], "/tmp/b")
+        self.assertEqual(result["sibling_a"], "/tmp/a")  # noqa: S108 -- path fixture for serializer round-trip; never touched on disk
+        self.assertEqual(result["sibling_b"], "/tmp/b")  # noqa: S108 -- path fixture for serializer round-trip; never touched on disk
         json.dumps(result)  # must not raise
 
         empty = report_writer.serialize_siblings(SiblingValidationReport())
@@ -186,8 +185,8 @@ class SerializeScoreboardTests(unittest.TestCase):
         config = CompetitionConfig(
             competition_id="comp-1",
             name="Test Comp",
-            start_time=datetime(2026, 7, 1, tzinfo=timezone.utc),
-            end_time=datetime(2026, 7, 2, tzinfo=timezone.utc),
+            start_time=datetime(2026, 7, 1, tzinfo=UTC),
+            end_time=datetime(2026, 7, 2, tzinfo=UTC),
         )
         challenges = {
             "chal-1": ChallengeScoringConfig(challenge_id="chal-1", initial_value=500),
@@ -196,13 +195,13 @@ class SerializeScoreboardTests(unittest.TestCase):
             SolveEvent(
                 team_id="team-a",
                 challenge_id="chal-1",
-                solved_at=datetime(2026, 7, 1, 12, 0, tzinfo=timezone.utc),
+                solved_at=datetime(2026, 7, 1, 12, 0, tzinfo=UTC),
                 submission_id="sub-1",
             ),
             SolveEvent(
                 team_id="team-b",
                 challenge_id="chal-1",
-                solved_at=datetime(2026, 7, 1, 13, 0, tzinfo=timezone.utc),
+                solved_at=datetime(2026, 7, 1, 13, 0, tzinfo=UTC),
                 submission_id="sub-2",
             ),
         ]
@@ -270,7 +269,7 @@ class SerializeAdversarialDeltaTests(unittest.TestCase):
         )
 
         scenario_report = ScenarioRunReport(
-            challenge_path="/tmp/chal",
+            challenge_path="/tmp/chal",  # noqa: S108 -- path fixture for report serialization; never touched on disk
             ticks_run=5,
             timeline=[SimEvent(tick=0, source="attacker", kind="probe", target="api")],
             triggers_fired=["t1"],
@@ -285,7 +284,7 @@ class SerializeAdversarialDeltaTests(unittest.TestCase):
         baseline = AgentEvalReport(profile="writeup_replay", solved=True, steps=2, elapsed_ticks=2)
         adversarial = AgentEvalReport(profile="writeup_replay", solved=False, steps=6, elapsed_ticks=6)
         report = AdversarialDeltaReport(
-            challenge_path="/tmp/chal",
+            challenge_path="/tmp/chal",  # noqa: S108 -- path fixture for report serialization; never touched on disk
             profile="writeup_replay",
             baseline=baseline,
             adversarial=adversarial,
@@ -295,7 +294,7 @@ class SerializeAdversarialDeltaTests(unittest.TestCase):
 
         result = report_writer.serialize_adversarial_delta(report)
 
-        self.assertEqual(result["challenge_path"], "/tmp/chal")
+        self.assertEqual(result["challenge_path"], "/tmp/chal")  # noqa: S108 -- path fixture for report serialization; never touched on disk
         self.assertEqual(result["profile"], "writeup_replay")
         self.assertEqual(result["baseline"], report_writer.serialize_agent_eval(baseline))
         self.assertEqual(result["adversarial"], report_writer.serialize_agent_eval(adversarial))
@@ -316,9 +315,9 @@ class SerializeAdversarialDeltaTests(unittest.TestCase):
         from ctf_generator.agent_eval import AdversarialDeltaReport, AgentEvalReport
         from ctf_generator.scenario import ScenarioRunReport
 
-        scenario_report = ScenarioRunReport(challenge_path="/tmp/chal", ticks_run=0, final_state=None)
+        scenario_report = ScenarioRunReport(challenge_path="/tmp/chal", ticks_run=0, final_state=None)  # noqa: S108 -- path fixture for report serialization; never touched on disk
         report = AdversarialDeltaReport(
-            challenge_path="/tmp/chal",
+            challenge_path="/tmp/chal",  # noqa: S108 -- path fixture for report serialization; never touched on disk
             profile="one_shot_prompt",
             baseline=AgentEvalReport(profile="one_shot_prompt"),
             adversarial=AgentEvalReport(profile="one_shot_prompt"),

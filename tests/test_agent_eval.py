@@ -26,7 +26,6 @@ from ctf_generator.agent_eval import (
 from ctf_generator.models import ResponseSpec, TriggerSpec
 from ctf_generator.scenario import ScriptedDefender
 
-
 DESCRIPTION_MD = """# Widget Vault
 
 Start at:
@@ -52,7 +51,7 @@ def _write_challenge(root: Path, *, description: str = DESCRIPTION_MD, hints: st
 class FakeHTTPClient:
     """Deterministic fake: one endpoint, one secret header, no network."""
 
-    def __init__(self, secret: str = "letmein", flag: str = "ctf{fake_flag_123456}") -> None:
+    def __init__(self, secret: str = "letmein", flag: str = "ctf{fake_flag_123456}") -> None:  # noqa: S107 -- fake credential for offline FakeHTTPClient; never a real secret
         self.secret = secret
         self.flag = flag
         self.calls: list[tuple[str, str, dict]] = []
@@ -140,7 +139,7 @@ class ScriptedSolverAgentTests(unittest.TestCase):
                 base_url="http://fake-app",
                 public_dir=challenge / "public",
                 http=http,
-                rng=random.Random(0),
+                rng=random.Random(0),  # noqa: S311 -- seeded RNG for deterministic challenge generation; not for secrets
                 max_steps=8,
                 deadline=float("inf"),
             )
@@ -155,14 +154,14 @@ class ScriptedSolverAgentTests(unittest.TestCase):
     def test_fails_when_secret_does_not_match(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             challenge = _write_challenge(Path(temp_dir))
-            http = FakeHTTPClient(secret="different-secret")
+            http = FakeHTTPClient(secret="different-secret")  # noqa: S106 -- fake credential exercising header-mismatch rejection
             agent = ScriptedSolverAgent()
 
             transcript = agent.solve(
                 base_url="http://fake-app",
                 public_dir=challenge / "public",
                 http=http,
-                rng=random.Random(0),
+                rng=random.Random(0),  # noqa: S311 -- seeded RNG for deterministic challenge generation; not for secrets
                 max_steps=8,
                 deadline=float("inf"),
             )
@@ -181,7 +180,7 @@ class ScriptedSolverAgentTests(unittest.TestCase):
                 base_url="http://fake-app",
                 public_dir=challenge / "public",
                 http=http,
-                rng=random.Random(0),
+                rng=random.Random(0),  # noqa: S311 -- seeded RNG for deterministic challenge generation; not for secrets
                 max_steps=2,
                 deadline=float("inf"),
             )
@@ -394,7 +393,7 @@ class LlmSolverAgentTests(unittest.TestCase):
                     base_url="http://fake-app",
                     public_dir=challenge / "public",
                     http=FakeHTTPClient(),
-                    rng=random.Random(0),
+                    rng=random.Random(0),  # noqa: S311 -- seeded RNG for deterministic challenge generation; not for secrets
                     max_steps=1,
                     deadline=float("inf"),
                 )
@@ -418,7 +417,7 @@ class LlmSolverAgentTests(unittest.TestCase):
                 base_url="http://fake-app",
                 public_dir=challenge / "public",
                 http=http,
-                rng=random.Random(0),
+                rng=random.Random(0),  # noqa: S311 -- seeded RNG for deterministic challenge generation; not for secrets
                 max_steps=5,
                 deadline=float("inf"),
             )
@@ -433,7 +432,7 @@ class LlmSolverAgentTests(unittest.TestCase):
     def test_solve_stops_when_model_gives_up(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             challenge = _write_challenge(Path(temp_dir))
-            http = FakeHTTPClient(secret="different-secret")
+            http = FakeHTTPClient(secret="different-secret")  # noqa: S106 -- fake credential for offline eval harness
             turns = [
                 [_tool_use_block("call-1", "http_request", {"method": "GET", "path": "/api/flag", "headers": {}})],
                 [_text_block("Nothing else worth trying; giving up.")],
@@ -445,7 +444,7 @@ class LlmSolverAgentTests(unittest.TestCase):
                 base_url="http://fake-app",
                 public_dir=challenge / "public",
                 http=http,
-                rng=random.Random(0),
+                rng=random.Random(0),  # noqa: S311 -- seeded RNG for deterministic challenge generation; not for secrets
                 max_steps=5,
                 deadline=float("inf"),
             )
@@ -458,7 +457,7 @@ class LlmSolverAgentTests(unittest.TestCase):
     def test_solve_respects_max_steps_budget(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             challenge = _write_challenge(Path(temp_dir))
-            http = FakeHTTPClient(secret="different-secret")
+            http = FakeHTTPClient(secret="different-secret")  # noqa: S106 -- fake credential for offline eval harness
             decision = [_tool_use_block("call-1", "http_request", {"method": "GET", "path": "/api/flag", "headers": {}})]
             client = FakeAnthropicClient([decision])
             agent = LlmSolverAgent(provider="anthropic", client=client)
@@ -467,7 +466,7 @@ class LlmSolverAgentTests(unittest.TestCase):
                 base_url="http://fake-app",
                 public_dir=challenge / "public",
                 http=http,
-                rng=random.Random(0),
+                rng=random.Random(0),  # noqa: S311 -- seeded RNG for deterministic challenge generation; not for secrets
                 max_steps=3,
                 deadline=float("inf"),
             )
@@ -490,7 +489,7 @@ class LlmSolverAgentTests(unittest.TestCase):
                 base_url="http://fake-app",
                 public_dir=challenge / "public",
                 http=http,
-                rng=random.Random(0),
+                rng=random.Random(0),  # noqa: S311 -- seeded RNG for deterministic challenge generation; not for secrets
                 max_steps=5,
                 deadline=float("inf"),
             )

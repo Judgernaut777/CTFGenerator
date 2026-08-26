@@ -48,7 +48,7 @@ class ModuleInterfaceTests(unittest.TestCase):
 class RenderShapeTests(unittest.TestCase):
     def test_render_emits_every_required_file_except_challenge_yaml(self) -> None:
         spec = _spec()
-        files = mobile.render(spec, random.Random(spec.seed))
+        files = mobile.render(spec, random.Random(spec.seed))  # noqa: S311 -- seeded RNG for deterministic challenge generation; not for secrets
         expected = set(mobile.REQUIRED_FILES) - {"challenge.yaml"}
         self.assertEqual(set(files), expected)
         for relative, content in files.items():
@@ -57,45 +57,45 @@ class RenderShapeTests(unittest.TestCase):
     def test_render_supports_every_declared_mode(self) -> None:
         for mode in mobile.MODES:
             spec = _spec(mode=mode)
-            files = mobile.render(spec, random.Random(spec.seed))
+            files = mobile.render(spec, random.Random(spec.seed))  # noqa: S311 -- seeded RNG for deterministic challenge generation; not for secrets
             expected = set(mobile.REQUIRED_FILES) - {"challenge.yaml"}
             self.assertEqual(set(files), expected, msg=f"mode={mode}")
 
     def test_no_compose_file_emitted(self) -> None:
         spec = _spec()
-        files = mobile.render(spec, random.Random(spec.seed))
+        files = mobile.render(spec, random.Random(spec.seed))  # noqa: S311 -- seeded RNG for deterministic challenge generation; not for secrets
         self.assertNotIn("docker-compose.yml", files)
 
 
 class DeterminismTests(unittest.TestCase):
     def test_same_spec_and_rng_seed_is_byte_identical(self) -> None:
         spec = _spec()
-        first = mobile.render(spec, random.Random("shared-seed"))
-        second = mobile.render(spec, random.Random("shared-seed"))
+        first = mobile.render(spec, random.Random("shared-seed"))  # noqa: S311 -- seeded RNG for deterministic challenge generation; not for secrets
+        second = mobile.render(spec, random.Random("shared-seed"))  # noqa: S311 -- seeded RNG for deterministic challenge generation; not for secrets
         self.assertEqual(first, second)
 
     def test_same_spec_and_rng_seed_is_byte_identical_per_mode(self) -> None:
         for mode in mobile.MODES:
             spec = _spec(mode=mode)
-            first = mobile.render(spec, random.Random("shared-seed"))
-            second = mobile.render(spec, random.Random("shared-seed"))
+            first = mobile.render(spec, random.Random("shared-seed"))  # noqa: S311 -- seeded RNG for deterministic challenge generation; not for secrets
+            second = mobile.render(spec, random.Random("shared-seed"))  # noqa: S311 -- seeded RNG for deterministic challenge generation; not for secrets
             self.assertEqual(first, second, msg=f"mode={mode}")
 
     def test_different_rng_seed_changes_output(self) -> None:
         spec = _spec()
-        first = mobile.render(spec, random.Random("seed-a"))
-        second = mobile.render(spec, random.Random("seed-b"))
+        first = mobile.render(spec, random.Random("seed-a"))  # noqa: S311 -- seeded RNG for deterministic challenge generation; not for secrets
+        second = mobile.render(spec, random.Random("seed-b"))  # noqa: S311 -- seeded RNG for deterministic challenge generation; not for secrets
         self.assertNotEqual(first, second)
 
     def test_red_and_blue_rendered_with_same_rng_differ_only_in_framing(self) -> None:
-        red = mobile.render(_spec(mode="red"), random.Random("shared-seed"))
-        blue = mobile.render(_spec(mode="blue"), random.Random("shared-seed"))
+        red = mobile.render(_spec(mode="red"), random.Random("shared-seed"))  # noqa: S311 -- seeded RNG for deterministic challenge generation; not for secrets
+        blue = mobile.render(_spec(mode="blue"), random.Random("shared-seed"))  # noqa: S311 -- seeded RNG for deterministic challenge generation; not for secrets
         self.assertNotEqual(red["public/description.md"], blue["public/description.md"])
         # Underlying bundle (key material, ciphertext) is identical between
         # framings for the same rng -- only narrative framing differs.
         self.assertEqual(
-            red[f"public/app/src/main/java/com/acmemobile/vault/CryptoVault.java"],
-            blue[f"public/app/src/main/java/com/acmemobile/vault/CryptoVault.java"],
+            red["public/app/src/main/java/com/acmemobile/vault/CryptoVault.java"],
+            blue["public/app/src/main/java/com/acmemobile/vault/CryptoVault.java"],
         )
         red_variant = json.loads(red["private/variant.json"])
         blue_variant = json.loads(blue["private/variant.json"])
@@ -107,8 +107,8 @@ class DeterminismTests(unittest.TestCase):
         record = SnapshotCveSource().get("CVE-2015-3860")
         self.assertIsNotNone(record)
         spec = _spec()
-        first = mobile.render(spec, random.Random("shared-seed"), cve_record=record)
-        second = mobile.render(spec, random.Random("shared-seed"), cve_record=record)
+        first = mobile.render(spec, random.Random("shared-seed"), cve_record=record)  # noqa: S311 -- seeded RNG for deterministic challenge generation; not for secrets
+        second = mobile.render(spec, random.Random("shared-seed"), cve_record=record)  # noqa: S311 -- seeded RNG for deterministic challenge generation; not for secrets
         self.assertEqual(first, second)
         self.assertIn(record.cve_id, first["public/description.md"])
 
@@ -116,7 +116,7 @@ class DeterminismTests(unittest.TestCase):
 class VariantJsonTests(unittest.TestCase):
     def test_variant_json_contains_flag_and_is_valid_json(self) -> None:
         spec = _spec()
-        files = mobile.render(spec, random.Random(spec.seed))
+        files = mobile.render(spec, random.Random(spec.seed))  # noqa: S311 -- seeded RNG for deterministic challenge generation; not for secrets
         variant = json.loads(files["private/variant.json"])
         self.assertIn("flag", variant)
         self.assertTrue(variant["flag"].startswith("ctf{"))
@@ -127,7 +127,7 @@ class VariantJsonTests(unittest.TestCase):
 
     def test_flag_is_consistent_across_files(self) -> None:
         spec = _spec()
-        files = mobile.render(spec, random.Random(spec.seed))
+        files = mobile.render(spec, random.Random(spec.seed))  # noqa: S311 -- seeded RNG for deterministic challenge generation; not for secrets
         variant = json.loads(files["private/variant.json"])
         flag = variant["flag"]
         self.assertIn(flag, files["private/solution.md"])
@@ -145,7 +145,7 @@ class VariantJsonTests(unittest.TestCase):
 class BundleContentTests(unittest.TestCase):
     def test_hardcoded_key_present_in_crypto_vault(self) -> None:
         spec = _spec()
-        files = mobile.render(spec, random.Random(spec.seed))
+        files = mobile.render(spec, random.Random(spec.seed))  # noqa: S311 -- seeded RNG for deterministic challenge generation; not for secrets
         variant = json.loads(files["private/variant.json"])
         key_hex = variant["credentials"]["hardcoded_xor_key_hex"]
         source = files[
@@ -155,12 +155,12 @@ class BundleContentTests(unittest.TestCase):
 
     def test_shared_prefs_is_valid_xml_and_decrypts_to_flag(self) -> None:
         spec = _spec()
-        files = mobile.render(spec, random.Random(spec.seed))
+        files = mobile.render(spec, random.Random(spec.seed))  # noqa: S311 -- seeded RNG for deterministic challenge generation; not for secrets
         variant = json.loads(files["private/variant.json"])
         key = bytes.fromhex(variant["credentials"]["hardcoded_xor_key_hex"])
 
         prefs_xml = files["public/app/shared_prefs/vault_prefs.xml"]
-        root = ET.fromstring(prefs_xml)
+        root = ET.fromstring(prefs_xml)  # noqa: S314 -- parses challenge XML our own renderer just generated
         pref_key = variant["storage"]["pref_key"]
         value = None
         for elem in root.findall("string"):
@@ -175,20 +175,20 @@ class BundleContentTests(unittest.TestCase):
 
     def test_manifest_declares_backup_enabled(self) -> None:
         spec = _spec()
-        files = mobile.render(spec, random.Random(spec.seed))
+        files = mobile.render(spec, random.Random(spec.seed))  # noqa: S311 -- seeded RNG for deterministic challenge generation; not for secrets
         manifest = files["public/app/AndroidManifest.xml"]
         self.assertIn('android:allowBackup="true"', manifest)
         self.assertIn("backup_rules", manifest)
 
     def test_backup_rules_references_shared_prefs(self) -> None:
         spec = _spec()
-        files = mobile.render(spec, random.Random(spec.seed))
+        files = mobile.render(spec, random.Random(spec.seed))  # noqa: S311 -- seeded RNG for deterministic challenge generation; not for secrets
         rules = files["public/app/res/xml/backup_rules.xml"]
         self.assertIn("vault_prefs.xml", rules)
 
     def test_login_activity_contains_decoy_hardcoded_credentials(self) -> None:
         spec = _spec()
-        files = mobile.render(spec, random.Random(spec.seed))
+        files = mobile.render(spec, random.Random(spec.seed))  # noqa: S311 -- seeded RNG for deterministic challenge generation; not for secrets
         variant = json.loads(files["private/variant.json"])
         source = files[
             "public/app/src/main/java/com/acmemobile/vault/LoginActivity.java"
@@ -198,21 +198,21 @@ class BundleContentTests(unittest.TestCase):
 
     def test_solver_source_is_syntactically_valid_python(self) -> None:
         spec = _spec()
-        files = mobile.render(spec, random.Random(spec.seed))
+        files = mobile.render(spec, random.Random(spec.seed))  # noqa: S311 -- seeded RNG for deterministic challenge generation; not for secrets
         solver_source = files["private/solver.py"]
         compile(solver_source, "solver.py", "exec")
         self.assertIn("XOR_KEY_HEX", solver_source)
 
     def test_healthcheck_source_is_syntactically_valid_python(self) -> None:
         spec = _spec()
-        files = mobile.render(spec, random.Random(spec.seed))
+        files = mobile.render(spec, random.Random(spec.seed))  # noqa: S311 -- seeded RNG for deterministic challenge generation; not for secrets
         compile(files["tests/healthcheck.py"], "healthcheck.py", "exec")
 
 
 class CheckpointsTests(unittest.TestCase):
     def test_checkpoints_come_from_spec(self) -> None:
         spec = _spec()
-        files = mobile.render(spec, random.Random(spec.seed))
+        files = mobile.render(spec, random.Random(spec.seed))  # noqa: S311 -- seeded RNG for deterministic challenge generation; not for secrets
         checkpoints_yaml = files["private/checkpoints.yaml"]
         for name in spec.checkpoints:
             self.assertIn(name, checkpoints_yaml)
@@ -225,7 +225,7 @@ class PerModeTests(unittest.TestCase):
         expected = set(mobile.REQUIRED_FILES) - {"challenge.yaml"}
         for mode in mobile.MODES:
             spec = _spec(mode=mode)
-            files = mobile.render(spec, random.Random(f"per-mode-{mode}"))
+            files = mobile.render(spec, random.Random(f"per-mode-{mode}"))  # noqa: S311 -- seeded RNG for deterministic challenge generation; not for secrets
             self.assertEqual(set(files), expected, msg=f"mode={mode}")
             for relative, content in files.items():
                 self.assertTrue(content, f"mode={mode}: {relative} must not be empty")
@@ -233,8 +233,8 @@ class PerModeTests(unittest.TestCase):
     def test_every_mode_is_deterministic(self) -> None:
         for mode in mobile.MODES:
             spec = _spec(mode=mode)
-            first = mobile.render(spec, random.Random(f"det-{mode}"))
-            second = mobile.render(spec, random.Random(f"det-{mode}"))
+            first = mobile.render(spec, random.Random(f"det-{mode}"))  # noqa: S311 -- seeded RNG for deterministic challenge generation; not for secrets
+            second = mobile.render(spec, random.Random(f"det-{mode}"))  # noqa: S311 -- seeded RNG for deterministic challenge generation; not for secrets
             self.assertEqual(first, second, msg=f"mode={mode}")
 
     def test_every_mode_produces_valid_shared_prefs_and_solvable_flag(self) -> None:
@@ -243,10 +243,10 @@ class PerModeTests(unittest.TestCase):
         # variant.json, regardless of narrative framing.
         for mode in mobile.MODES:
             spec = _spec(mode=mode)
-            files = mobile.render(spec, random.Random(f"valid-{mode}"))
+            files = mobile.render(spec, random.Random(f"valid-{mode}"))  # noqa: S311 -- seeded RNG for deterministic challenge generation; not for secrets
             variant = json.loads(files["private/variant.json"])
             key = bytes.fromhex(variant["credentials"]["hardcoded_xor_key_hex"])
-            root = ET.fromstring(files["public/app/shared_prefs/vault_prefs.xml"])
+            root = ET.fromstring(files["public/app/shared_prefs/vault_prefs.xml"])  # noqa: S314 -- parses challenge XML our own renderer just generated
             pref_key = variant["storage"]["pref_key"]
             value = next(
                 elem.text for elem in root.findall("string") if elem.get("name") == pref_key
@@ -257,8 +257,8 @@ class PerModeTests(unittest.TestCase):
             self.assertEqual(envelope["value"], variant["flag"], msg=f"mode={mode}")
 
     def test_blue_description_differs_materially_from_red(self) -> None:
-        red = mobile.render(_spec(mode="red"), random.Random("shared-seed"))
-        blue = mobile.render(_spec(mode="blue"), random.Random("shared-seed"))
+        red = mobile.render(_spec(mode="red"), random.Random("shared-seed"))  # noqa: S311 -- seeded RNG for deterministic challenge generation; not for secrets
+        blue = mobile.render(_spec(mode="blue"), random.Random("shared-seed"))  # noqa: S311 -- seeded RNG for deterministic challenge generation; not for secrets
         red_desc = red["public/description.md"]
         blue_desc = blue["public/description.md"]
         self.assertNotEqual(red_desc, blue_desc)
@@ -271,8 +271,8 @@ class PerModeTests(unittest.TestCase):
         self.assertNotIn("AppSec engineer", red_desc)
 
     def test_blue_private_deliverable_differs_from_red(self) -> None:
-        red = mobile.render(_spec(mode="red"), random.Random("shared-seed"))
-        blue = mobile.render(_spec(mode="blue"), random.Random("shared-seed"))
+        red = mobile.render(_spec(mode="red"), random.Random("shared-seed"))  # noqa: S311 -- seeded RNG for deterministic challenge generation; not for secrets
+        blue = mobile.render(_spec(mode="blue"), random.Random("shared-seed"))  # noqa: S311 -- seeded RNG for deterministic challenge generation; not for secrets
         red_solution = red["private/solution.md"]
         blue_solution = blue["private/solution.md"]
         self.assertNotEqual(red_solution, blue_solution)
@@ -285,7 +285,7 @@ class PerModeTests(unittest.TestCase):
 
     def test_blue_findings_table_includes_backup_exposure_row(self) -> None:
         spec = _spec(mode="blue")
-        files = mobile.render(spec, random.Random(spec.seed))
+        files = mobile.render(spec, random.Random(spec.seed))  # noqa: S311 -- seeded RNG for deterministic challenge generation; not for secrets
         solution = files["private/solution.md"]
         self.assertIn("F5", solution)
         self.assertIn("backup", solution.lower())

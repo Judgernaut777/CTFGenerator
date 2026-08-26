@@ -72,7 +72,7 @@ class ForensicsInterfaceTests(unittest.TestCase):
 class ForensicsRenderTests(unittest.TestCase):
     def test_render_emits_every_required_file_except_challenge_yaml(self) -> None:
         spec = _spec()
-        rng = random.Random(spec.seed)
+        rng = random.Random(spec.seed)  # noqa: S311 -- seeded RNG for deterministic challenge generation; not for secrets
         files = forensics.render(spec, rng, _cve_record())
 
         expected = set(forensics.REQUIRED_FILES) - {"challenge.yaml"}
@@ -83,23 +83,23 @@ class ForensicsRenderTests(unittest.TestCase):
 
     def test_no_extra_files_beyond_required_files(self) -> None:
         spec = _spec()
-        rng = random.Random(spec.seed)
+        rng = random.Random(spec.seed)  # noqa: S311 -- seeded RNG for deterministic challenge generation; not for secrets
         files = forensics.render(spec, rng, _cve_record())
         for relative_path in files:
             self.assertIn(relative_path, forensics.REQUIRED_FILES)
 
     def test_deterministic_with_cve_record(self) -> None:
         spec = _spec()
-        rng1 = random.Random(spec.seed)
-        rng2 = random.Random(spec.seed)
+        rng1 = random.Random(spec.seed)  # noqa: S311 -- seeded RNG for deterministic challenge generation; not for secrets
+        rng2 = random.Random(spec.seed)  # noqa: S311 -- seeded RNG for deterministic challenge generation; not for secrets
         files1 = forensics.render(spec, rng1, _cve_record())
         files2 = forensics.render(spec, rng2, _cve_record())
         self.assertEqual(files1, files2)
 
     def test_deterministic_without_cve_record(self) -> None:
         spec = _spec(seed="no-cve-seed")
-        rng1 = random.Random(spec.seed)
-        rng2 = random.Random(spec.seed)
+        rng1 = random.Random(spec.seed)  # noqa: S311 -- seeded RNG for deterministic challenge generation; not for secrets
+        rng2 = random.Random(spec.seed)  # noqa: S311 -- seeded RNG for deterministic challenge generation; not for secrets
         files1 = forensics.render(spec, rng1, None)
         files2 = forensics.render(spec, rng2, None)
         self.assertEqual(files1, files2)
@@ -107,8 +107,8 @@ class ForensicsRenderTests(unittest.TestCase):
     def test_deterministic_for_each_supported_mode(self) -> None:
         for mode in forensics.MODES:
             spec = _spec(mode=mode, seed=f"mode-seed-{mode}")
-            rng1 = random.Random(spec.seed)
-            rng2 = random.Random(spec.seed)
+            rng1 = random.Random(spec.seed)  # noqa: S311 -- seeded RNG for deterministic challenge generation; not for secrets
+            rng2 = random.Random(spec.seed)  # noqa: S311 -- seeded RNG for deterministic challenge generation; not for secrets
             files1 = forensics.render(spec, rng1, _cve_record())
             files2 = forensics.render(spec, rng2, _cve_record())
             self.assertEqual(files1, files2, f"render() not deterministic for mode={mode!r}")
@@ -116,13 +116,13 @@ class ForensicsRenderTests(unittest.TestCase):
     def test_different_seeds_produce_different_output(self) -> None:
         spec_a = _spec(seed="seed-alpha")
         spec_b = _spec(seed="seed-beta")
-        files_a = forensics.render(spec_a, random.Random(spec_a.seed), _cve_record())
-        files_b = forensics.render(spec_b, random.Random(spec_b.seed), _cve_record())
+        files_a = forensics.render(spec_a, random.Random(spec_a.seed), _cve_record())  # noqa: S311 -- seeded RNG for deterministic challenge generation; not for secrets
+        files_b = forensics.render(spec_b, random.Random(spec_b.seed), _cve_record())  # noqa: S311 -- seeded RNG for deterministic challenge generation; not for secrets
         self.assertNotEqual(files_a, files_b)
 
     def test_variant_json_contains_flag(self) -> None:
         spec = _spec()
-        rng = random.Random(spec.seed)
+        rng = random.Random(spec.seed)  # noqa: S311 -- seeded RNG for deterministic challenge generation; not for secrets
         files = forensics.render(spec, rng, _cve_record())
         variant_text = files["private/variant.json"]
         self.assertIn('"flag"', variant_text)
@@ -134,7 +134,7 @@ class ForensicsRenderTests(unittest.TestCase):
     def test_flag_uses_the_real_cve_not_the_decoy(self) -> None:
         record = _cve_record(cve_id="CVE-2018-13379", cwe_ids=["CWE-22"])
         spec = _spec()
-        rng = random.Random(spec.seed)
+        rng = random.Random(spec.seed)  # noqa: S311 -- seeded RNG for deterministic challenge generation; not for secrets
         files = forensics.render(spec, rng, record)
         variant_text = files["private/variant.json"]
         match = re.search(r'"flag":\s*"(ctf\{[^"]+\})"', variant_text)
@@ -143,7 +143,7 @@ class ForensicsRenderTests(unittest.TestCase):
 
     def test_access_log_has_corroborated_and_decoy_waf_alerts(self) -> None:
         spec = _spec()
-        rng = random.Random(spec.seed)
+        rng = random.Random(spec.seed)  # noqa: S311 -- seeded RNG for deterministic challenge generation; not for secrets
         files = forensics.render(spec, rng, _cve_record())
         access_log = files["public/artifacts/access.log"]
         alerts = re.findall(r'signature="(CVE-\d{4}-\d{4,})"', access_log)
@@ -152,7 +152,7 @@ class ForensicsRenderTests(unittest.TestCase):
 
     def test_auth_log_references_dropped_filename(self) -> None:
         spec = _spec()
-        rng = random.Random(spec.seed)
+        rng = random.Random(spec.seed)  # noqa: S311 -- seeded RNG for deterministic challenge generation; not for secrets
         files = forensics.render(spec, rng, _cve_record())
         variant_text = files["private/variant.json"]
         dropped_filename_match = re.search(r'"dropped_filename":\s*"([^"]+)"', variant_text)
@@ -163,7 +163,7 @@ class ForensicsRenderTests(unittest.TestCase):
 
     def test_dropped_strings_contains_sha256_matching_variant(self) -> None:
         spec = _spec()
-        rng = random.Random(spec.seed)
+        rng = random.Random(spec.seed)  # noqa: S311 -- seeded RNG for deterministic challenge generation; not for secrets
         files = forensics.render(spec, rng, _cve_record())
         variant_text = files["private/variant.json"]
         hash_match = re.search(r'"dropped_hash":\s*"([0-9a-f]{64})"', variant_text)
@@ -180,7 +180,7 @@ class ForensicsRenderTests(unittest.TestCase):
         spawning a subprocess, keeping the test hermetic and network-free.
         """
         spec = _spec()
-        rng = random.Random(spec.seed)
+        rng = random.Random(spec.seed)  # noqa: S311 -- seeded RNG for deterministic challenge generation; not for secrets
         files = forensics.render(spec, rng, _cve_record())
 
         namespace: dict[str, object] = {}
@@ -196,7 +196,7 @@ class ForensicsRenderTests(unittest.TestCase):
 
     def test_healthcheck_passes_against_rendered_artifacts(self) -> None:
         spec = _spec()
-        rng = random.Random(spec.seed)
+        rng = random.Random(spec.seed)  # noqa: S311 -- seeded RNG for deterministic challenge generation; not for secrets
         files = forensics.render(spec, rng, _cve_record())
 
         namespace: dict[str, object] = {}

@@ -44,8 +44,8 @@ from ctf_generator.application.execution.worker_job_service import (
 )
 from ctf_generator.application.worker_enrollment import ScopeError
 from ctf_generator.domain.execution.runtime import (
-    BuildBundle,
     MAX_BUILD_BUNDLE_BYTES,
+    BuildBundle,
     StackServiceImage,
 )
 from ctf_generator.domain.instances.models import (

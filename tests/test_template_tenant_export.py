@@ -38,7 +38,7 @@ class ModuleInterfaceTests(unittest.TestCase):
 class VariantJsonTests(unittest.TestCase):
     def test_variant_carries_vuln_class_and_stable_token_shape(self) -> None:
         spec = _spec()
-        files = tenant_export.render_tenant_export(spec, random.Random(spec.seed))
+        files = tenant_export.render_tenant_export(spec, random.Random(spec.seed))  # noqa: S311 -- seeded RNG for deterministic challenge generation; not for secrets
         variant = json.loads(files["private/variant.json"])
         self.assertIn(variant["vuln_class"], tenant_export.VULN_CLASSES)
         # Token/route shape is class-independent (keeps variant-uniqueness scoring
@@ -48,7 +48,7 @@ class VariantJsonTests(unittest.TestCase):
 
     def test_flag_is_consistent_and_not_in_public_prose(self) -> None:
         spec = _spec()
-        files = tenant_export.render_tenant_export(spec, random.Random(spec.seed))
+        files = tenant_export.render_tenant_export(spec, random.Random(spec.seed))  # noqa: S311 -- seeded RNG for deterministic challenge generation; not for secrets
         # The flag lives in the runtime service source + .env, never in public prose.
         env_flag = files[".env.example"].split("CTFGEN_FLAG=", 1)[1].strip()
         self.assertTrue(env_flag.startswith("ctf{"))
@@ -64,7 +64,7 @@ class AdaptiveSolverTests(unittest.TestCase):
         # any instance and any differently-classed sibling (validate-runtime +
         # cross-replay hold).
         spec = _spec()
-        files = tenant_export.render_tenant_export(spec, random.Random(spec.seed))
+        files = tenant_export.render_tenant_export(spec, random.Random(spec.seed))  # noqa: S311 -- seeded RNG for deterministic challenge generation; not for secrets
         solver = files["private/solver.py"]
         self.assertIn("_try_field_trust", solver)
         self.assertIn("_try_predictable_job_id", solver)
@@ -87,7 +87,7 @@ class PerInstanceVulnClassTests(unittest.TestCase):
     def _render_class(self, target: str):
         for i in range(200):
             spec = _spec(seed=f"vc-seed-{i}")
-            files = tenant_export.render_tenant_export(spec, random.Random(spec.seed))
+            files = tenant_export.render_tenant_export(spec, random.Random(spec.seed))  # noqa: S311 -- seeded RNG for deterministic challenge generation; not for secrets
             if json.loads(files["private/variant.json"])["vuln_class"] == target:
                 return files
         self.fail(f"no seed produced vuln_class={target}")
@@ -128,8 +128,8 @@ class PerInstanceVulnClassTests(unittest.TestCase):
 
 class DeterminismTests(unittest.TestCase):
     def test_same_seed_is_byte_identical(self) -> None:
-        a = tenant_export.render_tenant_export(_spec(), random.Random("seed-x"))
-        b = tenant_export.render_tenant_export(_spec(), random.Random("seed-x"))
+        a = tenant_export.render_tenant_export(_spec(), random.Random("seed-x"))  # noqa: S311 -- seeded RNG for deterministic challenge generation; not for secrets
+        b = tenant_export.render_tenant_export(_spec(), random.Random("seed-x"))  # noqa: S311 -- seeded RNG for deterministic challenge generation; not for secrets
         self.assertEqual(a, b)
 
 

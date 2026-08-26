@@ -1009,7 +1009,6 @@ def main(argv: list[str] | None = None) -> int:
 
     if args.command == "serve":
         from . import dashboard_server
-        from .competition_service import CompetitionService
 
         service = _build_serve_service(args)
         auth = _build_serve_auth(args)
@@ -1237,7 +1236,7 @@ def _default_serve_config():
 
     from .models import CompetitionConfig
 
-    now = _datetime.datetime.now(_datetime.timezone.utc)
+    now = _datetime.datetime.now(_datetime.UTC)
     return CompetitionConfig(
         competition_id="ctfgen-live",
         name="CTFGenerator Live",

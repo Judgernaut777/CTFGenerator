@@ -136,7 +136,7 @@ def _variant(rng: random.Random) -> Variant:
     )
 
 
-def _cve_context(spec: ChallengeSpec, cve_record: "CveRecord | None") -> str:
+def _cve_context(spec: ChallengeSpec, cve_record: CveRecord | None) -> str:
     if cve_record is not None:
         cwe = ", ".join(cve_record.cwe_ids) or "CWE-122"
         return (
@@ -160,7 +160,7 @@ def _cve_context(spec: ChallengeSpec, cve_record: "CveRecord | None") -> str:
 def render(
     spec: ChallengeSpec,
     rng: random.Random,
-    cve_record: "CveRecord | None" = None,
+    cve_record: CveRecord | None = None,
 ) -> dict[str, str]:
     if spec.mode not in MODES:
         raise ValueError(

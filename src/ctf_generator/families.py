@@ -2,8 +2,9 @@ from __future__ import annotations
 
 import random
 import re
+from collections.abc import Callable
 from dataclasses import dataclass, field
-from typing import TYPE_CHECKING, Callable, Protocol
+from typing import TYPE_CHECKING, Protocol
 
 from . import schema as _schema
 from .models import ChallengeSpec, ResponseSpec, ScenarioSpec, TriggerSpec
@@ -140,7 +141,7 @@ class FamilyRenderer(Protocol):
         self,
         spec: ChallengeSpec,
         rng: random.Random,
-        cve_record: "CveRecord | None" = None,
+        cve_record: CveRecord | None = None,
     ) -> dict[str, str | bytes]: ...
 
 
@@ -373,7 +374,7 @@ _FAMILY_SCENARIOS: dict[str, ScenarioSpec] = {
 def _render_web_business_logic_tenant_export(
     spec: ChallengeSpec,
     rng: random.Random,
-    cve_record: "CveRecord | None" = None,
+    cve_record: CveRecord | None = None,
 ) -> dict[str, str]:
     """Adapter wrapping ``render_tenant_export`` unchanged for the registry.
 

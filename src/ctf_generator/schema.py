@@ -21,8 +21,8 @@ Versioning policy (SemVer-ish, two- or three-part accepted):
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from copy import deepcopy
-from typing import Callable
 
 # --- Schema identifiers -------------------------------------------------------
 SPEC_SCHEMA = "ctfgen.challenge-spec"

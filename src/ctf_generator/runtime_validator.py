@@ -183,7 +183,7 @@ def _manifest_args(manifest: dict | None, key: str) -> list[str] | None:
 
 
 def _run(command: list[str], cwd: Path, timeout: int) -> subprocess.CompletedProcess[str]:
-    return subprocess.run(
+    return subprocess.run(  # noqa: S603 -- commands come from the validated runtime manifest, never raw user input
         command,
         cwd=cwd,
         timeout=timeout,

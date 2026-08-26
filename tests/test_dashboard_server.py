@@ -2,11 +2,10 @@ from __future__ import annotations
 
 import json
 import unittest
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from unittest import mock
 
 import ctf_generator.dashboard_server as ds
-
 from ctf_generator.competition_service import ChallengeCatalog, ChallengeMeta, CompetitionService
 from ctf_generator.dashboard_server import (
     CSRF_HEADER,
@@ -21,8 +20,8 @@ from ctf_generator.events import InMemoryEventStore
 from ctf_generator.models import ChallengeScoringConfig, CompetitionConfig
 from ctf_generator.scoring_engine import StaticPointsEngine
 
-START = datetime(2026, 1, 1, 0, 0, 0, tzinfo=timezone.utc)
-END = datetime(2026, 1, 1, 10, 0, 0, tzinfo=timezone.utc)
+START = datetime(2026, 1, 1, 0, 0, 0, tzinfo=UTC)
+END = datetime(2026, 1, 1, 10, 0, 0, tzinfo=UTC)
 
 
 class ScriptedClock:
@@ -86,8 +85,8 @@ def make_service() -> CompetitionService:
 def make_auth(**overrides) -> AuthConfig:
     kwargs = dict(
         admin_username="admin",
-        password="hunter2",
-        public_token="pub-token-fixed",
+        password="hunter2",  # noqa: S106 -- fake credential for dashboard auth harness
+        public_token="pub-token-fixed",  # noqa: S106 -- fake public token for dashboard auth harness
         session_ttl_seconds=300,
         pbkdf2_iterations=1000,  # keep tests fast; production default is higher
         salt=b"fixed-salt-16bb",
@@ -96,7 +95,7 @@ def make_auth(**overrides) -> AuthConfig:
     return AuthConfig.create(**kwargs)
 
 
-def login_request(username: str = "admin", password: str = "hunter2") -> DashboardRequest:
+def login_request(username: str = "admin", password: str = "hunter2") -> DashboardRequest:  # noqa: S107 -- fake credential default for login-request factory
     return DashboardRequest(method="POST", path="/login", body=json.dumps({"username": username, "password": password}))
 
 
@@ -136,7 +135,7 @@ class LoginTests(unittest.TestCase):
 
     def test_login_rejects_bad_password(self) -> None:
         h = Harness()
-        response = h.call(login_request(password="wrong"))
+        response = h.call(login_request(password="wrong"))  # noqa: S106 -- deliberately wrong fake credential for rejection test
 
         self.assertEqual(response.status, 401)
         self.assertEqual(h.sessions.get("tok-1"), None)
@@ -565,7 +564,7 @@ class MultiAdminTests(unittest.TestCase):
     def make_multi_auth(self) -> AuthConfig:
         return AuthConfig.from_users(
             [("admin", "hunter2"), ("root", "toor")],
-            public_token="pub-token-fixed",
+            public_token="pub-token-fixed",  # noqa: S106 -- fake public token for dashboard test
             session_ttl_seconds=300,
             pbkdf2_iterations=1000,
             salt=b"fixed-salt-16bb",
@@ -652,7 +651,7 @@ class LoginTimingTests(unittest.TestCase):
     def test_multi_admin_hashes_regardless_of_username(self) -> None:
         auth = AuthConfig.from_users(
             [("admin", "hunter2"), ("root", "toor")],
-            public_token="pub-token-fixed",
+            public_token="pub-token-fixed",  # noqa: S106 -- fake public token for dashboard test
             pbkdf2_iterations=1000,
             salt=b"fixed-salt-16bb",
         )
@@ -687,11 +686,11 @@ class LoginTimingTests(unittest.TestCase):
 
 class Pbkdf2StrengthTests(unittest.TestCase):
     def test_default_iterations_meet_owasp_2023_minimum(self) -> None:
-        auth = AuthConfig.create("admin", "pw", public_token="x")
+        auth = AuthConfig.create("admin", "pw", public_token="x")  # noqa: S106 -- fake public token for dashboard test
         self.assertGreaterEqual(auth.pbkdf2_iterations, 600_000)
 
     def test_from_users_default_iterations_meet_owasp_2023_minimum(self) -> None:
-        auth = AuthConfig.from_users([("admin", "pw")], public_token="x")
+        auth = AuthConfig.from_users([("admin", "pw")], public_token="x")  # noqa: S106 -- fake public token for dashboard test
         self.assertGreaterEqual(auth.pbkdf2_iterations, 600_000)
 
 

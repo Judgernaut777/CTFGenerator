@@ -275,7 +275,7 @@ def _build_manifests(build_root: Path, meta: BuildMeta) -> None:
 
 def write_build(
     final_dir: Path,
-    files: dict[str, "RenderedFile | str | bytes"],
+    files: dict[str, RenderedFile | str | bytes],
     *,
     meta: BuildMeta,
     force: bool = False,
@@ -291,7 +291,7 @@ def write_build(
     re-raised.
     """
     # Normalize str/bytes inputs to RenderedFile
-    norm_files: dict[str, "RenderedFile"] = {}
+    norm_files: dict[str, RenderedFile] = {}
     for rel, val in files.items():
         if isinstance(val, RenderedFile):
             norm_files[rel] = val
@@ -338,7 +338,7 @@ def write_build(
         # Collision detection is case-insensitive so two paths that differ only
         # in case (which collide on a case-insensitive filesystem) are rejected
         # rather than silently clobbering each other.
-        normalized: dict[str, "RenderedFile"] = {}
+        normalized: dict[str, RenderedFile] = {}
         seen_casefold: set[str] = set()
         for rel, rf in norm_files.items():
             norm = validate_relative_path(rel)

@@ -7,10 +7,10 @@ from ctf_generator import families
 from ctf_generator.families import (
     Family,
     ScoringHints,
-    family_names,
-    family_of,
     families_for_category,
     families_for_mode,
+    family_names,
+    family_of,
     get,
     is_registered,
     register,
@@ -72,8 +72,8 @@ class SnapshotWrapperTests(unittest.TestCase):
         spec = _spec()
         fam = get("web_business_logic_tenant_export")
 
-        direct = render_tenant_export(spec, random.Random("shared-seed"))
-        wrapped = fam.render(spec, random.Random("shared-seed"))
+        direct = render_tenant_export(spec, random.Random("shared-seed"))  # noqa: S311 -- seeded RNG for deterministic challenge generation; not for secrets
+        wrapped = fam.render(spec, random.Random("shared-seed"))  # noqa: S311 -- seeded RNG for deterministic challenge generation; not for secrets
 
         self.assertEqual(direct, wrapped)
 
@@ -81,8 +81,8 @@ class SnapshotWrapperTests(unittest.TestCase):
         spec = _spec()
         fam = get("web_business_logic_tenant_export")
 
-        direct = render_tenant_export(spec, random.Random("shared-seed"))
-        wrapped_with_cve = fam.render(spec, random.Random("shared-seed"), cve_record=object())
+        direct = render_tenant_export(spec, random.Random("shared-seed"))  # noqa: S311 -- seeded RNG for deterministic challenge generation; not for secrets
+        wrapped_with_cve = fam.render(spec, random.Random("shared-seed"), cve_record=object())  # noqa: S311 -- seeded RNG for deterministic challenge generation; not for secrets
 
         self.assertEqual(direct, wrapped_with_cve)
 
@@ -90,10 +90,10 @@ class SnapshotWrapperTests(unittest.TestCase):
         spec = _spec()
         fam = get("web_business_logic_tenant_export")
 
-        direct_a = render_tenant_export(spec, random.Random("seed-a"))
-        direct_b = render_tenant_export(spec, random.Random("seed-b"))
-        wrapped_a = fam.render(spec, random.Random("seed-a"))
-        wrapped_b = fam.render(spec, random.Random("seed-b"))
+        direct_a = render_tenant_export(spec, random.Random("seed-a"))  # noqa: S311 -- seeded RNG for deterministic challenge generation; not for secrets
+        direct_b = render_tenant_export(spec, random.Random("seed-b"))  # noqa: S311 -- seeded RNG for deterministic challenge generation; not for secrets
+        wrapped_a = fam.render(spec, random.Random("seed-a"))  # noqa: S311 -- seeded RNG for deterministic challenge generation; not for secrets
+        wrapped_b = fam.render(spec, random.Random("seed-b"))  # noqa: S311 -- seeded RNG for deterministic challenge generation; not for secrets
 
         self.assertEqual(direct_a, wrapped_a)
         self.assertEqual(direct_b, wrapped_b)

@@ -17,25 +17,25 @@ import os
 import unittest
 import uuid
 from contextlib import contextmanager
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta, timezone
 
 try:  # heavy deps are optional; guard so import never fails the host suite
     import sqlalchemy as sa
-    from sqlalchemy.engine import make_url
-    from sqlalchemy.exc import IntegrityError
     from alembic import command
     from alembic.config import Config as AlembicConfig
+    from sqlalchemy.engine import make_url
+    from sqlalchemy.exc import IntegrityError
 
     from ctf_generator.domain.challenges.models import (
         ChallengeScoringConfig,
         CompetitionConfig,
     )
-    from ctf_generator.infrastructure.database.config import DatabaseConfig
-    from ctf_generator.infrastructure.database.session import Database
-    from ctf_generator.infrastructure.database.models import Competition
     from ctf_generator.infrastructure.database.competition_repository import (
         SqlAlchemyCompetitionRepository,
     )
+    from ctf_generator.infrastructure.database.config import DatabaseConfig
+    from ctf_generator.infrastructure.database.models import Competition
+    from ctf_generator.infrastructure.database.session import Database
 
     _IMPORT_ERROR: str | None = None
 except Exception as exc:  # pragma: no cover - exercised only without the extra
@@ -75,7 +75,7 @@ def _isolated_database():
         admin.dispose()
 
 
-def _alembic_config(url) -> "AlembicConfig":
+def _alembic_config(url) -> AlembicConfig:
     cfg = AlembicConfig(os.path.join(_REPO_ROOT, "alembic.ini"))
     cfg.set_main_option("script_location", os.path.join(_REPO_ROOT, "alembic"))
     cfg.set_main_option("sqlalchemy.url", str(url))
@@ -99,8 +99,8 @@ def _migrated_database():
             db.dispose()
 
 
-def _sample_config(competition_id: str = "spring-ctf-2026") -> "CompetitionConfig":
-    start = datetime(2026, 6, 1, 9, 0, tzinfo=timezone.utc)
+def _sample_config(competition_id: str = "spring-ctf-2026") -> CompetitionConfig:
+    start = datetime(2026, 6, 1, 9, 0, tzinfo=UTC)
     return CompetitionConfig(
         competition_id=competition_id,
         name="Spring CTF 2026",
@@ -229,7 +229,7 @@ class CompetitionRepositoryIntegrationTests(unittest.TestCase):
                     SqlAlchemyCompetitionRepository(s).add(clash)
 
     def test_check_constraint_end_before_start_raises(self) -> None:
-        start = datetime(2026, 6, 1, 9, 0, tzinfo=timezone.utc)
+        start = datetime(2026, 6, 1, 9, 0, tzinfo=UTC)
         bad = CompetitionConfig(
             competition_id="bad-window",
             name="Bad Window",
@@ -275,7 +275,7 @@ class CompetitionRepositoryIntegrationTests(unittest.TestCase):
         # the server's session TimeZone GUC -- instant equality is what matters).
         self.assertEqual(fetched.start_time, start)
         self.assertEqual(
-            fetched.start_time, datetime(2026, 6, 1, 9, 0, tzinfo=timezone.utc)
+            fetched.start_time, datetime(2026, 6, 1, 9, 0, tzinfo=UTC)
         )
         # timestamptz always returns a tz-AWARE datetime (never naive); the exact
         # rendered offset depends on the session tz, so we don't pin it to UTC.

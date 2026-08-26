@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import unittest
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 
 from ctf_generator.competition_service import (
     ChallengeCatalog,
@@ -14,8 +14,8 @@ from ctf_generator.events import InMemoryEventStore
 from ctf_generator.models import ChallengeScoringConfig, CompetitionConfig
 from ctf_generator.scoring_engine import StaticPointsEngine
 
-START = datetime(2026, 1, 1, 0, 0, 0, tzinfo=timezone.utc)
-END = datetime(2026, 1, 1, 10, 0, 0, tzinfo=timezone.utc)
+START = datetime(2026, 1, 1, 0, 0, 0, tzinfo=UTC)
+END = datetime(2026, 1, 1, 10, 0, 0, tzinfo=UTC)
 
 
 class ScriptedClock:

@@ -48,14 +48,23 @@ import subprocess
 import time
 import urllib.error
 import urllib.request
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Callable, Protocol
+from typing import Protocol
 
 from .models import ScenarioSpec
-from .runtime_validator import CommandRunner, RuntimeValidationReport, _record, _run, _wait_for_health
+from .runtime_validator import (
+    CommandRunner,
+    RuntimeValidationReport,
+    _record,
+    _run,
+    _wait_for_health,
+)
 from .scenario import (
     Agent as ScenarioAgent,
+)
+from .scenario import (
     EnvironmentController,
     EventSource,
     NullEnvironmentController,
@@ -110,9 +119,9 @@ class UrllibHTTPClient:
         if json_body is not None:
             data = json.dumps(json_body).encode("utf-8")
             req_headers.setdefault("Content-Type", "application/json")
-        request = urllib.request.Request(url, data=data, headers=req_headers, method=method)
+        request = urllib.request.Request(url, data=data, headers=req_headers, method=method)  # noqa: S310 -- URL supplied by trusted eval harness configuration
         try:
-            with urllib.request.urlopen(request, timeout=timeout) as response:
+            with urllib.request.urlopen(request, timeout=timeout) as response:  # noqa: S310 -- see above; eval target URLs are operator-provided
                 body = response.read().decode("utf-8", errors="replace")
                 return HTTPResponse(
                     status=response.status, body=body, headers=dict(response.headers)
@@ -688,7 +697,7 @@ def run_agent_eval(
     eval_profile = EVAL_PROFILES[profile]
     resolved_agent = agent or eval_profile.agent_factory()
     resolved_http = http or _default_http()
-    resolved_rng = rng if rng is not None else random.Random(0)
+    resolved_rng = rng if rng is not None else random.Random(0)  # noqa: S311 -- fixed-seed RNG for reproducible eval runs; determinism required, not for secrets
     resolved_runner = runner or _run
 
     report = AgentEvalReport(profile=profile)

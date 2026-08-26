@@ -47,7 +47,7 @@ class ModuleInterfaceTests(unittest.TestCase):
 class RenderRequiredFilesTests(unittest.TestCase):
     def _assert_all_required_files_emitted(self, mode: str) -> None:
         spec = _spec(mode=mode)
-        rng = random.Random(spec.seed)
+        rng = random.Random(spec.seed)  # noqa: S311 -- seeded RNG for deterministic challenge generation; not for secrets
         files = cloud.render(spec, rng)
         for relative in cloud.REQUIRED_FILES:
             if relative == "challenge.yaml":
@@ -69,8 +69,8 @@ class RenderRequiredFilesTests(unittest.TestCase):
 class DeterminismTests(unittest.TestCase):
     def _assert_deterministic(self, mode: str) -> None:
         spec = _spec(mode=mode)
-        files_a = cloud.render(spec, random.Random(spec.seed))
-        files_b = cloud.render(spec, random.Random(spec.seed))
+        files_a = cloud.render(spec, random.Random(spec.seed))  # noqa: S311 -- seeded RNG for deterministic challenge generation; not for secrets
+        files_b = cloud.render(spec, random.Random(spec.seed))  # noqa: S311 -- seeded RNG for deterministic challenge generation; not for secrets
         self.assertEqual(files_a, files_b)
 
     def test_deterministic_red(self) -> None:
@@ -82,22 +82,22 @@ class DeterminismTests(unittest.TestCase):
     def test_different_seeds_diverge(self) -> None:
         spec_a = _spec(seed="seed-aaaa")
         spec_b = _spec(seed="seed-bbbb")
-        files_a = cloud.render(spec_a, random.Random(spec_a.seed))
-        files_b = cloud.render(spec_b, random.Random(spec_b.seed))
+        files_a = cloud.render(spec_a, random.Random(spec_a.seed))  # noqa: S311 -- seeded RNG for deterministic challenge generation; not for secrets
+        files_b = cloud.render(spec_b, random.Random(spec_b.seed))  # noqa: S311 -- seeded RNG for deterministic challenge generation; not for secrets
         self.assertNotEqual(files_a["private/variant.json"], files_b["private/variant.json"])
 
 
 class VariantContentTests(unittest.TestCase):
     def test_variant_json_contains_flag(self) -> None:
         spec = _spec(mode="red")
-        files = cloud.render(spec, random.Random(spec.seed))
+        files = cloud.render(spec, random.Random(spec.seed))  # noqa: S311 -- seeded RNG for deterministic challenge generation; not for secrets
         variant_text = files["private/variant.json"]
         self.assertIn('"flag"', variant_text)
         self.assertIn("ctf{", variant_text)
 
     def test_variant_json_has_routes_and_tokens(self) -> None:
         spec = _spec(mode="red")
-        files = cloud.render(spec, random.Random(spec.seed))
+        files = cloud.render(spec, random.Random(spec.seed))  # noqa: S311 -- seeded RNG for deterministic challenge generation; not for secrets
         variant_text = files["private/variant.json"]
         self.assertIn('"routes"', variant_text)
         self.assertIn('"tokens"', variant_text)
@@ -105,7 +105,7 @@ class VariantContentTests(unittest.TestCase):
 
     def test_compose_has_all_markers(self) -> None:
         spec = _spec(mode="red")
-        files = cloud.render(spec, random.Random(spec.seed))
+        files = cloud.render(spec, random.Random(spec.seed))  # noqa: S311 -- seeded RNG for deterministic challenge generation; not for secrets
         compose = files["docker-compose.yml"]
         for marker in cloud.COMPOSE_MARKERS:
             self.assertIn(marker, compose)
@@ -113,14 +113,14 @@ class VariantContentTests(unittest.TestCase):
     def test_purple_detection_rule_enabled_red_is_not(self) -> None:
         spec_red = _spec(mode="red")
         spec_purple = _spec(mode="purple")
-        files_red = cloud.render(spec_red, random.Random(spec_red.seed))
-        files_purple = cloud.render(spec_purple, random.Random(spec_purple.seed))
+        files_red = cloud.render(spec_red, random.Random(spec_red.seed))  # noqa: S311 -- seeded RNG for deterministic challenge generation; not for secrets
+        files_purple = cloud.render(spec_purple, random.Random(spec_purple.seed))  # noqa: S311 -- seeded RNG for deterministic challenge generation; not for secrets
         self.assertIn("enabled: false", files_red["detection/ssrf_egress_rule.yaml"])
         self.assertIn("enabled: true", files_purple["detection/ssrf_egress_rule.yaml"])
 
     def test_solver_and_healthcheck_use_stdlib_only(self) -> None:
         spec = _spec(mode="red")
-        files = cloud.render(spec, random.Random(spec.seed))
+        files = cloud.render(spec, random.Random(spec.seed))  # noqa: S311 -- seeded RNG for deterministic challenge generation; not for secrets
         for path in ("private/solver.py", "tests/healthcheck.py"):
             text = files[path]
             self.assertNotIn("import requests", text)
@@ -132,7 +132,7 @@ class PerModeDivergenceTests(unittest.TestCase):
 
     def _render(self, mode: str) -> dict[str, str]:
         spec = _spec(mode=mode)
-        return cloud.render(spec, random.Random(spec.seed))
+        return cloud.render(spec, random.Random(spec.seed))  # noqa: S311 -- seeded RNG for deterministic challenge generation; not for secrets
 
     def test_each_mode_renders_and_emits_all_required_files(self) -> None:
         for mode in cloud.MODES:
@@ -146,8 +146,8 @@ class PerModeDivergenceTests(unittest.TestCase):
     def test_each_mode_is_deterministic(self) -> None:
         for mode in cloud.MODES:
             spec = _spec(mode=mode)
-            files_a = cloud.render(spec, random.Random(spec.seed))
-            files_b = cloud.render(spec, random.Random(spec.seed))
+            files_a = cloud.render(spec, random.Random(spec.seed))  # noqa: S311 -- seeded RNG for deterministic challenge generation; not for secrets
+            files_b = cloud.render(spec, random.Random(spec.seed))  # noqa: S311 -- seeded RNG for deterministic challenge generation; not for secrets
             self.assertEqual(files_a, files_b, f"non-deterministic for mode={mode}")
 
     def test_purple_description_differs_from_red(self) -> None:

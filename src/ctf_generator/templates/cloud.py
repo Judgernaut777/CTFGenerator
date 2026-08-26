@@ -106,7 +106,7 @@ class Variant:
 def render(
     spec: ChallengeSpec,
     rng: random.Random,
-    cve_record: "CveRecord | None" = None,
+    cve_record: CveRecord | None = None,
 ) -> dict[str, str]:
     variant = _variant(rng)
     object_path = f"{variant.bucket}/{variant.object_key}"
@@ -447,7 +447,7 @@ if __name__ == "__main__":
 '''
 
 
-def _description(spec: ChallengeSpec, v: Variant, cve_record: "CveRecord | None") -> str:
+def _description(spec: ChallengeSpec, v: Variant, cve_record: CveRecord | None) -> str:
     cve_paragraph = ""
     if cve_record is not None:
         cve_paragraph = (

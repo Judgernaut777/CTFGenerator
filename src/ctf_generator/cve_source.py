@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import json
 import time
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Protocol
 
@@ -837,7 +837,7 @@ class NvdFetcher(Protocol):
 def _default_nvd_fetcher(url: str, headers: dict[str, str], timeout: int) -> bytes:
     import urllib.request
 
-    request = urllib.request.Request(url, headers=headers)
+    request = urllib.request.Request(url, headers=headers)  # noqa: S310 -- URL originates from pinned NVD API config, https only
     with urllib.request.urlopen(request, timeout=timeout) as response:  # noqa: S310
         return response.read()
 

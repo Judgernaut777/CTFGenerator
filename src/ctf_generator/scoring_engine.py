@@ -11,7 +11,7 @@ unchanged.
 
 from __future__ import annotations
 
-from .domain.scoring.scoring_engine import (
+from .domain.scoring.scoring_engine import (  # noqa: F401 -- private names are intentional re-exports for backward compatibility
     _DEFAULT_ENGINE_NAME,
     _REGISTRY,
     _VALID_DECAY_FUNCTIONS,
