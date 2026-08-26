@@ -21,7 +21,6 @@ from __future__ import annotations
 import os
 import unittest
 import uuid
-from collections import Counter
 from contextlib import contextmanager
 
 try:
@@ -49,40 +48,6 @@ _SKIP_REASON = (
     else "CTFGEN_TEST_DATABASE_URL not set (needs a running PostgreSQL)"
 )
 _ENABLED = _IMPORT_ERROR is None and bool(_TEST_URL)
-
-
-def _constraint_signature(constraint):
-    """A migration-drift signature independent of generated constraint names."""
-    columns = tuple(sorted(column.name for column in getattr(constraint, "columns", ())))
-    sqltext = str(getattr(constraint, "sqltext", ""))
-    elements = tuple(
-        sorted(str(element.target_fullname) for element in getattr(constraint, "elements", ()))
-    )
-    table = getattr(getattr(constraint, "table", None), "name", "")
-    return type(constraint).__name__, table, columns, sqltext, elements
-
-
-def _without_equivalent_constraint_renames(diffs):
-    """Drop paired add/remove changes differing only in generated names.
-
-    SQLAlchemy 2.0.52 reports these renames while PostgreSQL's actual constraint
-    semantics are unchanged. All non-constraint and unpaired constraint diffs
-    remain failures.
-    """
-    removed = Counter(
-        _constraint_signature(item[1]) for item in diffs if item[0] == "remove_constraint"
-    )
-    added = Counter(_constraint_signature(item[1]) for item in diffs if item[0] == "add_constraint")
-    equivalent = removed & added
-    kept = []
-    for item in diffs:
-        if item[0] in {"remove_constraint", "add_constraint"}:
-            signature = _constraint_signature(item[1])
-            if equivalent[signature]:
-                equivalent[signature] -= 1
-                continue
-        kept.append(item)
-    return kept
 
 
 @contextmanager
@@ -128,11 +93,7 @@ class MigrationDriftTests(unittest.TestCase):
                     diffs = compare_metadata(ctx, Base.metadata)
             finally:
                 engine.dispose()
-        self.assertEqual(
-            _without_equivalent_constraint_renames(diffs),
-            [],
-            f"unexpected schema drift: {diffs!r}",
-        )
+        self.assertEqual(diffs, [], f"unexpected schema drift: {diffs!r}")
 
     def test_full_downgrade_leaves_clean_database(self) -> None:
         with _isolated_database() as url:
