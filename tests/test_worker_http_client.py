@@ -153,9 +153,7 @@ def _migrated_database():
 
 def _enroll(db, name=_WORKER, *, caps=_CAPS, fresh=True, scopes=None) -> str:
     enrollment = WorkerEnrollmentService(db)
-    enrollment.register_worker(
-        Worker(name, "docker-rootless", ("x86_64",), caps, 4, "1.0.0")
-    )
+    enrollment.register_worker(Worker(name, "docker-rootless", ("x86_64",), caps, 4, "1.0.0"))
     now = _now()
     issued = (
         enrollment.approve_worker(name, now)
@@ -222,7 +220,8 @@ def _seed_instance(db, *, assigned, state="starting") -> str:
         if first_time:
             SqlAlchemyCompetitionRepository(s).add(
                 CompetitionConfig(
-                    competition_id=_CID, name="Cup",
+                    competition_id=_CID,
+                    name="Cup",
                     start_time=now - timedelta(hours=1),
                     end_time=now + timedelta(hours=47),
                 )
@@ -233,9 +232,14 @@ def _seed_instance(db, *, assigned, state="starting") -> str:
             )
             SqlAlchemyChallengeVersionRepository(s).add(
                 ChallengeVersion(
-                    definition_slug="sqli", version_no=1, state="draft",
-                    family_version="1.0", seed="s", spec_sha256="h1",
-                    spec={"t": 1}, spec_version="1.0",
+                    definition_slug="sqli",
+                    version_no=1,
+                    state="draft",
+                    family_version="1.0",
+                    seed="s",
+                    spec_sha256="h1",
+                    spec={"t": 1},
+                    spec_version="1.0",
                 )
             )
     if first_time:
@@ -245,9 +249,14 @@ def _seed_instance(db, *, assigned, state="starting") -> str:
     with db.session_scope() as s:
         SqlAlchemyInstanceRepository(s).add(
             Instance(
-                instance_id=iid, competition_id=_CID, team_name="Red",
-                definition_slug="sqli", version_no=1, state=state,
-                desired_state="active", assigned_worker=assigned,
+                instance_id=iid,
+                competition_id=_CID,
+                team_name="Red",
+                definition_slug="sqli",
+                version_no=1,
+                state=state,
+                desired_state="active",
+                assigned_worker=assigned,
                 image_ref="registry.example/sqli@sha256:abc",
                 expires_at=now + timedelta(hours=1),
             ),
@@ -262,9 +271,7 @@ _INSTANCE_IMAGE = "registry.example/sqli@sha256:abc"
 def _seed_build_image(db, *, image_ref=_INSTANCE_IMAGE, digest, bundle="bundle-1") -> None:
     """Record a built image for the seeded sqli v1, keyed to the instance's ref."""
     with db.session_scope() as s:
-        SqlAlchemyChallengeBuildImageRepository(s).add(
-            "sqli", 1, image_ref, digest, bundle, _now()
-        )
+        SqlAlchemyChallengeBuildImageRepository(s).add("sqli", 1, image_ref, digest, bundle, _now())
 
 
 def _seed_stack(db, *, primary_ref=_INSTANCE_IMAGE, bundle="bundle-stack-1") -> None:
@@ -272,15 +279,28 @@ def _seed_stack(db, *, primary_ref=_INSTANCE_IMAGE, bundle="bundle-stack-1") -> 
     with db.session_scope() as s:
         repo = SqlAlchemyChallengeBuildStackImageRepository(s)
         repo.add_service(
-            "sqli", 1, service_name="edge", image_ref=primary_ref,
-            image_digest="sha256:" + "ee" * 32, bundle_sha256=bundle,
-            depends_on=("internal",), expose=("8080",), is_primary=True, now=_now(),
+            "sqli",
+            1,
+            service_name="edge",
+            image_ref=primary_ref,
+            image_digest="sha256:" + "ee" * 32,
+            bundle_sha256=bundle,
+            depends_on=("internal",),
+            expose=("8080",),
+            is_primary=True,
+            now=_now(),
         )
         repo.add_service(
-            "sqli", 1, service_name="internal",
+            "sqli",
+            1,
+            service_name="internal",
             image_ref="registry.example/internal@sha256:def",
-            image_digest="sha256:" + "11" * 32, bundle_sha256=bundle,
-            depends_on=(), expose=("9443",), is_primary=False, now=_now(),
+            image_digest="sha256:" + "11" * 32,
+            bundle_sha256=bundle,
+            depends_on=(),
+            expose=("9443",),
+            is_primary=False,
+            now=_now(),
         )
 
 
@@ -388,9 +408,7 @@ class HttpClientRoundTripTests(unittest.TestCase):
             client = _http_client(db, token)
             lease = client.claim(token, 60, _now())
             client.start(token, job_id, lease.lease_token, _now())
-            self.assertFalse(
-                client.heartbeat(token, job_id, lease.lease_token, 60, _now())
-            )
+            self.assertFalse(client.heartbeat(token, job_id, lease.lease_token, 60, _now()))
             client.complete(token, job_id, lease.lease_token, {"ok": True}, _now())
             with db.session_scope() as s:
                 self.assertEqual(SqlAlchemyJobQueue(s).get(job_id).status, "succeeded")
@@ -420,8 +438,12 @@ class HttpClientRoundTripTests(unittest.TestCase):
             now = _now()
             client.report_health(
                 HealthObservation(
-                    instance_id=iid, observed_state="starting", healthy=False,
-                    worker=_WORKER, generation=1, observed_at=now,
+                    instance_id=iid,
+                    observed_state="starting",
+                    healthy=False,
+                    worker=_WORKER,
+                    generation=1,
+                    observed_at=now,
                 ),
                 now,
             )
@@ -429,8 +451,9 @@ class HttpClientRoundTripTests(unittest.TestCase):
                 RuntimeResource(iid, "container", "c-1", _WORKER, generation=1), now
             )
             client.report_endpoint(
-                InstanceEndpoint(iid, "web", "10.0.0.2", 8080, "tcp",
-                                 "tcp://10.0.0.2:8080", internal=True),
+                InstanceEndpoint(
+                    iid, "web", "10.0.0.2", 8080, "tcp", "tcp://10.0.0.2:8080", internal=True
+                ),
                 now,
             )
             client.transition_instance(iid, "healthy", reason="up", now=now)
@@ -451,9 +474,7 @@ class HttpClientRoundTripTests(unittest.TestCase):
             self.assertEqual(instance.instance_id, iid)
             self.assertEqual(instance.assigned_worker, _WORKER)
             with db.session_scope() as s:
-                self.assertEqual(
-                    SqlAlchemyInstanceRepository(s).get(iid).assigned_worker, _WORKER
-                )
+                self.assertEqual(SqlAlchemyInstanceRepository(s).get(iid).assigned_worker, _WORKER)
 
 
 @unittest.skipUnless(_ENABLED, _SKIP_REASON)
@@ -498,8 +519,12 @@ class HttpClientErrorMappingTests(unittest.TestCase):
             with self.assertRaises(ScopeError):
                 client.report_health(
                     HealthObservation(
-                        instance_id=iid, observed_state="healthy", healthy=True,
-                        worker=_WORKER, generation=1, observed_at=now,
+                        instance_id=iid,
+                        observed_state="healthy",
+                        healthy=True,
+                        worker=_WORKER,
+                        generation=1,
+                        observed_at=now,
                     ),
                     now,
                 )
@@ -514,8 +539,12 @@ class HttpClientErrorMappingTests(unittest.TestCase):
             with self.assertRaises(InstanceOwnershipError):
                 client.report_health(
                     HealthObservation(
-                        instance_id=iid, observed_state="healthy", healthy=True,
-                        worker=_WORKER, generation=1, observed_at=now,
+                        instance_id=iid,
+                        observed_state="healthy",
+                        healthy=True,
+                        worker=_WORKER,
+                        generation=1,
+                        observed_at=now,
                     ),
                     now,
                 )
@@ -531,9 +560,7 @@ class HttpClientErrorMappingTests(unittest.TestCase):
                 client.replace_instance(iid, _now())
             # The ownership refusal left the instance assigned to the other worker.
             with db.session_scope() as s:
-                self.assertEqual(
-                    SqlAlchemyInstanceRepository(s).get(iid).assigned_worker, _OTHER
-                )
+                self.assertEqual(SqlAlchemyInstanceRepository(s).get(iid).assigned_worker, _OTHER)
 
     def test_wrong_lease_token_maps_to_lookup_error(self) -> None:
         with _migrated_database() as db:
@@ -584,8 +611,10 @@ class HttpVsLocalBehaviorEquivalenceTests(unittest.TestCase):
             local = LocalControlPlaneClient(
                 jobs=WorkerJobService(db, enrollment),
                 instances=WorkerInstanceService(lifecycle, enrollment),
-                lifecycle=lifecycle, scheduling=scheduling,
-                token=token, architecture="x86_64",
+                lifecycle=lifecycle,
+                scheduling=scheduling,
+                token=token,
+                architecture="x86_64",
             )
             local_claimed = self._run_lifecycle(local, token, job_id)
             with db.session_scope() as s:

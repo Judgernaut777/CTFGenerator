@@ -43,9 +43,7 @@ def _canonical_payload_hash(payload) -> str:
     """Stable sha256 of a payload mapping (sorted keys, compact separators) so
     two logically-identical payloads hash equal regardless of key order."""
     return hashlib.sha256(
-        json.dumps(dict(payload), sort_keys=True, separators=(",", ":")).encode(
-            "utf-8"
-        )
+        json.dumps(dict(payload), sort_keys=True, separators=(",", ":")).encode("utf-8")
     ).hexdigest()
 
 
@@ -60,9 +58,7 @@ class JobService:
         self._database = database
         self._queue_factory = queue_factory
 
-    def enqueue_idempotent(
-        self, job: Job, now: datetime | None = None
-    ) -> tuple[Job, bool]:
+    def enqueue_idempotent(self, job: Job, now: datetime | None = None) -> tuple[Job, bool]:
         """Enqueue ``job``, collapsing a duplicate ``idempotency_key`` to the
         existing row. Returns ``(job, created)`` -- ``created`` is False when
         an earlier enqueue won (retries and API double-submits collapse to
@@ -75,9 +71,7 @@ class JobService:
             return persisted, True
         except IntegrityError:
             with self._database.session_scope() as session:
-                existing = self._queue_factory(session).get_by_idempotency_key(
-                    job.idempotency_key
-                )
+                existing = self._queue_factory(session).get_by_idempotency_key(job.idempotency_key)
             if existing is None:  # pragma: no cover - a rolled-back rival
                 raise
             if not self._same_request(existing, job):

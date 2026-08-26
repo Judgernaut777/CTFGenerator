@@ -54,9 +54,7 @@ class TeamTests(unittest.TestCase):
 
 class MembershipTests(unittest.TestCase):
     def test_valid_teamed(self) -> None:
-        m = Membership(
-            user_email="a@x.io", competition_id="c", role="captain", team_name="Red"
-        )
+        m = Membership(user_email="a@x.io", competition_id="c", role="captain", team_name="Red")
         self.assertEqual(m.role, "captain")
         self.assertEqual(m.team_name, "Red")
 
@@ -82,9 +80,7 @@ class MembershipTests(unittest.TestCase):
     def test_empty_team_name_is_rejected_not_treated_as_unteamed(self) -> None:
         # Unteamed is None, never "" -- an empty string is a programming error.
         with self.assertRaises(ValueError):
-            Membership(
-                user_email="a@x.io", competition_id="c", role="player", team_name=""
-            )
+            Membership(user_email="a@x.io", competition_id="c", role="player", team_name="")
 
 
 if __name__ == "__main__":

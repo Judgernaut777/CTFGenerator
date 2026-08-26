@@ -25,7 +25,7 @@ names, challenge ids, scores -- go through :func:`escape` on the server and
 from __future__ import annotations
 
 import html
-from typing import Iterable, Mapping
+from collections.abc import Iterable, Mapping
 
 
 def escape(value: object) -> str:

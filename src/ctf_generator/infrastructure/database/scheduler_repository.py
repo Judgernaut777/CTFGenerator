@@ -106,9 +106,7 @@ class SqlAlchemyScheduler:
             # architecture membership: architectures @> ARRAY[arch]
             WorkerRow.architectures.contains(_text_array([requirements.architecture])),
             # capability superset: capabilities @> required_capabilities
-            WorkerRow.capabilities.contains(
-                _text_array(requirements.required_capabilities)
-            ),
+            WorkerRow.capabilities.contains(_text_array(requirements.required_capabilities)),
             free > 0,
         )
         if requirements.runtime_type is not None:

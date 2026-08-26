@@ -106,7 +106,7 @@ class Variant:
 def render(
     spec: ChallengeSpec,
     rng: random.Random,
-    cve_record: "CveRecord | None" = None,
+    cve_record: CveRecord | None = None,
 ) -> dict[str, str]:
     variant = _variant(rng)
     object_path = f"{variant.bucket}/{variant.object_key}"
@@ -185,34 +185,37 @@ def _token_hex(rng: random.Random, byte_count: int) -> str:
 
 
 def _variant_json(spec: ChallengeSpec, v: Variant, object_path: str) -> str:
-    return json.dumps(
-        {
-            "meta": spec.meta_mapping(),
-            "family": FAMILY_NAME,
-            "flag": v.flag,
-            "routes": {
-                "fetch": v.fetch_route,
-                "metadata_role_list": "/latest/meta-data/iam/security-credentials/",
-                "metadata_role_credentials": (
-                    f"/latest/meta-data/iam/security-credentials/{v.role_name}"
-                ),
-                "storage_list": "/internal/objects",
-                "storage_object": f"/internal/objects/{object_path}",
+    return (
+        json.dumps(
+            {
+                "meta": spec.meta_mapping(),
+                "family": FAMILY_NAME,
+                "flag": v.flag,
+                "routes": {
+                    "fetch": v.fetch_route,
+                    "metadata_role_list": "/latest/meta-data/iam/security-credentials/",
+                    "metadata_role_credentials": (
+                        f"/latest/meta-data/iam/security-credentials/{v.role_name}"
+                    ),
+                    "storage_list": "/internal/objects",
+                    "storage_object": f"/internal/objects/{object_path}",
+                },
+                "tokens": {
+                    "role_name": v.role_name,
+                    "access_key_id": v.access_key_id,
+                    "secret_key": v.secret_key,
+                    "session_token": v.session_token,
+                    "bucket": v.bucket,
+                    "object_key": v.object_key,
+                    "metadata_ip": METADATA_IP,
+                    "rule_id": v.rule_id,
+                },
             },
-            "tokens": {
-                "role_name": v.role_name,
-                "access_key_id": v.access_key_id,
-                "secret_key": v.secret_key,
-                "session_token": v.session_token,
-                "bucket": v.bucket,
-                "object_key": v.object_key,
-                "metadata_ip": METADATA_IP,
-                "rule_id": v.rule_id,
-            },
-        },
-        indent=2,
-        sort_keys=True,
-    ) + "\n"
+            indent=2,
+            sort_keys=True,
+        )
+        + "\n"
+    )
 
 
 def _compose() -> str:
@@ -447,7 +450,7 @@ if __name__ == "__main__":
 '''
 
 
-def _description(spec: ChallengeSpec, v: Variant, cve_record: "CveRecord | None") -> str:
+def _description(spec: ChallengeSpec, v: Variant, cve_record: CveRecord | None) -> str:
     cve_paragraph = ""
     if cve_record is not None:
         cve_paragraph = (
@@ -533,7 +536,8 @@ write-up (or an equivalent structured answer covering the same three
 points) as the private deliverable.
 """
 
-    return f"""# Private Solution
+    return (
+        f"""# Private Solution
 
 The `api` service fetches any attacker-supplied URL and only checks a small
 hostname denylist (`localhost`, `127.0.0.1`, `0.0.0.0`). It never blocks
@@ -559,11 +563,13 @@ Solve path:
 This teaches SSRF-to-cloud-credential-theft: input validation on the fetch
 service is necessary but not sufficient without also constraining what the
 service's own network identity can reach.
-""" + purple_deliverable
+"""
+        + purple_deliverable
+    )
 
 
 def _solver(v: Variant, object_path: str) -> str:
-    return f'''from __future__ import annotations
+    return f"""from __future__ import annotations
 
 import argparse
 import json
@@ -627,7 +633,7 @@ def main():
 
 if __name__ == "__main__":
     sys.exit(main())
-'''
+"""
 
 
 def _detection_rule(spec: ChallengeSpec, v: Variant) -> str:
@@ -657,7 +663,7 @@ def _detection_rule(spec: ChallengeSpec, v: Variant) -> str:
 
 
 def _healthcheck() -> str:
-    return '''from __future__ import annotations
+    return """from __future__ import annotations
 
 import argparse
 import json
@@ -681,11 +687,11 @@ def main():
 
 if __name__ == "__main__":
     sys.exit(main())
-'''
+"""
 
 
 def _validate_solver() -> str:
-    return '''from __future__ import annotations
+    return """from __future__ import annotations
 
 from pathlib import Path
 
@@ -695,7 +701,7 @@ def test_solver_mentions_flag_pattern():
     assert "ctf\\\\{" in solver
     assert "urllib" in solver
     assert "169.254.169.254" in solver
-'''
+"""
 
 
 def _validate_variant(v: Variant) -> str:

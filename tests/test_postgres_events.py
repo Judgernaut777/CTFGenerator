@@ -30,7 +30,7 @@ class FakeCursor:
     without touching a real database.
     """
 
-    def __init__(self, connection: "FakeConnection") -> None:
+    def __init__(self, connection: FakeConnection) -> None:
         self._connection = connection
         self.executed: list[tuple[str, tuple]] = []
         self._pending_result: list[tuple] | tuple | None = None
@@ -51,10 +51,17 @@ class FakeCursor:
                 (seq, ts, type_, team_id, challenge_id, json.loads(payload_json))
             )
             self._pending_result = (seq,)
-        elif normalized.startswith("SELECT seq, ts, type, team_id, challenge_id, payload FROM competition_events") and "WHERE seq >" in normalized:
+        elif (
+            normalized.startswith(
+                "SELECT seq, ts, type, team_id, challenge_id, payload FROM competition_events"
+            )
+            and "WHERE seq >" in normalized
+        ):
             (since_seq,) = params
             self._pending_result = [row for row in self._connection.rows if row[0] > since_seq]
-        elif normalized.startswith("SELECT seq, ts, type, team_id, challenge_id, payload FROM competition_events"):
+        elif normalized.startswith(
+            "SELECT seq, ts, type, team_id, challenge_id, payload FROM competition_events"
+        ):
             self._pending_result = list(self._connection.rows)
         elif normalized.startswith("SELECT COALESCE(MAX(seq), 0)"):
             seqs = [row[0] for row in self._connection.rows]

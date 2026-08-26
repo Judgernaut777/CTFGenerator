@@ -75,7 +75,9 @@ def build_parser() -> argparse.ArgumentParser:
         default=_DEFAULT_FAMILY,
         choices=FAMILIES,
     )
-    create.add_argument("--force", action="store_true", help="Overwrite an existing output directory")
+    create.add_argument(
+        "--force", action="store_true", help="Overwrite an existing output directory"
+    )
     create.add_argument(
         "--from-spec",
         type=Path,
@@ -232,7 +234,9 @@ def build_parser() -> argparse.ArgumentParser:
         help="Replay one challenge's solver against another challenge's live instance",
     )
     replay.add_argument("solver_dir", type=Path, help="Challenge whose solver is run")
-    replay.add_argument("target_dir", type=Path, help="Challenge whose instance is launched as the target")
+    replay.add_argument(
+        "target_dir", type=Path, help="Challenge whose instance is launched as the target"
+    )
     replay.add_argument("--base-url", default="http://127.0.0.1:8080")
     replay.add_argument("--timeout", default=90, type=int)
     replay.add_argument(
@@ -307,9 +311,7 @@ def build_parser() -> argparse.ArgumentParser:
     cve_search_parser.add_argument("--min-cvss", type=float, default=0.0)
     cve_search_parser.add_argument("--keyword", default=None)
     cve_search_parser.add_argument("--limit", type=int, default=20)
-    cve_search_parser.add_argument(
-        "--source", default="snapshot", choices=["snapshot", "nvd"]
-    )
+    cve_search_parser.add_argument("--source", default="snapshot", choices=["snapshot", "nvd"])
     cve_search_parser.add_argument("--cache-dir", type=Path, default=None)
 
     cve_show_parser = subparsers.add_parser(
@@ -317,9 +319,7 @@ def build_parser() -> argparse.ArgumentParser:
         help="Show a single CVE record",
     )
     cve_show_parser.add_argument("cve_id")
-    cve_show_parser.add_argument(
-        "--source", default="snapshot", choices=["snapshot", "nvd"]
-    )
+    cve_show_parser.add_argument("--source", default="snapshot", choices=["snapshot", "nvd"])
     cve_show_parser.add_argument("--cache-dir", type=Path, default=None)
 
     subparsers.add_parser(
@@ -343,9 +343,7 @@ def build_parser() -> argparse.ArgumentParser:
     create_from_cve_parser.add_argument("--family", default=None, choices=FAMILIES)
     create_from_cve_parser.add_argument("--title", default=None)
     create_from_cve_parser.add_argument("--force", action="store_true")
-    create_from_cve_parser.add_argument(
-        "--source", default="snapshot", choices=["snapshot", "nvd"]
-    )
+    create_from_cve_parser.add_argument("--source", default="snapshot", choices=["snapshot", "nvd"])
     create_from_cve_parser.add_argument(
         "--report-dir",
         type=Path,
@@ -639,9 +637,7 @@ def main(argv: list[str] | None = None) -> int:
         if args.mode != "red" or args.cve_refs:
             import dataclasses
 
-            generated = dataclasses.replace(
-                generated, mode=args.mode, cve_refs=list(args.cve_refs)
-            )
+            generated = dataclasses.replace(generated, mode=args.mode, cve_refs=list(args.cve_refs))
         errors = spec_generator.validate_spec(generated)
         if errors:
             print("Spec validation failed:")
@@ -809,7 +805,9 @@ def main(argv: list[str] | None = None) -> int:
             limit=args.limit,
         )
         for record in records:
-            print(f"{record.cve_id}  [{record.cvss_severity} {record.cvss_score}]  {record.category}")
+            print(
+                f"{record.cve_id}  [{record.cvss_severity} {record.cvss_score}]  {record.category}"
+            )
             print(f"    {record.description}")
         if not records:
             print("No matching CVEs found")
@@ -976,9 +974,7 @@ def main(argv: list[str] | None = None) -> int:
             )
             result = report_writer.serialize_adversarial_delta(delta_report)
             _write_cli_report(args, "eval-agent", subject, "passed", result)
-            print(
-                f"Adversarial delta for {args.challenge_dir} [{args.profile}]"
-            )
+            print(f"Adversarial delta for {args.challenge_dir} [{args.profile}]")
             print(
                 f"  baseline:    solved={delta_report.baseline.solved} "
                 f"steps={delta_report.baseline.steps}"
@@ -1009,7 +1005,6 @@ def main(argv: list[str] | None = None) -> int:
 
     if args.command == "serve":
         from . import dashboard_server
-        from .competition_service import CompetitionService
 
         service = _build_serve_service(args)
         auth = _build_serve_auth(args)
@@ -1237,7 +1232,7 @@ def _default_serve_config():
 
     from .models import CompetitionConfig
 
-    now = _datetime.datetime.now(_datetime.timezone.utc)
+    now = _datetime.datetime.now(_datetime.UTC)
     return CompetitionConfig(
         competition_id="ctfgen-live",
         name="CTFGenerator Live",
@@ -1297,7 +1292,9 @@ def _build_serve_service(args: argparse.Namespace):
         catalog = ChallengeCatalog()
 
     config_path = getattr(args, "config", None)
-    config = load_competition_config(config_path) if config_path is not None else _default_serve_config()
+    config = (
+        load_competition_config(config_path) if config_path is not None else _default_serve_config()
+    )
 
     return CompetitionService(store=store, catalog=catalog, config=config)
 
@@ -1466,8 +1463,7 @@ def _run_quickstart(output_dir: Path, seed: str) -> int:
     print("Next steps:")
     print(f"  ctfgen catalog --challenges-dir {output_dir} -o {catalog_path}")
     print(
-        "  ctfgen serve --admin-user admin --admin-password <password> "
-        f"--challenges {catalog_path}"
+        f"  ctfgen serve --admin-user admin --admin-password <password> --challenges {catalog_path}"
     )
     print(
         "  (or skip the catalog file entirely: ctfgen serve --admin-user admin "

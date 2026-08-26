@@ -4,7 +4,7 @@ import hashlib
 import json
 import re
 import subprocess
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -31,7 +31,7 @@ def git_commit(cwd: Path | None = None) -> str:
     """
     try:
         result = subprocess.run(
-            ["git", "rev-parse", "HEAD"],
+            ["git", "rev-parse", "HEAD"],  # noqa: S607 -- git is a standard tool resolved via PATH by design
             cwd=str(cwd) if cwd is not None else None,
             check=False,
             capture_output=True,
@@ -56,7 +56,7 @@ def build_report(
 ) -> dict:
     """Build the report envelope. Pure: no I/O when both injectables are given."""
     if timestamp is None:
-        timestamp = datetime.now(timezone.utc)
+        timestamp = datetime.now(UTC)
     if git_commit_value is None:
         git_commit_value = git_commit()
     return {
@@ -109,10 +109,10 @@ def _filename_timestamp(value: object) -> str:
         try:
             parsed = datetime.fromisoformat(value)
         except ValueError:
-            parsed = datetime.now(timezone.utc)
+            parsed = datetime.now(UTC)
     else:
-        parsed = datetime.now(timezone.utc)
-    return parsed.astimezone(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
+        parsed = datetime.now(UTC)
+    return parsed.astimezone(UTC).strftime("%Y%m%dT%H%M%SZ")
 
 
 def _slug(text: str) -> str:
@@ -124,18 +124,22 @@ def _slug(text: str) -> str:
 
 def _discriminator(result: dict) -> str:
     encoded = json.dumps(result, sort_keys=True, default=str).encode()
-    return hashlib.sha1(encoded).hexdigest()[:8]
+    # SHA-1 is used only as a short non-cryptographic discriminator for report
+    # filenames; no security property is claimed, so usedforsecurity=False
+    # marks it explicitly for FIPS/crypto-audit tooling.
+    # Non-crypto content discriminator for filenames.
+    return hashlib.sha1(encoded, usedforsecurity=False).hexdigest()[:8]  # nosec B324
 
 
-def serialize_validation(report: "ValidationReport") -> dict:
+def serialize_validation(report: ValidationReport) -> dict:
     return {"errors": list(report.errors), "warnings": list(report.warnings)}
 
 
-def serialize_runtime(report: "RuntimeValidationReport") -> dict:
+def serialize_runtime(report: RuntimeValidationReport) -> dict:
     return {"errors": list(report.errors), "logs": list(report.logs)}
 
 
-def serialize_siblings(report: "SiblingValidationReport") -> dict:
+def serialize_siblings(report: SiblingValidationReport) -> dict:
     return {
         "errors": list(report.errors),
         "warnings": list(report.warnings),
@@ -146,7 +150,7 @@ def serialize_siblings(report: "SiblingValidationReport") -> dict:
     }
 
 
-def serialize_replay(report: "ReplayReport") -> dict:
+def serialize_replay(report: ReplayReport) -> dict:
     return {
         "errors": list(report.errors),
         "logs": list(report.logs),
@@ -156,7 +160,7 @@ def serialize_replay(report: "ReplayReport") -> dict:
     }
 
 
-def serialize_scoreboard(snapshot: "ScoreboardSnapshot") -> dict:
+def serialize_scoreboard(snapshot: ScoreboardSnapshot) -> dict:
     return {
         "competition_id": snapshot.competition_id,
         "generated_at": snapshot.generated_at.isoformat(),
@@ -221,7 +225,7 @@ def _serialize_scenario_run_report(report) -> dict:
     }
 
 
-def serialize_agent_eval(report: "AgentEvalReport") -> dict:
+def serialize_agent_eval(report: AgentEvalReport) -> dict:
     """JSON-safe mapping for an ``agent_eval.AgentEvalReport``."""
     return {
         "profile": report.profile,
@@ -232,7 +236,7 @@ def serialize_agent_eval(report: "AgentEvalReport") -> dict:
     }
 
 
-def serialize_adversarial_delta(report: "AdversarialDeltaReport") -> dict:
+def serialize_adversarial_delta(report: AdversarialDeltaReport) -> dict:
     """JSON-safe mapping for an ``agent_eval.AdversarialDeltaReport``.
 
     Includes the ``success_dropped``/``step_delta`` derived properties

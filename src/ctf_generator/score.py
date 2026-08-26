@@ -580,7 +580,5 @@ def score_with_agent_eval(
 
     eval_component = 0.0 if solved else 100.0
     blended["agent_eval"] = agent_summary
-    blended["blended_score"] = round(
-        0.7 * float(static_mapping["total"]) + 0.3 * eval_component, 1
-    )
+    blended["blended_score"] = round(0.7 * float(static_mapping["total"]) + 0.3 * eval_component, 1)
     return blended

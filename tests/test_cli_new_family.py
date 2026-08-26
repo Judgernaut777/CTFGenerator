@@ -70,7 +70,9 @@ class ScaffoldIsLintCleanAndGeneratableTests(unittest.TestCase):
 
             module = _load_module(dest / "probe_gen_family.py", "probe_gen_family")
             # The scaffolded renderer must NOT import ctf_generator.families.
-            self.assertNotIn("import ctf_generator.families", (dest / "probe_gen_family.py").read_text())
+            self.assertNotIn(
+                "import ctf_generator.families", (dest / "probe_gen_family.py").read_text()
+            )
 
             fam = sdk.family_from_module(module)
             sdk.assert_family_ok(fam)  # lint-clean, unedited
@@ -92,8 +94,14 @@ class ScaffoldIsLintCleanAndGeneratableTests(unittest.TestCase):
             dest = Path(tmp) / "probe_modes_family"
             code, _, _ = _run(
                 [
-                    "new-family", "probe_modes_family", "--category", "network",
-                    "--modes", "red,purple", "--dest", str(dest),
+                    "new-family",
+                    "probe_modes_family",
+                    "--category",
+                    "network",
+                    "--modes",
+                    "red,purple",
+                    "--dest",
+                    str(dest),
                 ]
             )
             self.assertEqual(code, 0)
@@ -108,9 +116,7 @@ class ScaffoldNameAndPathSafetyTests(unittest.TestCase):
         for bad in ("../evil", "foo/bar", "foo\\bar", "1foo", "foo.bar", "class"):
             with self.subTest(name=bad), tempfile.TemporaryDirectory() as tmp:
                 dest = Path(tmp) / "out"
-                code, _, err = _run(
-                    ["new-family", bad, "--category", "web", "--dest", str(dest)]
-                )
+                code, _, err = _run(["new-family", bad, "--category", "web", "--dest", str(dest)])
                 self.assertNotEqual(code, 0)
                 self.assertNotEqual(err.strip(), "")  # a clean message, not a traceback
                 self.assertFalse(dest.exists(), f"{bad!r} wrote into DEST")
@@ -123,9 +129,7 @@ class ScaffoldNameAndPathSafetyTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             dest = Path(tmp) / "a_file"
             dest.write_text("i am a file\n", encoding="utf-8")
-            code, _, err = _run(
-                ["new-family", "okname", "--category", "web", "--dest", str(dest)]
-            )
+            code, _, err = _run(["new-family", "okname", "--category", "web", "--dest", str(dest)])
             self.assertNotEqual(code, 0)
             self.assertNotEqual(err.strip(), "")
             self.assertEqual(dest.read_text(encoding="utf-8"), "i am a file\n")
@@ -135,8 +139,7 @@ class ScaffoldNameAndPathSafetyTests(unittest.TestCase):
         # followed (which would write outside DEST). A DANGLING symlink also
         # bypasses an exists()-only guard, so is_symlink must catch it.
         for dangling in (True, False):
-            with self.subTest(dangling=dangling), \
-                    tempfile.TemporaryDirectory() as tmp:
+            with self.subTest(dangling=dangling), tempfile.TemporaryDirectory() as tmp:
                 outside = Path(tmp) / "OUTSIDE.py"
                 if not dangling:
                     outside.write_text("original\n", encoding="utf-8")
@@ -145,8 +148,15 @@ class ScaffoldNameAndPathSafetyTests(unittest.TestCase):
                 link = dest / "sym_family.py"
                 link.symlink_to(outside)
                 code, _, err = _run(
-                    ["new-family", "sym_family", "--category", "web",
-                     "--dest", str(dest), "--force"]
+                    [
+                        "new-family",
+                        "sym_family",
+                        "--category",
+                        "web",
+                        "--dest",
+                        str(dest),
+                        "--force",
+                    ]
                 )
                 self.assertNotEqual(code, 0, "must refuse a symlink target")
                 self.assertIn("symlink", err.lower())
@@ -166,15 +176,16 @@ class ScaffoldNameAndPathSafetyTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             dest = Path(tmp) / "probe_selftest_family"
             code, _, _ = _run(
-                ["new-family", "probe_selftest_family", "--category", "web",
-                 "--dest", str(dest)]
+                ["new-family", "probe_selftest_family", "--category", "web", "--dest", str(dest)]
             )
             self.assertEqual(code, 0)
             proc = subprocess.run(  # noqa: S603 - fixed args, our own scaffold output
                 [sys.executable, "-m", "unittest", "test_probe_selftest_family", "-v"],
                 cwd=str(dest),
-                env={"PYTHONPATH": os.pathsep.join([src, str(dest)]),
-                     "PATH": os.environ.get("PATH", "")},
+                env={
+                    "PYTHONPATH": os.pathsep.join([src, str(dest)]),
+                    "PATH": os.environ.get("PATH", ""),
+                },
                 capture_output=True,
                 text=True,
             )
@@ -184,14 +195,21 @@ class ScaffoldNameAndPathSafetyTests(unittest.TestCase):
     def test_bad_category_and_mode_exit_nonzero(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             dest = Path(tmp) / "out"
-            code, _, _ = _run(
-                ["new-family", "okname", "--category", "we b", "--dest", str(dest)]
-            )
+            code, _, _ = _run(["new-family", "okname", "--category", "we b", "--dest", str(dest)])
             self.assertNotEqual(code, 0)
             self.assertFalse(dest.exists())
 
             code, _, _ = _run(
-                ["new-family", "okname", "--category", "web", "--modes", "red,pink", "--dest", str(dest)]
+                [
+                    "new-family",
+                    "okname",
+                    "--category",
+                    "web",
+                    "--modes",
+                    "red,pink",
+                    "--dest",
+                    str(dest),
+                ]
             )
             self.assertNotEqual(code, 0)
             self.assertFalse(dest.exists())
@@ -223,7 +241,15 @@ class ScaffoldNoClobberTests(unittest.TestCase):
             module_path = dest / "probe_force_family.py"
             module_path.write_text("# stale\n", encoding="utf-8")
             code, _, _ = _run(
-                ["new-family", "probe_force_family", "--category", "web", "--dest", str(dest), "--force"]
+                [
+                    "new-family",
+                    "probe_force_family",
+                    "--category",
+                    "web",
+                    "--dest",
+                    str(dest),
+                    "--force",
+                ]
             )
             self.assertEqual(code, 0)
             self.assertIn("FAMILY_NAME", module_path.read_text(encoding="utf-8"))

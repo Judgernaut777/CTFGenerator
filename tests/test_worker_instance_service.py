@@ -39,17 +39,26 @@ _ALL_SCOPES = ("instances:report", "instances:transition")
 
 def _worker(name: str) -> Worker:
     return Worker(
-        name=name, runtime_type="docker-rootless", architectures=("aarch64",),
-        capabilities=("launch_instance",), capacity=2, version="1",
+        name=name,
+        runtime_type="docker-rootless",
+        architectures=("aarch64",),
+        capabilities=("launch_instance",),
+        capacity=2,
+        version="1",
         trust_state="trusted",
     )
 
 
 def _instance(assigned: str | None, image_ref: str | None = None) -> Instance:
     return Instance(
-        instance_id="inst-1", competition_id="cup", team_name="Red",
-        definition_slug="sql", version_no=1, state="queued",
-        assigned_worker=assigned, image_ref=image_ref,
+        instance_id="inst-1",
+        competition_id="cup",
+        team_name="Red",
+        definition_slug="sql",
+        version_no=1,
+        state="queued",
+        assigned_worker=assigned,
+        image_ref=image_ref,
     )
 
 
@@ -110,8 +119,12 @@ def _svc(*, assigned="w1", worker_name="w1", scopes=_ALL_SCOPES):
 
 def _health(worker="w1"):
     return HealthObservation(
-        instance_id="inst-1", observed_state="healthy", healthy=True,
-        worker=worker, generation=1, observed_at=_NOW,
+        instance_id="inst-1",
+        observed_state="healthy",
+        healthy=True,
+        worker=worker,
+        generation=1,
+        observed_at=_NOW,
     )
 
 
@@ -120,13 +133,12 @@ class OwnershipTests(unittest.TestCase):
     def test_owner_can_report_and_transition(self) -> None:
         svc, life = _svc(assigned="w1", worker_name="w1")
         svc.report_health("tok", _health("w1"), _NOW)
-        svc.report_runtime_resource(
-            "tok", RuntimeResource("inst-1", "container", "c1", "w1"), _NOW
-        )
+        svc.report_runtime_resource("tok", RuntimeResource("inst-1", "container", "c1", "w1"), _NOW)
         svc.report_endpoint(
             "tok",
-            InstanceEndpoint("inst-1", "port-8080", "10.0.0.2", 8080, "tcp",
-                             "tcp://10.0.0.2:8080", internal=True),
+            InstanceEndpoint(
+                "inst-1", "port-8080", "10.0.0.2", 8080, "tcp", "tcp://10.0.0.2:8080", internal=True
+            ),
             _NOW,
         )
         svc.transition_instance("tok", "inst-1", "starting", reason="up", now=_NOW)
@@ -144,25 +156,19 @@ class OwnershipTests(unittest.TestCase):
 
     def test_owner_reads_expected_image_digest(self) -> None:
         digest = "sha256:" + "ab" * 32
-        life = _FakeLifecycle(
-            instance=_instance("w1", image_ref="img:v1"), image_digest=digest
-        )
+        life = _FakeLifecycle(instance=_instance("w1", image_ref="img:v1"), image_digest=digest)
         svc = WorkerInstanceService(life, _FakeEnrollment(worker_name="w1"))
         self.assertEqual(svc.expected_image_digest("tok", "inst-1", _NOW), digest)
 
     def test_expected_image_digest_is_none_without_an_image_ref(self) -> None:
-        life = _FakeLifecycle(
-            instance=_instance("w1", image_ref=None), image_digest="sha256:x"
-        )
+        life = _FakeLifecycle(instance=_instance("w1", image_ref=None), image_digest="sha256:x")
         svc = WorkerInstanceService(life, _FakeEnrollment(worker_name="w1"))
         self.assertIsNone(svc.expected_image_digest("tok", "inst-1", _NOW))
 
     def test_non_owner_cannot_read_expected_image_digest(self) -> None:
         # Ownership-gated exactly like get_owned_instance: an instance owned by w2
         # is unreadable by w1's credential.
-        life = _FakeLifecycle(
-            instance=_instance("w2", image_ref="img:v1"), image_digest="sha256:x"
-        )
+        life = _FakeLifecycle(instance=_instance("w2", image_ref="img:v1"), image_digest="sha256:x")
         svc = WorkerInstanceService(life, _FakeEnrollment(worker_name="w1"))
         with self.assertRaises(InstanceOwnershipError):
             svc.expected_image_digest("tok", "inst-1", _NOW)
@@ -170,12 +176,8 @@ class OwnershipTests(unittest.TestCase):
     def test_owner_reads_launch_stack_services(self) -> None:
         from ctf_generator.domain.execution.runtime import StackServiceImage
 
-        stack = (
-            StackServiceImage("edge", "ir", "sha256:e", is_primary=True),
-        )
-        life = _FakeLifecycle(
-            instance=_instance("w1", image_ref="ir"), stack=stack
-        )
+        stack = (StackServiceImage("edge", "ir", "sha256:e", is_primary=True),)
+        life = _FakeLifecycle(instance=_instance("w1", image_ref="ir"), stack=stack)
         svc = WorkerInstanceService(life, _FakeEnrollment(worker_name="w1"))
         self.assertEqual(svc.launch_stack_services("tok", "inst-1", _NOW), stack)
 
@@ -197,8 +199,15 @@ class OwnershipTests(unittest.TestCase):
         with self.assertRaises(InstanceOwnershipError):
             svc.report_endpoint(
                 "tok",
-                InstanceEndpoint("inst-1", "port-8080", "10.0.0.2", 8080, "tcp",
-                                 "tcp://10.0.0.2:8080", internal=True),
+                InstanceEndpoint(
+                    "inst-1",
+                    "port-8080",
+                    "10.0.0.2",
+                    8080,
+                    "tcp",
+                    "tcp://10.0.0.2:8080",
+                    internal=True,
+                ),
                 _NOW,
             )
         self.assertEqual(life.endpoints, [])

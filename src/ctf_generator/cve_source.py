@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import json
 import time
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Protocol
 
@@ -141,9 +141,7 @@ def _filter_records(
     keyword: str | None,
     limit: int,
 ) -> list[CveRecord]:
-    matched = [
-        r for r in records if _matches(r, category, min_cvss, published_after, keyword)
-    ]
+    matched = [r for r in records if _matches(r, category, min_cvss, published_after, keyword)]
     return matched[:limit]
 
 
@@ -252,7 +250,9 @@ _BUNDLED_RECORDS: tuple[CveRecord, ...] = (
         cvss_severity="HIGH",
         cwe_ids=["CWE-284"],
         category="scada_ics",
-        affected_products=["Gigabyte AORUS/gaming motherboard driver (also affects SCADA host drivers)"],
+        affected_products=[
+            "Gigabyte AORUS/gaming motherboard driver (also affects SCADA host drivers)"
+        ],
         description=(
             "An unsigned Gigabyte driver used by numerous ICS/SCADA vendor "
             "installers allows an attacker-controlled input buffer to be written "
@@ -470,7 +470,10 @@ _BUNDLED_RECORDS: tuple[CveRecord, ...] = (
         cvss_severity="CRITICAL",
         cwe_ids=["CWE-94"],
         category="web",
-        affected_products=["Spring Framework 9.0.0 before 9.0.1", "Spring Framework 8.0.0 before 8.0.1"],
+        affected_products=[
+            "Spring Framework 9.0.0 before 9.0.1",
+            "Spring Framework 8.0.0 before 8.0.1",
+        ],
         description=(
             "Spring Framework allows unauthenticated remote code execution via "
             "specially crafted data binding expressions in Spring Cloud Config, "
@@ -490,7 +493,10 @@ _BUNDLED_RECORDS: tuple[CveRecord, ...] = (
         cvss_severity="HIGH",
         cwe_ids=["CWE-640"],
         category="web",
-        affected_products=["GitLab Community Edition before 13.8.8", "GitLab Enterprise Edition before 13.9.8"],
+        affected_products=[
+            "GitLab Community Edition before 13.8.8",
+            "GitLab Enterprise Edition before 13.9.8",
+        ],
         description=(
             "GitLab user sign up allows incorrect verification of an attacker-controlled "
             "email attribute, permitting account takeover via session fixation when LDAP "
@@ -509,7 +515,11 @@ _BUNDLED_RECORDS: tuple[CveRecord, ...] = (
         cvss_severity="CRITICAL",
         cwe_ids=["CWE-75"],
         category="network",
-        affected_products=["Microsoft Exchange Server 2013", "Microsoft Exchange Server 2016", "Microsoft Exchange Server 2019"],
+        affected_products=[
+            "Microsoft Exchange Server 2013",
+            "Microsoft Exchange Server 2016",
+            "Microsoft Exchange Server 2019",
+        ],
         description=(
             "Microsoft Exchange Server contains an improper input validation vulnerability "
             "in the parsing of Autodiscover requests, allowing an unauthenticated attacker "
@@ -528,7 +538,11 @@ _BUNDLED_RECORDS: tuple[CveRecord, ...] = (
         cvss_severity="CRITICAL",
         cwe_ids=["CWE-94"],
         category="network",
-        affected_products=["Microsoft Exchange Server 2013 CU23", "Microsoft Exchange Server 2016 CU18", "Microsoft Exchange Server 2019 CU7"],
+        affected_products=[
+            "Microsoft Exchange Server 2013 CU23",
+            "Microsoft Exchange Server 2016 CU18",
+            "Microsoft Exchange Server 2019 CU7",
+        ],
         description=(
             "Microsoft Exchange Server allows remote code execution on the server via an "
             "unauthenticated attacker sending specially crafted requests leading to heap "
@@ -547,7 +561,10 @@ _BUNDLED_RECORDS: tuple[CveRecord, ...] = (
         cvss_severity="HIGH",
         cwe_ids=["CWE-787"],
         category="binary",
-        affected_products=["Linux kernel 5.8 through 5.15.x before 5.15.13", "Linux kernel 5.16 before 5.16.11"],
+        affected_products=[
+            "Linux kernel 5.8 through 5.15.x before 5.15.13",
+            "Linux kernel 5.16 before 5.16.11",
+        ],
         description=(
             "A flaw exists in the Linux kernel where a write-through operation on a "
             "copy-on-write page allows an unprivileged local attacker to overwrite "
@@ -585,7 +602,11 @@ _BUNDLED_RECORDS: tuple[CveRecord, ...] = (
         cvss_severity="MEDIUM",
         cwe_ids=["CWE-522"],
         category="crypto",
-        affected_products=["Citrix NetScaler ADC", "Citrix NetScaler Gateway", "Citrix SD-WAN Center"],
+        affected_products=[
+            "Citrix NetScaler ADC",
+            "Citrix NetScaler Gateway",
+            "Citrix SD-WAN Center",
+        ],
         description=(
             "Citrix NetScaler ADC, NetScaler Gateway, and SD-WAN Center contain an "
             "insufficiently protected credentials vulnerability allowing an attacker "
@@ -663,7 +684,11 @@ _BUNDLED_RECORDS: tuple[CveRecord, ...] = (
         cvss_severity="HIGH",
         cwe_ids=["CWE-119"],
         category="scada_ics",
-        affected_products=["Treck TCP/IP Stack used in multiple IoT and ICS devices", "Xerox printers", "Schneider Electric devices"],
+        affected_products=[
+            "Treck TCP/IP Stack used in multiple IoT and ICS devices",
+            "Xerox printers",
+            "Schneider Electric devices",
+        ],
         description=(
             "Multiple buffer overflows, memory corruption vulnerabilities, and integer "
             "overflows in the Treck TCP/IP stack used in millions of IoT and SCADA/ICS "
@@ -702,7 +727,10 @@ _BUNDLED_RECORDS: tuple[CveRecord, ...] = (
         cvss_severity="HIGH",
         cwe_ids=["CWE-426"],
         category="forensics",
-        affected_products=["Microsoft Windows 10 before KB5014666", "Microsoft Windows 11 before KB5014666"],
+        affected_products=[
+            "Microsoft Windows 10 before KB5014666",
+            "Microsoft Windows 11 before KB5014666",
+        ],
         description=(
             "Microsoft Windows contains an arbitrary file write vulnerability in the "
             "Ms-Word Document handler that allows an attacker to execute arbitrary code "
@@ -837,8 +865,14 @@ class NvdFetcher(Protocol):
 def _default_nvd_fetcher(url: str, headers: dict[str, str], timeout: int) -> bytes:
     import urllib.request
 
-    request = urllib.request.Request(url, headers=headers)
-    with urllib.request.urlopen(request, timeout=timeout) as response:  # noqa: S310
+    # Scheme is validated against an http/https allowlist below before opening.
+    request = urllib.request.Request(url, headers=headers)  # noqa: S310 -- scheme allowlisted before urlopen
+    # Only http(s) schemes reach the network layer; anything else
+    # (file:, ftp:, custom handlers) is rejected before opening.
+    if request.type not in ("http", "https"):
+        raise ValueError(f"unsupported URL scheme: {url!r}")
+    # Scheme allowlisted to http/https above.
+    with urllib.request.urlopen(request, timeout=timeout) as response:  # nosec B310 -- scheme allowlisted above  # noqa: S310
         return response.read()
 
 
@@ -924,9 +958,7 @@ def cve_record_from_nvd_json(item: dict) -> CveRecord:
     description = _extract_description(cve.get("descriptions", []) or [])
     affected_products = _extract_affected_products(cve.get("configurations", []) or [])
     references = [
-        str(ref.get("url", ""))
-        for ref in cve.get("references", []) or []
-        if ref.get("url")
+        str(ref.get("url", "")) for ref in cve.get("references", []) or [] if ref.get("url")
     ]
     return CveRecord(
         cve_id=cve_id,

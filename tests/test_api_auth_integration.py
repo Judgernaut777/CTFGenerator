@@ -96,9 +96,7 @@ def _app(hasher=None, *, seed=True, rate_limiter=None):
             service = AuthService(db, hasher=hasher or Pbkdf2Sha256Hasher(iterations=1000))
             if seed:
                 with db.session_scope() as s:
-                    SqlAlchemyUserRepository(s).add(
-                        User(email=_EMAIL, display_name="Alice")
-                    )
+                    SqlAlchemyUserRepository(s).add(User(email=_EMAIL, display_name="Alice"))
                 service.set_password(_EMAIL, _PASSWORD, datetime.now(UTC))
                 service.grant_system_role(_EMAIL, "admin")
             app = create_app(
@@ -131,9 +129,7 @@ class AuthApiIntegrationTests(unittest.TestCase):
             self.assertTrue(token)
             self.assertIn("expires_at", r.json())
 
-            me = client.get(
-                "/api/v1/auth/me", headers={"Authorization": f"Bearer {token}"}
-            )
+            me = client.get("/api/v1/auth/me", headers={"Authorization": f"Bearer {token}"})
             self.assertEqual(me.status_code, 200, me.text)
             body = me.json()
             self.assertEqual(body["subject"], _EMAIL)
@@ -152,9 +148,7 @@ class AuthApiIntegrationTests(unittest.TestCase):
             # Same code AND same message -> no oracle for account existence
             # (request_id differs per request and is not part of the signal).
             wrong_err = {k: v for k, v in wrong.json()["error"].items() if k != "request_id"}
-            unknown_err = {
-                k: v for k, v in unknown.json()["error"].items() if k != "request_id"
-            }
+            unknown_err = {k: v for k, v in unknown.json()["error"].items() if k != "request_id"}
             self.assertEqual(wrong_err, unknown_err)
             self.assertEqual(wrong_err["code"], "unauthorized")
 
@@ -167,9 +161,7 @@ class AuthApiIntegrationTests(unittest.TestCase):
             before = len(spy.verify_calls)
             r = _login(client, email="nobody@example.com")
             self.assertEqual(r.status_code, 401)
-            self.assertGreater(
-                len(spy.verify_calls), before, "KDF was not run for unknown email"
-            )
+            self.assertGreater(len(spy.verify_calls), before, "KDF was not run for unknown email")
 
     def test_refresh_rotates_token(self) -> None:
         with _app() as (client, _service):
@@ -182,13 +174,9 @@ class AuthApiIntegrationTests(unittest.TestCase):
             new_token = r.json()["token"]
             self.assertNotEqual(new_token, token)
             # Old token is dead; new token works.
-            old = client.get(
-                "/api/v1/auth/me", headers={"Authorization": f"Bearer {token}"}
-            )
+            old = client.get("/api/v1/auth/me", headers={"Authorization": f"Bearer {token}"})
             self.assertEqual(old.status_code, 401)
-            new = client.get(
-                "/api/v1/auth/me", headers={"Authorization": f"Bearer {new_token}"}
-            )
+            new = client.get("/api/v1/auth/me", headers={"Authorization": f"Bearer {new_token}"})
             self.assertEqual(new.status_code, 200)
 
     def test_logout_revokes_token(self) -> None:
@@ -199,9 +187,7 @@ class AuthApiIntegrationTests(unittest.TestCase):
                 headers={"Authorization": f"Bearer {token}"},
             )
             self.assertEqual(out.status_code, 204)
-            after = client.get(
-                "/api/v1/auth/me", headers={"Authorization": f"Bearer {token}"}
-            )
+            after = client.get("/api/v1/auth/me", headers={"Authorization": f"Bearer {token}"})
             self.assertEqual(after.status_code, 401)
 
     def test_missing_bearer_on_me_is_401(self) -> None:

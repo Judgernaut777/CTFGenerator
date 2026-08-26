@@ -28,9 +28,7 @@ from typing import Any
 
 def compute_etag(payload: Mapping[str, Any]) -> str:
     """Return the quoted strong ETag for a resource's concurrency payload."""
-    canonical = json.dumps(
-        payload, sort_keys=True, separators=(",", ":"), default=str
-    )
+    canonical = json.dumps(payload, sort_keys=True, separators=(",", ":"), default=str)
     digest = hashlib.sha256(canonical.encode("utf-8")).hexdigest()[:32]
     return f'"{digest}"'
 

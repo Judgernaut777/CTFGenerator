@@ -150,7 +150,8 @@ def _base_images_present() -> bool:
         return False
     have = subprocess.run(
         ["docker", "images", "--format", "{{.Repository}}:{{.Tag}}"],
-        capture_output=True, text=True,
+        capture_output=True,
+        text=True,
     ).stdout.split()
     return all(img in have for img in _BASE_IMAGES)
 
@@ -214,9 +215,7 @@ def _buildable_spec() -> tuple[dict, str, str]:
     and the seed-derived flag baked into the rendered bundle. The flag is injected
     into the spec dict so ``SpecFlagVerifier`` (which reads ``spec['flag']``) agrees
     with the value the built image serves."""
-    spec = default_spec(
-        seed=_SEED, title="Heap Clobber", difficulty="easy", family=_FAMILY
-    )
+    spec = default_spec(seed=_SEED, title="Heap Clobber", difficulty="easy", family=_FAMILY)
     spec_dict = spec_to_dict(spec)
     # Render once (pure text generation -- no docker) to learn the flag the built
     # image bakes in; the render is deterministic in the seed, preserved through
@@ -224,8 +223,13 @@ def _buildable_spec() -> tuple[dict, str, str]:
     with tempfile.TemporaryDirectory(prefix="ctfgen-joined-") as tmp:
         root = Path(tmp) / "b"
         generator.create_challenge(
-            output_dir=root, seed=spec.seed, title=spec.title,
-            difficulty=spec.difficulty, family=spec.family, force=True, spec=spec,
+            output_dir=root,
+            seed=spec.seed,
+            title=spec.title,
+            difficulty=spec.difficulty,
+            family=spec.family,
+            force=True,
+            spec=spec,
         )
         variant = json.loads((root / "private" / "variant.json").read_text())
     flag = variant["flag"]
@@ -238,9 +242,7 @@ class JoinedEndToEndTests(unittest.TestCase):
     def setUp(self) -> None:
         self._instance_ids: list[str] = []
         self._built_images: list[str] = []
-        self._backend = DockerRuntimeBackend(
-            require_rootless=False, acknowledged_gaps=_ACKED
-        )
+        self._backend = DockerRuntimeBackend(require_rootless=False, acknowledged_gaps=_ACKED)
 
     def tearDown(self) -> None:
         for iid in self._instance_ids:
@@ -251,7 +253,8 @@ class JoinedEndToEndTests(unittest.TestCase):
         for ref in self._built_images:
             subprocess.run(
                 ["docker", "image", "rm", "--force", ref],
-                capture_output=True, text=True,
+                capture_output=True,
+                text=True,
             )
 
     def _seed(self, db, spec_dict: dict, spec_sha256: str) -> None:
@@ -259,7 +262,8 @@ class JoinedEndToEndTests(unittest.TestCase):
         with db.session_scope() as s:
             SqlAlchemyCompetitionRepository(s).add(
                 CompetitionConfig(
-                    competition_id=_CID, name="Cup",
+                    competition_id=_CID,
+                    name="Cup",
                     start_time=_NOW - timedelta(hours=1),
                     end_time=_NOW + timedelta(hours=47),
                 )
@@ -270,9 +274,14 @@ class JoinedEndToEndTests(unittest.TestCase):
             )
             SqlAlchemyChallengeVersionRepository(s).add(
                 ChallengeVersion(
-                    definition_slug=_SLUG, version_no=1, state="draft",
-                    family_version=fam_ver, seed=_SEED,
-                    spec_sha256=spec_sha256, spec=spec_dict, spec_version="1.0",
+                    definition_slug=_SLUG,
+                    version_no=1,
+                    state="draft",
+                    family_version=fam_ver,
+                    seed=_SEED,
+                    spec_sha256=spec_sha256,
+                    spec=spec_dict,
+                    spec_version="1.0",
                 )
             )
         with db.session_scope() as s:
@@ -281,18 +290,23 @@ class JoinedEndToEndTests(unittest.TestCase):
             # Attach the published version to the competition so the submission
             # path resolves the publication.
             SqlAlchemyChallengePublicationRepository(s).add(
-                ChallengePublication(
-                    competition_id=_CID, definition_slug=_SLUG, version_no=1
-                )
+                ChallengePublication(competition_id=_CID, definition_slug=_SLUG, version_no=1)
             )
         with db.session_scope() as s:
             reg = SqlAlchemyWorkerRegistry(s)
             reg.add(
                 WorkerIdentity(
-                    "w1", "docker-rootless", ("aarch64", "x86_64"),
-                    ("build_challenge", "launch_instance", "stop_instance",
-                     "delete_runtime_resources"),
-                    4, "1",
+                    "w1",
+                    "docker-rootless",
+                    ("aarch64", "x86_64"),
+                    (
+                        "build_challenge",
+                        "launch_instance",
+                        "stop_instance",
+                        "delete_runtime_resources",
+                    ),
+                    4,
+                    "1",
                 )
             )
             reg.heartbeat("w1", _NOW)
@@ -313,16 +327,24 @@ class JoinedEndToEndTests(unittest.TestCase):
         token = f"{CREDENTIAL_TOKEN_PREFIX}.{issued.credential_id}.{issued.secret}"
         arch = self._backend.probe().architecture
         client = LocalControlPlaneClient(
-            jobs=worker_jobs, instances=worker_instances, lifecycle=lifecycle,
-            scheduling=scheduling, builds=worker_builds, token=token, architecture=arch,
+            jobs=worker_jobs,
+            instances=worker_instances,
+            lifecycle=lifecycle,
+            scheduling=scheduling,
+            builds=worker_builds,
+            token=token,
+            architecture=arch,
         )
         # A benign command keeps the launched container deterministically alive:
         # under test is that the BUILT image launches on a worker, not the binary's
         # own runtime behaviour.
         worker = Worker(
             WorkerConfig(worker_name="w1", lease_seconds=300),
-            client, self._backend, command=("sleep", "3600"),
-            build_backend=self._backend, clock=lambda: _NOW,
+            client,
+            self._backend,
+            command=("sleep", "3600"),
+            build_backend=self._backend,
+            clock=lambda: _NOW,
         )
         return scheduling, jobs, lifecycle, worker
 
@@ -334,24 +356,23 @@ class JoinedEndToEndTests(unittest.TestCase):
             scheduling, jobs, lifecycle, worker = self._wire(db)
 
             # -- 1. trigger the build, then run ONE worker iteration to BUILD -----
-            build_job, created = BuildService(db, jobs=jobs).trigger_build(
-                _SLUG, 1, _NOW
-            )
+            build_job, created = BuildService(db, jobs=jobs).trigger_build(_SLUG, 1, _NOW)
             self.assertTrue(created)
             self.assertEqual(build_job.job_type, "build_challenge")
             self.assertTrue(worker.run_once(), "worker did not claim the build job")
 
             # The freshly-built image is recorded in the registry and REALLY exists.
             with db.session_scope() as s:
-                built_ref = SqlAlchemyChallengeBuildImageRepository(
-                    s
-                ).latest_image_ref_for_version(_SLUG, 1)
+                built_ref = SqlAlchemyChallengeBuildImageRepository(s).latest_image_ref_for_version(
+                    _SLUG, 1
+                )
             self.assertIsNotNone(built_ref, "no built image recorded after build job")
             self.assertTrue(built_ref.startswith("ctfgen-build/"))
             self._built_images.append(built_ref)
             inspect = subprocess.run(
                 ["docker", "image", "inspect", built_ref],
-                capture_output=True, text=True,
+                capture_output=True,
+                text=True,
             )
             self.assertEqual(inspect.returncode, 0, "built image missing on host")
 
@@ -359,8 +380,11 @@ class JoinedEndToEndTests(unittest.TestCase):
             iid = str(uuid.uuid4())
             self._instance_ids.append(iid)
             lifecycle.request_instance(
-                instance_id=iid, competition_id=_CID, team_name="Red",
-                definition_slug=_SLUG, version_no=1,
+                instance_id=iid,
+                competition_id=_CID,
+                team_name="Red",
+                definition_slug=_SLUG,
+                version_no=1,
                 requirements=WorkerRequirements(
                     architecture=self._backend.probe().architecture,
                     required_capabilities=frozenset({"launch_instance"}),
@@ -368,7 +392,8 @@ class JoinedEndToEndTests(unittest.TestCase):
                 pooled_items=(
                     ReservationItem("platform", PLATFORM_SCOPE_KEY, "active_instances", 1),
                 ),
-                expires_at=_LATER, now=_NOW,
+                expires_at=_LATER,
+                now=_NOW,
             )
             # The instance carries the freshly-built image, resolved from the registry.
             self.assertEqual(lifecycle.get(iid).image_ref, built_ref)
@@ -380,18 +405,19 @@ class JoinedEndToEndTests(unittest.TestCase):
             # A real container from the BUILT image is running under the instance label.
             running = subprocess.run(
                 ["docker", "ps", "-q", "--filter", f"label=ctfgen.instance={iid}"],
-                capture_output=True, text=True,
+                capture_output=True,
+                text=True,
             ).stdout.split()
             self.assertEqual(len(running), 1, "expected exactly one running container")
             image_of = subprocess.run(
                 ["docker", "inspect", "-f", "{{.Config.Image}}", running[0]],
-                capture_output=True, text=True,
+                capture_output=True,
+                text=True,
             ).stdout.strip()
             self.assertEqual(image_of, built_ref, "container not from the built image")
             with db.session_scope() as s:
                 kinds = sorted(
-                    r.kind
-                    for r in SqlAlchemyInstanceRepository(s).list_runtime_resources(iid)
+                    r.kind for r in SqlAlchemyInstanceRepository(s).list_runtime_resources(iid)
                 )
             self.assertIn("container", kinds)
             self.assertIn("network", kinds)
@@ -400,9 +426,12 @@ class JoinedEndToEndTests(unittest.TestCase):
             outcome = SubmissionProcessingService(db).process_submission(
                 SubmissionRequest(
                     submission_id=str(uuid.uuid4()),
-                    competition_id=_CID, team_name="Red",
-                    definition_slug=_SLUG, version_no=1,
-                    submitted_at=_NOW, candidate_flag=flag,
+                    competition_id=_CID,
+                    team_name="Red",
+                    definition_slug=_SLUG,
+                    version_no=1,
+                    submitted_at=_NOW,
+                    candidate_flag=flag,
                 )
             )
             self.assertTrue(outcome.accepted)
@@ -413,9 +442,12 @@ class JoinedEndToEndTests(unittest.TestCase):
             wrong = SubmissionProcessingService(db).process_submission(
                 SubmissionRequest(
                     submission_id=str(uuid.uuid4()),
-                    competition_id=_CID, team_name="Red",
-                    definition_slug=_SLUG, version_no=1,
-                    submitted_at=_NOW, candidate_flag="ctf{not-the-flag}",
+                    competition_id=_CID,
+                    team_name="Red",
+                    definition_slug=_SLUG,
+                    version_no=1,
+                    submitted_at=_NOW,
+                    candidate_flag="ctf{not-the-flag}",
                 )
             )
             self.assertFalse(wrong.accepted)

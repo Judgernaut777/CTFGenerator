@@ -46,9 +46,7 @@ class WebSettings:
     @classmethod
     def from_env(cls) -> WebSettings:
         secret_env = os.environ.get("CTFGEN_WEB_CSRF_SECRET")
-        secret = (
-            secret_env.encode("utf-8") if secret_env else secrets.token_bytes(32)
-        )
+        secret = secret_env.encode("utf-8") if secret_env else secrets.token_bytes(32)
         return cls(
             cookie_secure=os.environ.get("CTFGEN_WEB_COOKIE_INSECURE", "0") != "1",
             csrf_secret=secret,

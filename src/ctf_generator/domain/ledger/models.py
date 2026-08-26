@@ -25,9 +25,7 @@ from datetime import datetime
 
 # Event types carried in the score ledger (mirrors events.py usage). Stored as
 # text + CHECK so new types can be added by migration.
-VALID_SCORE_EVENT_TYPES = frozenset(
-    {"submission", "solve", "first_blood", "freeze", "revalue"}
-)
+VALID_SCORE_EVENT_TYPES = frozenset({"submission", "solve", "first_blood", "freeze", "revalue"})
 
 
 def _require_nonempty(value: str, field_name: str) -> None:
@@ -123,8 +121,7 @@ class ScoreEvent:
         _require_positive_version(self.version_no)
         if self.type not in VALID_SCORE_EVENT_TYPES:
             raise ValueError(
-                f"type must be one of {sorted(VALID_SCORE_EVENT_TYPES)}, "
-                f"got {self.type!r}"
+                f"type must be one of {sorted(VALID_SCORE_EVENT_TYPES)}, got {self.type!r}"
             )
         _require_nonempty(self.ts, "ts")
         if not isinstance(self.payload, Mapping):

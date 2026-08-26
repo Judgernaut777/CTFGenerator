@@ -54,9 +54,7 @@ class SqlAlchemyChallengeBuildImageRepository:
         reference), so re-driving a completed build job records nothing new and
         never raises on a duplicate. ``created_at`` is set from the injected
         ``now`` so the launch reader's newest-wins ordering is deterministic."""
-        version_uuid = _resolve.version_uuid(
-            self._session, definition_slug, version_no
-        )
+        version_uuid = _resolve.version_uuid(self._session, definition_slug, version_no)
         stmt = (
             pg_insert(ChallengeBuildImageRow)
             .values(
@@ -72,9 +70,7 @@ class SqlAlchemyChallengeBuildImageRepository:
         )
         self._session.execute(stmt)
 
-    def latest_image_ref_for_version(
-        self, definition_slug: str, version_no: int
-    ) -> str | None:
+    def latest_image_ref_for_version(self, definition_slug: str, version_no: int) -> str | None:
         """The most recently recorded built ``image_ref`` for the version, or
         ``None`` if no build has been recorded yet. Newest wins (``created_at``
         desc, then a stable ``id`` tiebreak). Returns ``None`` -- never an empty

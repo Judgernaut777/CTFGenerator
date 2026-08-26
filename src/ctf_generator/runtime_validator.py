@@ -17,8 +17,7 @@ class CommandRunner(Protocol):
         command: list[str],
         cwd: Path,
         timeout: int,
-    ) -> subprocess.CompletedProcess[str]:
-        ...
+    ) -> subprocess.CompletedProcess[str]: ...
 
 
 @dataclass
@@ -58,10 +57,24 @@ def validate_runtime(
     manifest = _load_runtime_manifest(challenge_path)
     started = False
     try:
-        _record(report, runner(["docker", "compose", "-p", project_name, "build"], challenge_path, timeout_seconds))
-        _record(report, runner(["docker", "compose", "-p", project_name, "up", "-d"], challenge_path, timeout_seconds))
+        _record(
+            report,
+            runner(
+                ["docker", "compose", "-p", project_name, "build"], challenge_path, timeout_seconds
+            ),
+        )
+        _record(
+            report,
+            runner(
+                ["docker", "compose", "-p", project_name, "up", "-d"],
+                challenge_path,
+                timeout_seconds,
+            ),
+        )
         started = True
-        _wait_for_health(challenge_path, base_url, timeout_seconds, runner, report, manifest, sandbox)
+        _wait_for_health(
+            challenge_path, base_url, timeout_seconds, runner, report, manifest, sandbox
+        )
         _record(
             report,
             runner(
@@ -84,7 +97,15 @@ def validate_runtime(
                 _record(
                     report,
                     runner(
-                        ["docker", "compose", "-p", project_name, "down", "--volumes", "--remove-orphans"],
+                        [
+                            "docker",
+                            "compose",
+                            "-p",
+                            project_name,
+                            "down",
+                            "--volumes",
+                            "--remove-orphans",
+                        ],
                         challenge_path,
                         timeout_seconds,
                     ),
@@ -160,9 +181,19 @@ def _script_command(
     if sandbox and challenge_path is not None:
         abs_path = str(Path(challenge_path).resolve())
         return [
-            "docker", "run", "--rm", "--network", "host",
-            "-v", f"{abs_path}:/work:ro", "-w", "/work",
-            "python:3.11-slim", "python", script, *script_args,
+            "docker",
+            "run",
+            "--rm",
+            "--network",
+            "host",
+            "-v",
+            f"{abs_path}:/work:ro",
+            "-w",
+            "/work",
+            "python:3.11-slim",
+            "python",
+            script,
+            *script_args,
         ]
     return [sys.executable, script, *script_args]
 
@@ -183,7 +214,7 @@ def _manifest_args(manifest: dict | None, key: str) -> list[str] | None:
 
 
 def _run(command: list[str], cwd: Path, timeout: int) -> subprocess.CompletedProcess[str]:
-    return subprocess.run(
+    return subprocess.run(  # noqa: S603 -- commands come from the validated runtime manifest, never raw user input
         command,
         cwd=cwd,
         timeout=timeout,
@@ -199,4 +230,3 @@ def _record(report: RuntimeValidationReport, result: subprocess.CompletedProcess
         report.logs.append(f"$ {command}\n{result.stdout}")
     if result.stderr:
         report.logs.append(f"$ {command}\n{result.stderr}")
-

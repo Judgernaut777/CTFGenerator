@@ -15,7 +15,8 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from ctf_generator import families, scenario as sc
+from ctf_generator import families
+from ctf_generator import scenario as sc
 from ctf_generator.agent_eval import HTTPResponse, _ScenarioDefendedHTTPClient
 from ctf_generator.cli import _scenario_spec_from_mapping
 from ctf_generator.generator import create_challenge
@@ -74,24 +75,31 @@ class FamilyScenarioTests(unittest.TestCase):
                         max_ticks=10,
                     )
                     self.assertEqual(len(report.triggers_fired), len(spec.triggers))
-                    patched = [
-                        r for r in report.responses_applied if r.action == "patch_route"
-                    ]
+                    patched = [r for r in report.responses_applied if r.action == "patch_route"]
                     self.assertTrue(patched, f"{name}: no patch_route response fired")
 
                     # (3) the defense blocks a request to the family's real
                     # attack-surface substring mid-solve (a stable path segment
                     # every solver of this family hits, not a test literal).
                     target = _scenario_target(name)
-                    self.assertIn(target, "".join(
-                        r.target for r in report.responses_applied if r.action == "patch_route"
-                    ))
+                    self.assertIn(
+                        target,
+                        "".join(
+                            r.target for r in report.responses_applied if r.action == "patch_route"
+                        ),
+                    )
                     defended = _ScenarioDefendedHTTPClient(_FakeInner(), report)
                     # A few benign early calls, then repeated hits on the target.
                     real_url = "http://svc/api/x" + target + "abc"
                     statuses = [
                         defended.request("GET", u).status
-                        for u in ["http://svc/api/a", "http://svc/api/b", real_url, real_url, real_url]
+                        for u in [
+                            "http://svc/api/a",
+                            "http://svc/api/b",
+                            real_url,
+                            real_url,
+                            real_url,
+                        ]
                     ]
                     self.assertEqual(statuses[0], 200)
                     self.assertIn(403, statuses, f"{name}: target route never blocked")

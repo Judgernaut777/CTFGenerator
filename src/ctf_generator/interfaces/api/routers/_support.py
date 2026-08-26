@@ -19,9 +19,7 @@ from ..idempotency import (
 )
 
 
-def respond(
-    status_code: int, envelope: dict[str, Any], *, etag: str | None = None
-) -> JSONResponse:
+def respond(status_code: int, envelope: dict[str, Any], *, etag: str | None = None) -> JSONResponse:
     """Build a JSON response, attaching a strong ``ETag`` when given. The
     ``X-Request-ID`` header is added by :class:`RequestIDMiddleware`."""
     headers = {"ETag": etag} if etag else None
@@ -36,18 +34,14 @@ def audit_sink(request: Request) -> AuditSink:
     return request.app.state.audit_sink
 
 
-def replay(
-    request: Request, scope: str, body_json: Any
-) -> JSONResponse | None:
+def replay(request: Request, scope: str, body_json: Any) -> JSONResponse | None:
     """If this POST carries an ``Idempotency-Key`` that was already used with the
     same body, return the stored response to replay; if the same key was used with
     a different body, raise ``409``; otherwise return ``None`` (proceed)."""
     key = request.headers.get("Idempotency-Key")
     if not key:
         return None
-    stored = replay_or_conflict(
-        _idempotency_store(request), scope, key, fingerprint(body_json)
-    )
+    stored = replay_or_conflict(_idempotency_store(request), scope, key, fingerprint(body_json))
     if stored is None:
         return None
     return respond(stored.status_code, stored.body, etag=stored.etag)

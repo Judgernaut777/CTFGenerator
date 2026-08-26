@@ -28,9 +28,7 @@ def normalize_candidate(candidate: str) -> str:
     if not normalized:
         raise FlagRejectedError("candidate flag is empty")
     if len(normalized) > MAX_CANDIDATE_LENGTH:
-        raise FlagRejectedError(
-            f"candidate flag exceeds {MAX_CANDIDATE_LENGTH} characters"
-        )
+        raise FlagRejectedError(f"candidate flag exceeds {MAX_CANDIDATE_LENGTH} characters")
     if any(ord(ch) < 0x20 or ord(ch) == 0x7F for ch in normalized):
         raise FlagRejectedError("candidate flag contains control characters")
     return normalized
@@ -48,15 +46,11 @@ class SpecFlagVerifier:
     ``instance_seed``.
     """
 
-    def verify(
-        self, version: ChallengeVersion, instance_seed: str | None, candidate: str
-    ) -> bool:
+    def verify(self, version: ChallengeVersion, instance_seed: str | None, candidate: str) -> bool:
         expected = version.spec.get("flag")
         if not isinstance(expected, str) or not expected.strip():
             raise FlagUnavailableError(
                 f"challenge version {version.definition_slug!r} "
                 f"v{version.version_no} spec carries no expected flag"
             )
-        return hmac.compare_digest(
-            expected.encode("utf-8"), candidate.encode("utf-8")
-        )
+        return hmac.compare_digest(expected.encode("utf-8"), candidate.encode("utf-8"))

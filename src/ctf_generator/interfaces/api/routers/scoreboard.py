@@ -45,9 +45,7 @@ def get_scoreboard(
     competition_id: str,
     limit: int | None = Query(default=None, ge=1),
     cursor: str | None = Query(default=None),
-    principal: Principal = Depends(
-        require_competition_permission(Permission.SCOREBOARD_READ)
-    ),
+    principal: Principal = Depends(require_competition_permission(Permission.SCOREBOARD_READ)),
     service=Depends(get_scoreboard_service),
 ):
     entries = sorted(service.standings(competition_id), key=entry_sort_key)
@@ -70,14 +68,10 @@ def get_scoreboard(
 def get_scoreboard_lag(
     request: Request,
     competition_id: str,
-    principal: Principal = Depends(
-        require_competition_permission(Permission.SCOREBOARD_LAG_READ)
-    ),
+    principal: Principal = Depends(require_competition_permission(Permission.SCOREBOARD_LAG_READ)),
     service=Depends(get_scoreboard_service),
 ):
     lag = service.lag()
     envelope = resource_envelope(SCOREBOARD_LAG_SCHEMA, lag_to_response(lag))
-    record_audit(
-        request, principal, action="scoreboard.lag.read", target=competition_id
-    )
+    record_audit(request, principal, action="scoreboard.lag.read", target=competition_id)
     return respond(200, envelope)

@@ -134,8 +134,7 @@ class SubmissionProcessingService:
             )
             if version is None:  # pragma: no cover - publication FK implies it
                 raise SubmissionProcessingError(
-                    f"challenge version {request.definition_slug!r} "
-                    f"v{request.version_no} not found"
+                    f"challenge version {request.definition_slug!r} v{request.version_no} not found"
                 )
             if version.state == "draft":
                 raise SubmissionProcessingError(
@@ -158,9 +157,7 @@ class SubmissionProcessingService:
 
             # (4) Normalize + verify (constant time; candidate never persisted).
             candidate = normalize_candidate(request.candidate_flag)
-            correct = self._verifier.verify(
-                version, request.instance_seed, candidate
-            )
+            correct = self._verifier.verify(version, request.instance_seed, candidate)
 
             # (5) Record the attempt (correct or not).
             submission = LedgerSubmission(

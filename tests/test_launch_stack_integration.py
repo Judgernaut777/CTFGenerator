@@ -52,7 +52,8 @@ class LaunchStackIntegrationTests(unittest.TestCase):
             containers=(
                 StackContainerSpec(service_name="internal", image_ref="alpine:latest"),
                 StackContainerSpec(
-                    service_name="edge", image_ref="alpine:latest",
+                    service_name="edge",
+                    image_ref="alpine:latest",
                     exposed_ports=(8000,),
                 ),
             ),
@@ -60,12 +61,8 @@ class LaunchStackIntegrationTests(unittest.TestCase):
 
     def test_launches_all_services_on_one_network_with_dns(self) -> None:
         result = _BACKEND.launch_stack(self._request(), command=("sleep", "120"))
-        containers = [
-            r.external_ref for r in result.runtime_resources if r.kind == "container"
-        ]
-        networks = [
-            r.external_ref for r in result.runtime_resources if r.kind == "network"
-        ]
+        containers = [r.external_ref for r in result.runtime_resources if r.kind == "container"]
+        networks = [r.external_ref for r in result.runtime_resources if r.kind == "network"]
         self.assertEqual(len(containers), 2)
         self.assertEqual(len(networks), 1)
         self.assertEqual(result.observation.phase, "running")
@@ -79,8 +76,7 @@ class LaunchStackIntegrationTests(unittest.TestCase):
         # Inter-service DNS: from one container, the sibling resolves by service
         # name on the shared network (the whole point of a stack).
         edge = next(
-            cid for cid in labelled
-            if "-edge" in _docker("inspect", "-f", "{{.Name}}", cid).stdout
+            cid for cid in labelled if "-edge" in _docker("inspect", "-f", "{{.Name}}", cid).stdout
         )
         ping = _docker("exec", edge, "ping", "-c", "1", "-W", "3", "internal")
         self.assertEqual(ping.returncode, 0, ping.stdout + ping.stderr)
@@ -99,9 +95,7 @@ class LaunchStackIntegrationTests(unittest.TestCase):
         _BACKEND.launch_stack(self._request(), command=("sleep", "120"))
         pairs = _BACKEND.find_stack_containers(self._instance)
         self.assertEqual(len(pairs), 2)
-        self.assertEqual(
-            {svc for _cid, svc in pairs}, {"internal", "edge"}
-        )
+        self.assertEqual({svc for _cid, svc in pairs}, {"internal", "edge"})
 
     def test_a_service_that_crashes_immediately_tears_down_the_stack(self) -> None:
         # A container whose process exits almost immediately still looks "running"

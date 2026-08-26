@@ -136,9 +136,7 @@ class HttpEndToEndFlowTests(unittest.TestCase):
         self._ctx.__exit__(None, None, None)
 
     def _login(self, email: str, password: str) -> str:
-        r = self.client.post(
-            f"{_V1}/auth/login", json={"email": email, "password": password}
-        )
+        r = self.client.post(f"{_V1}/auth/login", json={"email": email, "password": password})
         self.assertEqual(r.status_code, 200, r.text)
         token = r.json()["token"]
         self.assertTrue(token)
@@ -151,9 +149,7 @@ class HttpEndToEndFlowTests(unittest.TestCase):
         return {"Authorization": f"Bearer {token}"}
 
     def _standings(self, token: str) -> list[dict]:
-        r = self.client.get(
-            f"{_V1}/competitions/{_CID}/scoreboard", headers=self._auth(token)
-        )
+        r = self.client.get(f"{_V1}/competitions/{_CID}/scoreboard", headers=self._auth(token))
         self.assertEqual(r.status_code, 200, r.text)
         return r.json()["data"]
 
@@ -179,9 +175,7 @@ class HttpEndToEndFlowTests(unittest.TestCase):
         )
         self.assertEqual(r.status_code, 201, r.text)
         # Persisted effect visible in a read-back.
-        got = self.client.get(
-            f"{_V1}/competitions/{_CID}", headers=self._auth(admin)
-        )
+        got = self.client.get(f"{_V1}/competitions/{_CID}", headers=self._auth(admin))
         self.assertEqual(got.status_code, 200, got.text)
         self.assertEqual(got.json()["competition_id"], _CID)
 
@@ -192,9 +186,7 @@ class HttpEndToEndFlowTests(unittest.TestCase):
             json={"competition_id": _CID, "name": _TEAM},
         )
         self.assertEqual(r.status_code, 201, r.text)
-        teams = self.client.get(
-            f"{_V1}/teams?competition_id={_CID}", headers=self._auth(admin)
-        )
+        teams = self.client.get(f"{_V1}/teams?competition_id={_CID}", headers=self._auth(admin))
         self.assertEqual(teams.status_code, 200, teams.text)
         self.assertIn(_TEAM, [t["name"] for t in teams.json()["data"]])
 
@@ -238,9 +230,7 @@ class HttpEndToEndFlowTests(unittest.TestCase):
             json={"definition_slug": _SLUG, "version_no": 1},
         )
         self.assertEqual(r.status_code, 201, r.text)
-        pubs = self.client.get(
-            f"{_V1}/competitions/{_CID}/publications", headers=self._auth(admin)
-        )
+        pubs = self.client.get(f"{_V1}/competitions/{_CID}/publications", headers=self._auth(admin))
         self.assertEqual(pubs.status_code, 200, pubs.text)
         self.assertIn(_SLUG, [p["definition_slug"] for p in pubs.json()["data"]])
 

@@ -187,9 +187,7 @@ class OutboxTriggerTests(unittest.TestCase):
             with db.session_scope() as s:
                 appended = SqlAlchemyScoreLedger(s).append(_event())
             with db.session_scope() as s:
-                rows = s.execute(
-                    sa.text("SELECT seq, status FROM score_projection_outbox")
-                ).all()
+                rows = s.execute(sa.text("SELECT seq, status FROM score_projection_outbox")).all()
         self.assertEqual(rows, [(appended.seq, "pending")])
 
     def test_aborted_append_burns_seq_but_leaves_no_outbox_row(self) -> None:
@@ -205,9 +203,7 @@ class OutboxTriggerTests(unittest.TestCase):
                 outbox_count = s.execute(
                     sa.text("SELECT count(*) FROM score_projection_outbox")
                 ).scalar()
-                event_count = s.execute(
-                    sa.text("SELECT count(*) FROM score_events")
-                ).scalar()
+                event_count = s.execute(sa.text("SELECT count(*) FROM score_events")).scalar()
         self.assertEqual(outbox_count, 0)
         self.assertEqual(event_count, 0)
 
@@ -251,9 +247,7 @@ class StalledWriterTests(unittest.TestCase):
                 seq_a = stalled.seq
 
                 with db.session_scope() as s:
-                    committed = SqlAlchemyScoreLedger(s).append(
-                        _event(team_name="Blue")
-                    )
+                    committed = SqlAlchemyScoreLedger(s).append(_event(team_name="Blue"))
                 seq_b = committed.seq
                 self.assertGreater(seq_b, seq_a)
 
@@ -283,10 +277,7 @@ class StalledWriterTests(unittest.TestCase):
                 projection = SqlAlchemyScoreboardProjectionRepository(s).get("cup")
                 latest = SqlAlchemyScoreLedger(s).latest_seq()
                 pending = s.execute(
-                    sa.text(
-                        "SELECT count(*) FROM score_projection_outbox "
-                        "WHERE status = 'pending'"
-                    )
+                    sa.text("SELECT count(*) FROM score_projection_outbox WHERE status = 'pending'")
                 ).scalar()
         self.assertEqual(projection.as_of_seq, latest)
         self.assertEqual(pending, 0)
@@ -334,9 +325,7 @@ class StalledWriterTests(unittest.TestCase):
                 except BaseException as exc:  # noqa: BLE001
                     errors.append(exc)
 
-            threads = [
-                threading.Thread(target=write, args=(i,)) for i in range(writers)
-            ]
+            threads = [threading.Thread(target=write, args=(i,)) for i in range(writers)]
             threads.append(threading.Thread(target=project))
             for t in threads:
                 t.start()
@@ -350,20 +339,12 @@ class StalledWriterTests(unittest.TestCase):
 
             with db.session_scope() as s:
                 pending = s.execute(
-                    sa.text(
-                        "SELECT count(*) FROM score_projection_outbox "
-                        "WHERE status = 'pending'"
-                    )
+                    sa.text("SELECT count(*) FROM score_projection_outbox WHERE status = 'pending'")
                 ).scalar()
                 failed = s.execute(
-                    sa.text(
-                        "SELECT count(*) FROM score_projection_outbox "
-                        "WHERE status = 'failed'"
-                    )
+                    sa.text("SELECT count(*) FROM score_projection_outbox WHERE status = 'failed'")
                 ).scalar()
-                total_events = s.execute(
-                    sa.text("SELECT count(*) FROM score_events")
-                ).scalar()
+                total_events = s.execute(sa.text("SELECT count(*) FROM score_events")).scalar()
                 latest = SqlAlchemyScoreLedger(s).latest_seq()
                 stored = SqlAlchemyScoreboardProjectionRepository(s).get("cup")
 
@@ -411,9 +392,7 @@ class ProjectorBehaviorTests(unittest.TestCase):
                 ledger.append(_event(competition_id="cup"))
                 # 'revalue' is ledger-legal but the fold cannot represent it
                 # yet -- the projector must fail LOUD, not drop it.
-                ledger.append(
-                    _event(competition_id="other", team_name="Green", type_="revalue")
-                )
+                ledger.append(_event(competition_id="other", team_name="Green", type_="revalue"))
             projector = ScoreProjector(db)
             projector.run_until_drained()
             with db.session_scope() as s:
@@ -498,9 +477,7 @@ class ProjectorBehaviorTests(unittest.TestCase):
                 SqlAlchemyScoreLedger(s).append(_event())
             projector = ScoreProjector(db)
             boom = OperationalError("SELECT 1", {}, Exception("connection reset"))
-            with mock.patch.object(
-                ScoreProjector, "_refold", side_effect=boom
-            ):
+            with mock.patch.object(ScoreProjector, "_refold", side_effect=boom):
                 projector.run_once()
             with db.session_scope() as s:
                 queue = SqlAlchemyScoreProjectionQueue(s)
@@ -544,9 +521,7 @@ class ProjectorBehaviorTests(unittest.TestCase):
                 with db.session_scope() as s:
                     SqlAlchemyScoreLedger(s).append(naive)
             with db.session_scope() as s:
-                count = s.execute(
-                    sa.text("SELECT count(*) FROM score_events")
-                ).scalar()
+                count = s.execute(sa.text("SELECT count(*) FROM score_events")).scalar()
         self.assertEqual(count, 0)  # the appending transaction failed
 
     def test_rebuild_equals_fresh_fold(self) -> None:
@@ -575,12 +550,8 @@ class ProjectorBehaviorTests(unittest.TestCase):
 
             with db.session_scope() as s:
                 repo = SqlAlchemyScoreboardProjectionRepository(s)
-                repo.upsert(
-                    ScoreboardProjectionRecord("cup", 10, entries={"v": "new"})
-                )
-                repo.upsert(
-                    ScoreboardProjectionRecord("cup", 5, entries={"v": "stale"})
-                )
+                repo.upsert(ScoreboardProjectionRecord("cup", 10, entries={"v": "new"}))
+                repo.upsert(ScoreboardProjectionRecord("cup", 5, entries={"v": "stale"}))
             with db.session_scope() as s:
                 got = SqlAlchemyScoreboardProjectionRepository(s).get("cup")
         self.assertEqual(got.as_of_seq, 10)
@@ -611,9 +582,7 @@ class ProjectorBehaviorTests(unittest.TestCase):
                     )
                 self.assertEqual(fns, [])
                 command.upgrade(cfg, "head")
-                self.assertIn(
-                    "scoreboard_projections", sa.inspect(engine).get_table_names()
-                )
+                self.assertIn("scoreboard_projections", sa.inspect(engine).get_table_names())
             finally:
                 engine.dispose()
 

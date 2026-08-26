@@ -62,9 +62,7 @@ class OpenApiContractTests(unittest.TestCase):
             set(paths["/api/v1/competitions/{competition_id}/submissions"].keys()),
             {"get", "post"},
         )
-        self.assertEqual(
-            set(paths["/api/v1/submissions/{submission_id}"].keys()), {"get"}
-        )
+        self.assertEqual(set(paths["/api/v1/submissions/{submission_id}"].keys()), {"get"})
         self.assertEqual(
             set(paths["/api/v1/competitions/{competition_id}/scoreboard"].keys()),
             {"get"},
@@ -82,8 +80,7 @@ class OpenApiContractTests(unittest.TestCase):
             "/api/v1/challenge-definitions/{slug}/builds",
             "/api/v1/builds/{build_id}",
             "/api/v1/competitions/{competition_id}/publications",
-            "/api/v1/competitions/{competition_id}/publications/"
-            "{definition_slug}/{version_no}",
+            "/api/v1/competitions/{competition_id}/publications/{definition_slug}/{version_no}",
             "/api/v1/jobs/{job_id}",
             "/api/v1/jobs/dead-letter",
             "/api/v1/jobs/{job_id}/cancel",
@@ -97,15 +94,9 @@ class OpenApiContractTests(unittest.TestCase):
     def test_slice_c_verbs(self) -> None:
         paths = self.spec["paths"]
         self.assertEqual(set(paths["/api/v1/instances"].keys()), {"get", "post"})
+        self.assertEqual(set(paths["/api/v1/instances/{instance_id}"].keys()), {"get"})
         self.assertEqual(
-            set(paths["/api/v1/instances/{instance_id}"].keys()), {"get"}
-        )
-        self.assertEqual(
-            set(
-                paths[
-                    "/api/v1/competitions/{competition_id}/publications"
-                ].keys()
-            ),
+            set(paths["/api/v1/competitions/{competition_id}/publications"].keys()),
             {"get", "post"},
         )
         self.assertEqual(
@@ -143,9 +134,7 @@ class OpenApiContractTests(unittest.TestCase):
     def test_worker_gateway_verbs(self) -> None:
         paths = self.spec["paths"]
         self.assertEqual(set(paths["/api/v1/worker/jobs/claim"].keys()), {"post"})
-        self.assertEqual(
-            set(paths["/api/v1/worker/instances/{instance_id}"].keys()), {"get"}
-        )
+        self.assertEqual(set(paths["/api/v1/worker/instances/{instance_id}"].keys()), {"get"})
         self.assertEqual(
             set(paths["/api/v1/worker/instances/{instance_id}/transition"].keys()),
             {"post"},
@@ -153,9 +142,7 @@ class OpenApiContractTests(unittest.TestCase):
 
     def test_worker_claim_documents_401_and_409(self) -> None:
         # The worker credential + eligibility failures must be documented on claim.
-        responses = self.spec["paths"]["/api/v1/worker/jobs/claim"]["post"][
-            "responses"
-        ]
+        responses = self.spec["paths"]["/api/v1/worker/jobs/claim"]["post"]["responses"]
         for code in ("401", "403", "409"):
             self.assertIn(code, responses)
 
@@ -182,26 +169,24 @@ class OpenApiContractTests(unittest.TestCase):
         self.assertNotIn("401", health)
 
     def test_trigger_build_documents_202(self) -> None:
-        responses = self.spec["paths"][
-            "/api/v1/challenge-definitions/{slug}/builds"
-        ]["post"]["responses"]
+        responses = self.spec["paths"]["/api/v1/challenge-definitions/{slug}/builds"]["post"][
+            "responses"
+        ]
         self.assertIn("202", responses)
         for code in ("401", "403", "404", "409"):
             self.assertIn(code, responses)
 
     def test_submit_documents_201_and_error_codes(self) -> None:
-        responses = self.spec["paths"][
-            "/api/v1/competitions/{competition_id}/submissions"
-        ]["post"]["responses"]
+        responses = self.spec["paths"]["/api/v1/competitions/{competition_id}/submissions"]["post"][
+            "responses"
+        ]
         self.assertIn("201", responses)
         for code in ("400", "401", "403", "404", "409", "422", "429"):
             self.assertIn(code, responses)
 
     def test_competitions_expose_full_crud_verbs(self) -> None:
         paths = self.spec["paths"]
-        self.assertEqual(
-            set(paths["/api/v1/competitions"].keys()), {"get", "post"}
-        )
+        self.assertEqual(set(paths["/api/v1/competitions"].keys()), {"get", "post"})
         self.assertEqual(
             set(paths["/api/v1/competitions/{competition_id}"].keys()),
             {"get", "patch"},
@@ -210,9 +195,7 @@ class OpenApiContractTests(unittest.TestCase):
     def test_error_envelope_schema_is_ctfgen_error(self) -> None:
         envelope = self.spec["components"]["schemas"]["ErrorEnvelope"]
         self.assertIn("error", envelope["properties"])
-        self.assertEqual(
-            envelope["properties"]["schema"]["default"], ERROR_SCHEMA
-        )
+        self.assertEqual(envelope["properties"]["schema"]["default"], ERROR_SCHEMA)
         self.assertIn(ERROR_SCHEMA, json.dumps(envelope))
 
     def test_error_responses_reference_the_envelope(self) -> None:
@@ -233,9 +216,7 @@ class OpenApiContractTests(unittest.TestCase):
                     if not str(status).startswith(("4", "5")):
                         continue
                     schema = (
-                        response.get("content", {})
-                        .get("application/json", {})
-                        .get("schema", {})
+                        response.get("content", {}).get("application/json", {}).get("schema", {})
                     )
                     self.assertEqual(
                         schema.get("$ref"),

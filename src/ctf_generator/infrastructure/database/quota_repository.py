@@ -63,9 +63,7 @@ class SqlAlchemyQuotaPolicyRepository:
     def __init__(self, session: Session) -> None:
         self._session = session
 
-    def _row(
-        self, scope_type: str, scope_key: str, dimension: str
-    ) -> ResourceQuotaRow | None:
+    def _row(self, scope_type: str, scope_key: str, dimension: str) -> ResourceQuotaRow | None:
         return self._session.scalars(
             select(ResourceQuotaRow).where(
                 ResourceQuotaRow.scope_type == scope_type,
@@ -94,22 +92,16 @@ class SqlAlchemyQuotaPolicyRepository:
                 limit_value=quota.limit_value,
                 reserved_value=quota.reserved_value,
             )
-            .on_conflict_do_nothing(
-                index_elements=["scope_type", "scope_key", "dimension"]
-            )
+            .on_conflict_do_nothing(index_elements=["scope_type", "scope_key", "dimension"])
         )
         self._session.execute(stmt)
         self._session.flush()
 
-    def get(
-        self, scope_type: str, scope_key: str, dimension: str
-    ) -> ResourceQuota | None:
+    def get(self, scope_type: str, scope_key: str, dimension: str) -> ResourceQuota | None:
         row = self._row(scope_type, scope_key, dimension)
         return resource_quota_from_orm(row) if row is not None else None
 
-    def list_for_scope(
-        self, scope_type: str, scope_key: str
-    ) -> list[ResourceQuota]:
+    def list_for_scope(self, scope_type: str, scope_key: str) -> list[ResourceQuota]:
         rows = self._session.scalars(
             select(ResourceQuotaRow)
             .where(
@@ -170,9 +162,7 @@ class SqlAlchemyQuotaLedger:
     def _check_ceilings(self, demand: ResourceDemand) -> None:
         """Validate every scalar ceiling with a plain read (never counted)."""
         for ceiling in demand.ceilings:
-            quota = self._plain_quota(
-                ceiling.scope_type, ceiling.scope_key, ceiling.dimension
-            )
+            quota = self._plain_quota(ceiling.scope_type, ceiling.scope_key, ceiling.dimension)
             if quota is None:
                 raise LookupError(
                     "no quota configured for ceiling "
@@ -203,9 +193,7 @@ class SqlAlchemyQuotaLedger:
         (a brand-new reserve); a reactivation re-increments the *existing*
         immutable items and writes none."""
         for item in items:
-            quota = self._locked_quota(
-                item.scope_type, item.scope_key, item.dimension
-            )
+            quota = self._locked_quota(item.scope_type, item.scope_key, item.dimension)
             if quota is None:
                 raise LookupError(
                     "no quota configured for "
@@ -246,9 +234,7 @@ class SqlAlchemyQuotaLedger:
         self._check_ceilings(demand)
         # Pooled counters: locked FOR UPDATE and incremented in deterministic
         # order, writing one append-only item per counter.
-        self._hold_items(
-            demand.sorted_items(), header_row.reservation_id, insert_items=True
-        )
+        self._hold_items(demand.sorted_items(), header_row.reservation_id, insert_items=True)
         self._session.flush()
         self._session.refresh(header_row, ["created_at"])
         return quota_reservation_from_orm(header_row, items=demand.items)
@@ -275,9 +261,7 @@ class SqlAlchemyQuotaLedger:
         ).one_or_none()
         if header is None:
             raise LookupError(f"no reservation {reservation_id!r} to reactivate")
-        items = tuple(
-            reservation_item_from_orm(row) for row in self._items_for(key)
-        )
+        items = tuple(reservation_item_from_orm(row) for row in self._items_for(key))
         if header.state == "held":
             return quota_reservation_from_orm(header, items=items)
         header.state = "held"
@@ -289,9 +273,7 @@ class SqlAlchemyQuotaLedger:
         self._session.flush()
         return quota_reservation_from_orm(header, items=items)
 
-    def renew(
-        self, reservation_id: str, new_expires_at: datetime, now: datetime
-    ) -> None:
+    def renew(self, reservation_id: str, new_expires_at: datetime, now: datetime) -> None:
         """Extend a *held* reservation's TTL to ``new_expires_at`` under a
         ``FOR UPDATE`` lock. The instance-lifecycle owner calls this to keep a
         still-running instance's hold alive so ``release_expired`` (a safety
@@ -300,18 +282,14 @@ class SqlAlchemyQuotaLedger:
         try:
             key = _as_uuid(reservation_id)
         except (ValueError, AttributeError, TypeError) as exc:
-            raise LookupError(
-                f"malformed reservation id {reservation_id!r}"
-            ) from exc
+            raise LookupError(f"malformed reservation id {reservation_id!r}") from exc
         header = self._session.scalars(
             select(QuotaReservationRow)
             .where(QuotaReservationRow.reservation_id == key)
             .with_for_update()
         ).one_or_none()
         if header is None or header.state != "held":
-            raise LookupError(
-                f"no held reservation {reservation_id!r} to renew"
-            )
+            raise LookupError(f"no held reservation {reservation_id!r} to renew")
         header.expires_at = to_utc(new_expires_at)
         self._session.flush()
 
@@ -343,18 +321,14 @@ class SqlAlchemyQuotaLedger:
         except (ValueError, AttributeError, TypeError):
             return None
         header = self._session.scalars(
-            select(QuotaReservationRow).where(
-                QuotaReservationRow.reservation_id == key
-            )
+            select(QuotaReservationRow).where(QuotaReservationRow.reservation_id == key)
         ).one_or_none()
         if header is None:
             return None
         items = tuple(reservation_item_from_orm(row) for row in self._items_for(key))
         return quota_reservation_from_orm(header, items=items)
 
-    def list_expired(
-        self, now: datetime, limit: int = 100
-    ) -> list[QuotaReservation]:
+    def list_expired(self, now: datetime, limit: int = 100) -> list[QuotaReservation]:
         rows = self._session.scalars(
             select(QuotaReservationRow)
             .where(
@@ -394,8 +368,7 @@ class SqlAlchemyQuotaLedger:
                 )
                 .join(
                     QuotaReservationRow,
-                    QuotaReservationRow.reservation_id
-                    == QuotaReservationItemRow.reservation_id,
+                    QuotaReservationRow.reservation_id == QuotaReservationItemRow.reservation_id,
                 )
                 .where(QuotaReservationRow.state == "held")
                 .group_by(
@@ -410,9 +383,7 @@ class SqlAlchemyQuotaLedger:
             if row.dimension in CEILING_DIMENSIONS:
                 expected = 0
             else:
-                expected = int(
-                    held_sums.get((row.scope_type, row.scope_key, row.dimension), 0)
-                )
+                expected = int(held_sums.get((row.scope_type, row.scope_key, row.dimension), 0))
             if row.reserved_value != expected:
                 row.reserved_value = expected
                 changed += 1

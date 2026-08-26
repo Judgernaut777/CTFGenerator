@@ -167,9 +167,7 @@ def _service(db) -> EvalRunService:
 def _count_eval_jobs(db) -> int:
     with db.session_scope() as s:
         return s.execute(
-            sa.text(
-                "SELECT count(*) FROM jobs WHERE job_type='run_agent_evaluation'"
-            )
+            sa.text("SELECT count(*) FROM jobs WHERE job_type='run_agent_evaluation'")
         ).scalar_one()
 
 
@@ -179,19 +177,14 @@ class EvalRunServiceTests(unittest.TestCase):
         with _migrated_database() as (db, _url):
             _seed_definition_and_draft(db)
             _publish(db)
-            run, created = _service(db).request_eval(
-                _SLUG, 1, "writeup_replay", now=_NOW
-            )
+            run, created = _service(db).request_eval(_SLUG, 1, "writeup_replay", now=_NOW)
             self.assertTrue(created)
             self.assertEqual(run.status, "pending")
             self.assertEqual(_count_eval_jobs(db), 1)
             # Payload carries REFERENCES ONLY -- never a flag/seed/secret.
             with db.session_scope() as s:
                 payload = s.execute(
-                    sa.text(
-                        "SELECT payload FROM jobs "
-                        "WHERE job_type='run_agent_evaluation'"
-                    )
+                    sa.text("SELECT payload FROM jobs WHERE job_type='run_agent_evaluation'")
                 ).scalar_one()
             self.assertEqual(
                 set(payload),
@@ -220,9 +213,7 @@ class EvalRunServiceTests(unittest.TestCase):
             _publish(db)
             svc = _service(db)
             base, _ = svc.request_eval(_SLUG, 1, "writeup_replay", now=_NOW)
-            adv, created = svc.request_eval(
-                _SLUG, 1, "writeup_replay", adversarial=True, now=_NOW
-            )
+            adv, created = svc.request_eval(_SLUG, 1, "writeup_replay", adversarial=True, now=_NOW)
             self.assertTrue(created)
             self.assertNotEqual(base.eval_run_id, adv.eval_run_id)
             self.assertEqual(_count_eval_jobs(db), 2)
@@ -316,9 +307,7 @@ class EvalRunServiceTests(unittest.TestCase):
             run, _ = svc.request_eval(_SLUG, 1, "writeup_replay", now=_NOW)
             svc.record_result(run.eval_run_id, EvalResultInput(solved=True), _DONE)
             with self.assertRaises(EvalRunConflictError):
-                svc.record_result(
-                    run.eval_run_id, EvalResultInput(solved=False), _DONE
-                )
+                svc.record_result(run.eval_run_id, EvalResultInput(solved=False), _DONE)
 
     def test_advisory_run_gates_nothing(self) -> None:
         # The advisory invariant: publication must NOT consult eval state. A
@@ -336,9 +325,7 @@ class EvalRunServiceTests(unittest.TestCase):
             self.assertEqual(svc.get(run.eval_run_id).solved, False)
             # Publication proceeds unaffected -- nothing consumes the EvalRun.
             attached = PublicationService(db).attach(
-                ChallengePublication(
-                    competition_id="cup", definition_slug=_SLUG, version_no=1
-                )
+                ChallengePublication(competition_id="cup", definition_slug=_SLUG, version_no=1)
             )
             self.assertEqual(attached.definition_slug, _SLUG)
 
@@ -402,9 +389,7 @@ class EvalRunServiceTests(unittest.TestCase):
             self.assertFalse(created)  # recovered, did not create a second row
             self.assertEqual(loser.eval_run_id, winner.eval_run_id)
             with db.session_scope() as s:
-                rows = s.execute(
-                    sa.text("SELECT count(*) FROM eval_runs")
-                ).scalar_one()
+                rows = s.execute(sa.text("SELECT count(*) FROM eval_runs")).scalar_one()
             self.assertEqual(rows, 1)
             self.assertEqual(_count_eval_jobs(db), 1)  # no duplicate job
 

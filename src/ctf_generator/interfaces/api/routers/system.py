@@ -126,8 +126,7 @@ def _check_projection_lag(database) -> dict[str, object]:
         except Exception:  # pragma: no cover - defensive datetime guard
             age_seconds = None
     degraded = lag.failed_count >= _PROJECTION_FAILED_DEGRADED_AT or (
-        age_seconds is not None
-        and age_seconds >= _PROJECTION_PENDING_AGE_DEGRADED_SECONDS
+        age_seconds is not None and age_seconds >= _PROJECTION_PENDING_AGE_DEGRADED_SECONDS
     )
     return {
         "status": "degraded" if degraded else "ok",
@@ -174,10 +173,7 @@ def ready(request: Request) -> object:
     projection = _check_projection_lag(database) if db_up else {"status": "unknown"}
 
     hard_ok = db_up and migrations.get("status") == "ok"
-    degraded = (
-        dead_letter.get("status") == "degraded"
-        or projection.get("status") == "degraded"
-    )
+    degraded = dead_letter.get("status") == "degraded" or projection.get("status") == "degraded"
     checks = {
         "database": {"status": "up" if db_up else "down"},
         "migrations": migrations,
@@ -243,15 +239,9 @@ def metrics(
 
         pending = _metric_count(lambda: _lag().pending_count)
         failed = _metric_count(lambda: _lag().failed_count)
-        dead_letter = _metric_count(
-            lambda: len(JobService(database).list_dead_letter())
-        )
+        dead_letter = _metric_count(lambda: len(JobService(database).list_dead_letter()))
         eval_non_terminal = _metric_count(
-            lambda: len(
-                EvalRunService(
-                    database, jobs=JobService(database)
-                ).list_non_terminal()
-            )
+            lambda: len(EvalRunService(database, jobs=JobService(database)).list_non_terminal())
         )
 
     text = render_metrics(

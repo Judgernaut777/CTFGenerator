@@ -148,9 +148,7 @@ class OidcService:
             "code_challenge_method": "S256",
         }
         url = f"{doc.authorization_endpoint}?{urlencode(params)}"
-        return AuthorizationRedirect(
-            url=url, state=state, binding_secret=binding_secret
-        )
+        return AuthorizationRedirect(url=url, state=state, binding_secret=binding_secret)
 
     # -- callback (validate + issue the local session) -----------------------
 
@@ -202,9 +200,7 @@ class OidcService:
 
     # -- internals -----------------------------------------------------------
 
-    def _exchange_code(
-        self, doc: DiscoveryDocument, code: str, code_verifier: str
-    ) -> str:
+    def _exchange_code(self, doc: DiscoveryDocument, code: str, code_verifier: str) -> str:
         """Exchange the authorization code for tokens at the token endpoint, with
         the PKCE ``code_verifier`` + ``client_secret_basic`` auth and an
         exact-match ``redirect_uri``. Returns the raw ``id_token``. A non-2xx or a
@@ -347,9 +343,7 @@ class OidcService:
         if not self._config.auto_provision:
             raise OidcAuthError("no local account for this identity")
         display_name = (
-            claims.get("name")
-            or claims.get("preferred_username")
-            or email.split("@", 1)[0]
+            claims.get("name") or claims.get("preferred_username") or email.split("@", 1)[0]
         )
         try:
             self._identity.register(User(email=email, display_name=str(display_name)))

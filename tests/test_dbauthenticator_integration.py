@@ -165,9 +165,7 @@ class DbAuthenticatorSeamTests(unittest.TestCase):
 
             # player -> read yes, write no (403), proving the flat set resolved
             # from the real competition role gates require_permission.
-            player_read = client.get(
-                f"/api/v1/competitions/{_COMP}", headers=_auth(player_token)
-            )
+            player_read = client.get(f"/api/v1/competitions/{_COMP}", headers=_auth(player_token))
             self.assertEqual(player_read.status_code, 200)
             player_write = client.post(
                 "/api/v1/competitions",
@@ -190,9 +188,7 @@ class DbAuthenticatorSeamTests(unittest.TestCase):
 
     def test_garbage_token_is_401(self) -> None:
         with _fixture() as (client, _service, _db):
-            r = client.get(
-                f"/api/v1/competitions/{_COMP}", headers=_auth("not-a-real-token")
-            )
+            r = client.get(f"/api/v1/competitions/{_COMP}", headers=_auth("not-a-real-token"))
             self.assertEqual(r.status_code, 401)
 
     def test_revoked_token_is_401(self) -> None:
@@ -209,9 +205,7 @@ class DbAuthenticatorSeamTests(unittest.TestCase):
             past = datetime.now(UTC) - timedelta(hours=1)
             # Craft an already-expired session directly for org@x.io.
             with db.session_scope() as s:
-                uid = s.execute(
-                    sa.text("SELECT id FROM users WHERE email = 'org@x.io'")
-                ).scalar()
+                uid = s.execute(sa.text("SELECT id FROM users WHERE email = 'org@x.io'")).scalar()
                 s.execute(
                     sa.text(
                         "INSERT INTO sessions "

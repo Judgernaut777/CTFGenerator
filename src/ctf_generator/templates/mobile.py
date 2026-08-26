@@ -109,7 +109,7 @@ class Variant:
 def render(
     spec: ChallengeSpec,
     rng: random.Random,
-    cve_record: "CveRecord | None" = None,
+    cve_record: CveRecord | None = None,
 ) -> dict[str, str]:
     variant = _variant(rng)
     is_blue = spec.mode == "blue"
@@ -193,7 +193,9 @@ def _variant(rng: random.Random) -> Variant:
         ["api-staging.internal", "debug.acmemobile.local", "qa-api.acmemobile.io"]
     )
     debug_user = rng.choice(["svc_debug", "qa_bot", "internal_qa", "staging_ci"])
-    debug_password = f"{rng.choice(['Spring', 'River', 'Delta', 'Ember'])}{rng.randrange(100, 999)}!"
+    debug_password = (
+        f"{rng.choice(['Spring', 'River', 'Delta', 'Ember'])}{rng.randrange(100, 999)}!"
+    )
     session_token = f"sess_{_token_hex(rng, 8)}"
     flag = f"ctf{{mobile_insecure_storage_{_token_hex(rng, 6)}}}"
 
@@ -477,7 +479,7 @@ def _description(
     spec: ChallengeSpec,
     v: Variant,
     is_blue: bool,
-    cve_record: "CveRecord | None",
+    cve_record: CveRecord | None,
 ) -> str:
     cve_note = ""
     if cve_record is not None:
@@ -555,7 +557,7 @@ def _findings_table(v: Variant, is_blue: bool = False) -> str:
     if is_blue:
         table += (
             "| F5 | CWE-312 | `public/app/AndroidManifest.xml` + `backup_rules.xml` | "
-            "no (risk amplifier) | `android:allowBackup=\"true\"` plus the "
+            'no (risk amplifier) | `android:allowBackup="true"` plus the '
             "full-backup `sharedpref` include means F2's exposure needs no "
             "device access at all -- `adb backup` alone reaches the same "
             "ciphertext via `public/app/backup/vault_backup.xml` |\n"
@@ -645,7 +647,7 @@ compile-time constant.
 
 
 def _solver(v: Variant) -> str:
-    return f'''from __future__ import annotations
+    return f"""from __future__ import annotations
 
 import argparse
 import base64
@@ -708,70 +710,73 @@ def main() -> int:
 
 if __name__ == "__main__":
     sys.exit(main())
-'''
+"""
 
 
 def _variant_json(spec: ChallengeSpec, v: Variant) -> str:
-    return json.dumps(
-        {
-            "meta": spec.meta_mapping(),
-            "family": FAMILY_NAME,
-            "mode": spec.mode,
-            "flag": v.flag,
-            "app": {
-                "name": v.app_name,
-                "company": v.company,
-                "package": "com.acmemobile.vault",
-            },
-            "storage": {
-                "pref_key": v.pref_key,
-                "note_label": v.note_label,
-                "account_holder": v.account_holder,
-                "ciphertext_b64": v.ciphertext_b64,
-            },
-            "credentials": {
-                "hardcoded_xor_key_hex": v.key_hex,
-                "debug_host": v.debug_host,
-                "debug_user": v.debug_user,
-                "debug_password": v.debug_password,
-            },
-            "decoys": {
-                "backup_session_token": v.session_token,
-            },
-            "findings": [
-                {
-                    "id": "F1",
-                    "cwe": "CWE-798",
-                    "file": f"{_JAVA_DIR}/CryptoVault.java",
-                    "required_for_flag": True,
+    return (
+        json.dumps(
+            {
+                "meta": spec.meta_mapping(),
+                "family": FAMILY_NAME,
+                "mode": spec.mode,
+                "flag": v.flag,
+                "app": {
+                    "name": v.app_name,
+                    "company": v.company,
+                    "package": "com.acmemobile.vault",
                 },
-                {
-                    "id": "F2",
-                    "cwe": "CWE-312",
-                    "file": "public/app/shared_prefs/vault_prefs.xml",
-                    "required_for_flag": True,
+                "storage": {
+                    "pref_key": v.pref_key,
+                    "note_label": v.note_label,
+                    "account_holder": v.account_holder,
+                    "ciphertext_b64": v.ciphertext_b64,
                 },
-                {
-                    "id": "F3",
-                    "cwe": "CWE-798",
-                    "file": f"{_JAVA_DIR}/LoginActivity.java",
-                    "required_for_flag": False,
+                "credentials": {
+                    "hardcoded_xor_key_hex": v.key_hex,
+                    "debug_host": v.debug_host,
+                    "debug_user": v.debug_user,
+                    "debug_password": v.debug_password,
                 },
-                {
-                    "id": "F4",
-                    "cwe": "CWE-312",
-                    "file": "public/app/backup/vault_backup.xml",
-                    "required_for_flag": False,
+                "decoys": {
+                    "backup_session_token": v.session_token,
                 },
-            ],
-        },
-        indent=2,
-        sort_keys=True,
-    ) + "\n"
+                "findings": [
+                    {
+                        "id": "F1",
+                        "cwe": "CWE-798",
+                        "file": f"{_JAVA_DIR}/CryptoVault.java",
+                        "required_for_flag": True,
+                    },
+                    {
+                        "id": "F2",
+                        "cwe": "CWE-312",
+                        "file": "public/app/shared_prefs/vault_prefs.xml",
+                        "required_for_flag": True,
+                    },
+                    {
+                        "id": "F3",
+                        "cwe": "CWE-798",
+                        "file": f"{_JAVA_DIR}/LoginActivity.java",
+                        "required_for_flag": False,
+                    },
+                    {
+                        "id": "F4",
+                        "cwe": "CWE-312",
+                        "file": "public/app/backup/vault_backup.xml",
+                        "required_for_flag": False,
+                    },
+                ],
+            },
+            indent=2,
+            sort_keys=True,
+        )
+        + "\n"
+    )
 
 
 def _healthcheck() -> str:
-    return f'''from __future__ import annotations
+    return f"""from __future__ import annotations
 
 import sys
 from pathlib import Path
@@ -808,4 +813,4 @@ def main() -> int:
 
 if __name__ == "__main__":
     sys.exit(main())
-'''
+"""

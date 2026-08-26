@@ -69,7 +69,8 @@ def _cmd_login(args: argparse.Namespace) -> int:
         # Login is unauthenticated; a wrong password surfaces as an ApiError
         # (invalid credentials), NOT AuthRequired.
         issued = ApiClient(http, store, api_url).request(
-            "POST", "/auth/login",
+            "POST",
+            "/auth/login",
             json={"email": email, "password": password},
             authed=False,
         )
@@ -78,9 +79,7 @@ def _cmd_login(args: argparse.Namespace) -> int:
         # Resolve the real subject via /auth/me using the freshly issued token
         # (an in-memory override -- the session is not persisted until we have
         # the subject).
-        me = ApiClient(http, store, api_url, token_override=token).request(
-            "GET", "/auth/me"
-        )
+        me = ApiClient(http, store, api_url, token_override=token).request("GET", "/auth/me")
         subject = me.get("subject", email)
         store.save(
             Session(

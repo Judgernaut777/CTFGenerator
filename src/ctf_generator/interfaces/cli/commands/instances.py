@@ -37,11 +37,7 @@ _COLUMNS = [
 
 
 def _list(args: argparse.Namespace) -> int:
-    path = (
-        f"/competitions/{args.competition_id}/instances"
-        if args.competition_id
-        else "/instances"
-    )
+    path = f"/competitions/{args.competition_id}/instances" if args.competition_id else "/instances"
     with open_client(args) as client:
         rows = client.list(path, limit=args.limit)
     output.print_rows(rows, _COLUMNS, as_json=args.json)
@@ -113,9 +109,7 @@ def add_parser(areas: argparse._SubParsersAction) -> None:
     request.add_argument("--capability", action="append", default=None, help="Repeatable")
     request.add_argument("--ttl-seconds", dest="ttl_seconds", type=int, default=3600)
     request.add_argument("--worker-units", dest="worker_units", type=int, default=1)
-    request.add_argument(
-        "--platform-capacity", dest="platform_capacity", type=int, default=1
-    )
+    request.add_argument("--platform-capacity", dest="platform_capacity", type=int, default=1)
     add_idempotency_option(request)
     add_global_options(request)
     request.set_defaults(func=_request)

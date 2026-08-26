@@ -2,8 +2,9 @@ from __future__ import annotations
 
 import random
 import re
+from collections.abc import Callable
 from dataclasses import dataclass, field
-from typing import TYPE_CHECKING, Callable, Protocol
+from typing import TYPE_CHECKING, Protocol
 
 from . import schema as _schema
 from .models import ChallengeSpec, ResponseSpec, ScenarioSpec, TriggerSpec
@@ -14,6 +15,104 @@ from .validator import REQUIRED_FILES
 
 if TYPE_CHECKING:
     from .cve_source import CveRecord
+
+
+# --- Binary-safe RenderedFile value -------------------------------------------
+#
+# Allows renderer families to return either text (str) or exact binary bytes
+# while preserving a stable public authoring type. The generator normalizes
+# everything to RenderedFile at the single choke point (build.write_build).
+
+
+@dataclass(frozen=True)
+class RenderedFile:
+    """A rendered file carrying exact binary content with text/binary distinction.
+
+    This is the **single authoritative type** for renderer output. Families may
+    return ``str`` or ``bytes``; the SDK normalizes to ``RenderedFile`` before
+    the build layer writes to disk and hashes for manifests.
+
+    Use ``RenderedFile.from_value()`` to normalize str/bytes inputs.
+    Use ``.decode()`` to get back str (UTF-8) or raw bytes.
+    """
+
+    content: bytes
+    #: True when the original value was bytes (binary file); False when it was
+    #: str (text file). Preserved so linters and tooling can make policy
+    #: decisions without re-scanning content.
+    is_binary: bool
+
+    @classmethod
+    def from_value(cls, value: str | bytes) -> RenderedFile:
+        """Normalize a str or bytes value into a RenderedFile.
+
+        Args:
+            value: str (UTF-8 text) or bytes (exact binary payload).
+
+        Returns:
+            RenderedFile with content as UTF-8 bytes and is_binary flag set.
+
+        Raises:
+            TypeError: if value is not str or bytes.
+        """
+        if isinstance(value, bytes):
+            return cls(content=value, is_binary=True)
+        if isinstance(value, str):
+            return cls(content=value.encode("utf-8"), is_binary=False)
+        raise TypeError(
+            f"RenderedFile.from_value() expects str or bytes, got {type(value).__name__}"
+        )
+
+    def decode(self, *, errors: str = "strict", force_str: bool = False) -> str | bytes:
+        """Return the original-style value.
+
+        For text files (is_binary=False), returns the decoded UTF-8 str.
+        For binary files (is_binary=True), returns the raw bytes unchanged,
+        unless force_str=True, in which case it decodes with the given
+        error handling (useful for flag token scanning).
+
+        Args:
+            errors: Error handling for UTF-8 decode on text files. Passed to
+                ``bytes.decode()``. Default "strict". Use "replace" to tolerate
+                invalid UTF-8 in binary files that are treated as text.
+            force_str: If True, always return str (decoding binary with
+                replacement characters). Default False.
+
+        Returns:
+            str for text files, bytes for binary files (or str if force_str=True).
+
+        Raises:
+            UnicodeDecodeError: if a text file contains invalid UTF-8 and
+                errors="strict" (default).
+        """
+        if self.is_binary and not force_str:
+            return self.content
+        return self.content.decode("utf-8", errors=errors)
+
+    def __repr__(self) -> str:  # pragma: no cover - trivial
+        kind = "binary" if self.is_binary else "text"
+        return f"RenderedFile({kind}, {len(self.content)} bytes)"
+
+
+def normalize_renderer_output(
+    rendered: dict[str, str | bytes],
+) -> dict[str, RenderedFile]:
+    """Normalize a renderer's {path: str|bytes} mapping to {path: RenderedFile}.
+
+    This is the **single normalization seam** for renderer output. Call it once
+    in the generator before passing to build.write_build.
+
+    Args:
+        rendered: Mapping from relative path to str (text) or bytes (binary).
+
+    Returns:
+        Mapping from relative path to RenderedFile.
+
+    Raises:
+        TypeError: if any value is not str or bytes.
+    """
+    return {path: RenderedFile.from_value(content) for path, content in rendered.items()}
+
 
 # --- Scoring hints ------------------------------------------------------------
 
@@ -42,8 +141,8 @@ class FamilyRenderer(Protocol):
         self,
         spec: ChallengeSpec,
         rng: random.Random,
-        cve_record: "CveRecord | None" = None,
-    ) -> dict[str, str]: ...
+        cve_record: CveRecord | None = None,
+    ) -> dict[str, str | bytes]: ...
 
 
 DefaultSpecBuilder = Callable[..., ChallengeSpec]
@@ -160,9 +259,7 @@ def families_for_mode(mode: str) -> list[Family]:
 
 def families_for_category(category: str) -> list[Family]:
     return [
-        f
-        for f in sorted(_REGISTRY.values(), key=lambda fam: fam.name)
-        if f.category == category
+        f for f in sorted(_REGISTRY.values(), key=lambda fam: fam.name) if f.category == category
     ]
 
 
@@ -275,7 +372,7 @@ _FAMILY_SCENARIOS: dict[str, ScenarioSpec] = {
 def _render_web_business_logic_tenant_export(
     spec: ChallengeSpec,
     rng: random.Random,
-    cve_record: "CveRecord | None" = None,
+    cve_record: CveRecord | None = None,
 ) -> dict[str, str]:
     """Adapter wrapping ``render_tenant_export`` unchanged for the registry.
 
@@ -296,9 +393,7 @@ register(
         compose_service_markers=("worker:", "redis"),
         difficulties=("easy", "medium", "hard"),
         cve_driven=False,
-        llm_brief=_FAMILY_BRIEF.get(
-            "web_business_logic_tenant_export", "A security challenge."
-        ),
+        llm_brief=_FAMILY_BRIEF.get("web_business_logic_tenant_export", "A security challenge."),
         scoring_hints=ScoringHints(
             has_worker=True,
             has_queue=True,
@@ -438,32 +533,47 @@ _FAMILY_META: dict[str, dict] = {
     # web_business_logic_tenant_export is registered explicitly above with its
     # metadata inline (it is not in the module loop below).
     "network_lateral_pivot": dict(
-        maintenance_status="beta", isolation_level="container", required_ports=(8080,),
-        expected_memory_mb=384, cve_fidelity_support=("contextualized", "inspired", "simulated"),
+        maintenance_status="beta",
+        isolation_level="container",
+        required_ports=(8080,),
+        expected_memory_mb=384,
+        cve_fidelity_support=("contextualized", "inspired", "simulated"),
     ),
     "cloud_metadata_ssrf": dict(
-        maintenance_status="beta", isolation_level="container", required_ports=(8080, 9000),
-        expected_memory_mb=384, cve_fidelity_support=("contextualized", "inspired", "simulated"),
+        maintenance_status="beta",
+        isolation_level="container",
+        required_ports=(8080, 9000),
+        expected_memory_mb=384,
+        cve_fidelity_support=("contextualized", "inspired", "simulated"),
     ),
     "forensics_incident_triage": dict(
-        maintenance_status="beta", isolation_level="artifact", expected_memory_mb=128,
+        maintenance_status="beta",
+        isolation_level="artifact",
+        expected_memory_mb=128,
     ),
     "crypto_token_forgery": dict(
-        maintenance_status="experimental", isolation_level="container", required_ports=(8080,),
+        maintenance_status="experimental",
+        isolation_level="container",
+        required_ports=(8080,),
         cve_fidelity_support=("contextualized", "inspired", "simulated"),
     ),
     "binary_heap_exploit": dict(
         # Raw-TCP service on a seed-randomized ephemeral port (rng.randrange),
         # so required_ports stays empty per the "seed-varied" convention.
-        maintenance_status="experimental", isolation_level="raw_tcp", expected_memory_mb=128,
+        maintenance_status="experimental",
+        isolation_level="raw_tcp",
+        expected_memory_mb=128,
     ),
     "scada_ics_modbus_takeover": dict(
         # PLC/HMI ports are seed-randomized (rng.randrange 5020-5030 / 8090-8099),
         # so they are ephemeral -- required_ports stays empty.
-        maintenance_status="experimental", isolation_level="container",
+        maintenance_status="experimental",
+        isolation_level="container",
     ),
     "mobile_insecure_storage": dict(
-        maintenance_status="experimental", isolation_level="artifact", expected_memory_mb=128,
+        maintenance_status="experimental",
+        isolation_level="artifact",
+        expected_memory_mb=128,
     ),
 }
 

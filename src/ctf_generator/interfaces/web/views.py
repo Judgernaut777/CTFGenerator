@@ -236,15 +236,11 @@ def report_snapshot_detail(snapshot: ReportSnapshot) -> dict[str, Any]:
         "competition_id": snapshot.competition_id,
         "created_by": snapshot.created_by,
         "created_at": _iso(snapshot.created_at),
-        "payload_json": json.dumps(
-            dict(snapshot.payload), indent=2, sort_keys=True, default=str
-        ),
+        "payload_json": json.dumps(dict(snapshot.payload), indent=2, sort_keys=True, default=str),
     }
 
 
-def submission_history_row(
-    submission: LedgerSubmission, title: str
-) -> dict[str, Any]:
+def submission_history_row(submission: LedgerSubmission, title: str) -> dict[str, Any]:
     """One own-team submission-history row (M12b). Exposes ONLY the public attempt
     facts: which challenge (slug + resolved title + version), when, and whether it
     was correct. The candidate answer is inbound-only and is NOT stored on

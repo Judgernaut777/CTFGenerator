@@ -45,9 +45,7 @@ DEGRADED = "degraded"
 UNAVAILABLE = "unavailable"
 
 
-def readiness_body(
-    *, hard_ok: bool, degraded: bool, checks: dict[str, Any]
-) -> dict[str, Any]:
+def readiness_body(*, hard_ok: bool, degraded: bool, checks: dict[str, Any]) -> dict[str, Any]:
     """Structured multi-check readiness body.
 
     ``hard_ok`` is False when a HARD dependency (DB down / migrations behind) is

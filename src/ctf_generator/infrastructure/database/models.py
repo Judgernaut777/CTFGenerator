@@ -73,16 +73,12 @@ _SYSTEM_ROLE_IN_LIST = ", ".join(f"'{r}'" for r in sorted(VALID_SYSTEM_ROLES))
 # Likewise for challenge-version lifecycle states and scoring decay functions.
 _VERSION_STATE_IN_LIST = ", ".join(f"'{s}'" for s in sorted(VALID_VERSION_STATES))
 _DECAY_FUNCTION_IN_LIST = ", ".join(f"'{d}'" for d in sorted(VALID_DECAY_FUNCTIONS))
-_SCORE_EVENT_TYPE_IN_LIST = ", ".join(
-    f"'{t}'" for t in sorted(VALID_SCORE_EVENT_TYPES)
-)
+_SCORE_EVENT_TYPE_IN_LIST = ", ".join(f"'{t}'" for t in sorted(VALID_SCORE_EVENT_TYPES))
 # M15: agent-evaluation platform-record enumerations -- rendered from the domain
 # frozensets (single source of truth) and sorted, so the ORM CHECK SQL and the
 # migration SQL cannot drift from the domain or each other.
 _EVAL_PROFILE_IN_LIST = ", ".join(f"'{p}'" for p in sorted(VALID_EVAL_PROFILES))
-_EVAL_RUN_STATUS_IN_LIST = ", ".join(
-    f"'{s}'" for s in sorted(VALID_EVAL_RUN_STATUSES)
-)
+_EVAL_RUN_STATUS_IN_LIST = ", ".join(f"'{s}'" for s in sorted(VALID_EVAL_RUN_STATUSES))
 # M16 audit trail: the closed set of audit outcomes, rendered from the domain
 # frozenset (single source of truth) and sorted so the ORM CHECK SQL and the
 # migration SQL cannot drift.
@@ -95,34 +91,24 @@ _REPORT_TYPE_IN_LIST = ", ".join(f"'{t}'" for t in sorted(VALID_REPORT_TYPES))
 # CHECK SQL and the migration SQL cannot drift from the domain or each other.
 _JOB_TYPE_IN_LIST = ", ".join(f"'{t}'" for t in sorted(VALID_JOB_TYPES))
 _JOB_STATUS_IN_LIST = ", ".join(f"'{s}'" for s in sorted(VALID_JOB_STATUSES))
-_JOB_ERROR_CLASS_IN_LIST = ", ".join(
-    f"'{c}'" for c in sorted(VALID_JOB_ERROR_CLASSES)
-)
+_JOB_ERROR_CLASS_IN_LIST = ", ".join(f"'{c}'" for c in sorted(VALID_JOB_ERROR_CLASSES))
 _TRUST_STATE_IN_LIST = ", ".join(f"'{s}'" for s in sorted(VALID_TRUST_STATES))
 _RUNTIME_TYPE_IN_LIST = ", ".join(f"'{r}'" for r in sorted(VALID_RUNTIME_TYPES))
-_PROJECTION_STATUS_IN_LIST = ", ".join(
-    f"'{s}'" for s in sorted(VALID_PROJECTION_TASK_STATUSES)
-)
-_TERMINAL_JOB_STATUS_IN_LIST = ", ".join(
-    f"'{s}'" for s in sorted(TERMINAL_JOB_STATUSES)
-)
+_PROJECTION_STATUS_IN_LIST = ", ".join(f"'{s}'" for s in sorted(VALID_PROJECTION_TASK_STATUSES))
+_TERMINAL_JOB_STATUS_IN_LIST = ", ".join(f"'{s}'" for s in sorted(TERMINAL_JOB_STATUSES))
 # M8: scheduling/quota enumerations -- rendered from the domain frozensets
 # (single source of truth) and sorted, so the ORM CHECK SQL and the migration
 # SQL cannot drift from the domain or each other.
 _QUOTA_SCOPE_IN_LIST = ", ".join(f"'{s}'" for s in sorted(VALID_QUOTA_SCOPES))
 _QUOTA_DIMENSION_IN_LIST = ", ".join(f"'{d}'" for d in sorted(VALID_DIMENSIONS))
 _CEILING_DIMENSION_IN_LIST = ", ".join(f"'{d}'" for d in sorted(CEILING_DIMENSIONS))
-_RESERVATION_STATE_IN_LIST = ", ".join(
-    f"'{s}'" for s in sorted(VALID_RESERVATION_STATES)
-)
+_RESERVATION_STATE_IN_LIST = ", ".join(f"'{s}'" for s in sorted(VALID_RESERVATION_STATES))
 # M8 slice 1b: instance-lifecycle enumerations -- rendered from the domain
 # frozensets (single source of truth) and sorted, so the ORM CHECK SQL and the
 # migration SQL cannot drift from the domain or each other.
 _INSTANCE_STATE_IN_LIST = ", ".join(f"'{s}'" for s in sorted(VALID_INSTANCE_STATES))
 _DESIRED_STATE_IN_LIST = ", ".join(f"'{s}'" for s in sorted(VALID_DESIRED_STATES))
-_RESOURCE_KIND_IN_LIST = ", ".join(
-    f"'{k}'" for k in sorted(VALID_RUNTIME_RESOURCE_KINDS)
-)
+_RESOURCE_KIND_IN_LIST = ", ".join(f"'{k}'" for k in sorted(VALID_RUNTIME_RESOURCE_KINDS))
 _RESOURCE_STATE_IN_LIST = ", ".join(f"'{s}'" for s in sorted(VALID_RESOURCE_STATES))
 _OBSERVED_STATE_IN_LIST = ", ".join(f"'{s}'" for s in sorted(VALID_OBSERVED_STATES))
 _EVENT_ACTOR_IN_LIST = ", ".join(f"'{a}'" for a in sorted(VALID_EVENT_ACTORS))
@@ -140,29 +126,19 @@ class Competition(Base):
 
     __tablename__ = "competitions"
 
-    id: Mapped[uuid.UUID] = mapped_column(
-        sa.Uuid, primary_key=True, default=uuid.uuid4
-    )
+    id: Mapped[uuid.UUID] = mapped_column(sa.Uuid, primary_key=True, default=uuid.uuid4)
     slug: Mapped[str] = mapped_column(sa.Text, nullable=False)
     name: Mapped[str] = mapped_column(sa.Text, nullable=False)
-    start_time: Mapped[datetime] = mapped_column(
-        sa.DateTime(timezone=True), nullable=False
-    )
-    end_time: Mapped[datetime] = mapped_column(
-        sa.DateTime(timezone=True), nullable=False
-    )
+    start_time: Mapped[datetime] = mapped_column(sa.DateTime(timezone=True), nullable=False)
+    end_time: Mapped[datetime] = mapped_column(sa.DateTime(timezone=True), nullable=False)
     scoring_start_at: Mapped[datetime | None] = mapped_column(
         sa.DateTime(timezone=True), nullable=True
     )
-    freeze_time: Mapped[datetime | None] = mapped_column(
-        sa.DateTime(timezone=True), nullable=True
-    )
+    freeze_time: Mapped[datetime | None] = mapped_column(sa.DateTime(timezone=True), nullable=True)
     status: Mapped[str] = mapped_column(
         sa.Text, nullable=False, server_default=sa.text("'draft'"), default="draft"
     )
-    archived_at: Mapped[datetime | None] = mapped_column(
-        sa.DateTime(timezone=True), nullable=True
-    )
+    archived_at: Mapped[datetime | None] = mapped_column(sa.DateTime(timezone=True), nullable=True)
     created_at: Mapped[datetime] = mapped_column(
         sa.DateTime(timezone=True), nullable=False, server_default=sa.func.now()
     )
@@ -171,8 +147,7 @@ class Competition(Base):
         UniqueConstraint("slug", name="uq_competitions_slug"),
         CheckConstraint("end_time > start_time", name="end_after_start"),
         CheckConstraint(
-            "freeze_time IS NULL OR "
-            "(freeze_time >= start_time AND freeze_time <= end_time)",
+            "freeze_time IS NULL OR (freeze_time >= start_time AND freeze_time <= end_time)",
             name="freeze_within_bounds",
         ),
         CheckConstraint("char_length(name) > 0", name="name_non_empty"),
@@ -200,9 +175,7 @@ class User(Base):
     id: Mapped[uuid.UUID] = mapped_column(sa.Uuid, primary_key=True, default=uuid.uuid4)
     email: Mapped[str] = mapped_column(sa.Text, nullable=False)
     display_name: Mapped[str] = mapped_column(sa.Text, nullable=False)
-    archived_at: Mapped[datetime | None] = mapped_column(
-        sa.DateTime(timezone=True), nullable=True
-    )
+    archived_at: Mapped[datetime | None] = mapped_column(sa.DateTime(timezone=True), nullable=True)
     created_at: Mapped[datetime] = mapped_column(
         sa.DateTime(timezone=True), nullable=False, server_default=sa.func.now()
     )
@@ -244,9 +217,7 @@ class Team(Base):
         nullable=False,
     )
     name: Mapped[str] = mapped_column(sa.Text, nullable=False)
-    archived_at: Mapped[datetime | None] = mapped_column(
-        sa.DateTime(timezone=True), nullable=True
-    )
+    archived_at: Mapped[datetime | None] = mapped_column(sa.DateTime(timezone=True), nullable=True)
     created_at: Mapped[datetime] = mapped_column(
         sa.DateTime(timezone=True), nullable=False, server_default=sa.func.now()
     )
@@ -288,17 +259,13 @@ class Membership(Base):
     )
     team_id: Mapped[uuid.UUID | None] = mapped_column(sa.Uuid, nullable=True)
     role: Mapped[str] = mapped_column(sa.Text, nullable=False)
-    archived_at: Mapped[datetime | None] = mapped_column(
-        sa.DateTime(timezone=True), nullable=True
-    )
+    archived_at: Mapped[datetime | None] = mapped_column(sa.DateTime(timezone=True), nullable=True)
     created_at: Mapped[datetime] = mapped_column(
         sa.DateTime(timezone=True), nullable=False, server_default=sa.func.now()
     )
 
     __table_args__ = (
-        UniqueConstraint(
-            "user_id", "competition_id", name="uq_memberships_user_id_competition_id"
-        ),
+        UniqueConstraint("user_id", "competition_id", name="uq_memberships_user_id_competition_id"),
         # Cross-table integrity: the placed team must belong to the same
         # competition. MATCH SIMPLE -> not enforced when team_id is NULL, which
         # is exactly the unteamed case we want to allow.
@@ -308,9 +275,7 @@ class Membership(Base):
             ondelete="RESTRICT",
         ),
         CheckConstraint(f"role IN ({_ROLE_IN_LIST})", name="role_valid"),
-        Index(
-            "ix_memberships_competition_id_team_id", "competition_id", "team_id"
-        ),
+        Index("ix_memberships_competition_id_team_id", "competition_id", "team_id"),
         Index("ix_memberships_user_id", "user_id"),
     )
 
@@ -327,9 +292,7 @@ class ChallengeDefinition(Base):
     family: Mapped[str] = mapped_column(sa.Text, nullable=False)
     slug: Mapped[str] = mapped_column(sa.Text, nullable=False)
     title: Mapped[str] = mapped_column(sa.Text, nullable=False)
-    archived_at: Mapped[datetime | None] = mapped_column(
-        sa.DateTime(timezone=True), nullable=True
-    )
+    archived_at: Mapped[datetime | None] = mapped_column(sa.DateTime(timezone=True), nullable=True)
     created_at: Mapped[datetime] = mapped_column(
         sa.DateTime(timezone=True), nullable=False, server_default=sa.func.now()
     )
@@ -359,25 +322,17 @@ class ChallengeVersion(Base):
         nullable=False,
     )
     version_no: Mapped[int] = mapped_column(sa.Integer, nullable=False)
-    state: Mapped[str] = mapped_column(
-        sa.Text, nullable=False, server_default=sa.text("'draft'")
-    )
+    state: Mapped[str] = mapped_column(sa.Text, nullable=False, server_default=sa.text("'draft'"))
     family_version: Mapped[str] = mapped_column(sa.Text, nullable=False)
     seed: Mapped[str] = mapped_column(sa.Text, nullable=False)
-    mode: Mapped[str] = mapped_column(
-        sa.Text, nullable=False, server_default=sa.text("'red'")
-    )
+    mode: Mapped[str] = mapped_column(sa.Text, nullable=False, server_default=sa.text("'red'"))
     spec_sha256: Mapped[str] = mapped_column(sa.Text, nullable=False)
     spec_json: Mapped[dict] = mapped_column(JSONB, nullable=False)
     cve_refs: Mapped[list[str] | None] = mapped_column(ARRAY(sa.Text), nullable=True)
     cve_content_hash: Mapped[str | None] = mapped_column(sa.Text, nullable=True)
     spec_version: Mapped[str] = mapped_column(sa.Text, nullable=False)
-    published_at: Mapped[datetime | None] = mapped_column(
-        sa.DateTime(timezone=True), nullable=True
-    )
-    archived_at: Mapped[datetime | None] = mapped_column(
-        sa.DateTime(timezone=True), nullable=True
-    )
+    published_at: Mapped[datetime | None] = mapped_column(sa.DateTime(timezone=True), nullable=True)
+    archived_at: Mapped[datetime | None] = mapped_column(sa.DateTime(timezone=True), nullable=True)
     created_at: Mapped[datetime] = mapped_column(
         sa.DateTime(timezone=True), nullable=False, server_default=sa.func.now()
     )
@@ -390,9 +345,7 @@ class ChallengeVersion(Base):
             "definition_id", "spec_sha256", name="uq_challenge_versions_definition_id_spec_sha256"
         ),
         CheckConstraint("version_no >= 1", name="version_no_positive"),
-        CheckConstraint(
-            f"state IN ({_VERSION_STATE_IN_LIST})", name="state_valid"
-        ),
+        CheckConstraint(f"state IN ({_VERSION_STATE_IN_LIST})", name="state_valid"),
         # published_at is stamped when the version leaves draft and retained
         # through archived, so a version has a timestamp iff it is not a draft.
         CheckConstraint(
@@ -546,9 +499,7 @@ class ChallengeBuildStackImage(Base):
     expose: Mapped[list] = mapped_column(
         JSONB, nullable=False, server_default=sa.text("'[]'::jsonb")
     )
-    is_primary: Mapped[bool] = mapped_column(
-        sa.Boolean, nullable=False, server_default=sa.false()
-    )
+    is_primary: Mapped[bool] = mapped_column(sa.Boolean, nullable=False, server_default=sa.false())
     created_at: Mapped[datetime] = mapped_column(
         sa.DateTime(timezone=True), nullable=False, server_default=sa.func.now()
     )
@@ -564,9 +515,7 @@ class ChallengeBuildStackImage(Base):
         CheckConstraint(r"image_ref !~ '^\s*$'", name="image_ref_non_empty"),
         CheckConstraint(r"image_digest !~ '^\s*$'", name="image_digest_non_empty"),
         CheckConstraint(r"bundle_sha256 !~ '^\s*$'", name="bundle_sha256_non_empty"),
-        Index(
-            "ix_challenge_build_stack_images_version", "challenge_version_id"
-        ),
+        Index("ix_challenge_build_stack_images_version", "challenge_version_id"),
         Index(
             "ix_challenge_build_stack_images_bundle",
             "challenge_version_id",
@@ -601,12 +550,8 @@ class EvalRun(Base):
     status: Mapped[str] = mapped_column(
         sa.Text, nullable=False, server_default=sa.text("'pending'")
     )
-    requested_at: Mapped[datetime] = mapped_column(
-        sa.DateTime(timezone=True), nullable=False
-    )
-    completed_at: Mapped[datetime | None] = mapped_column(
-        sa.DateTime(timezone=True), nullable=True
-    )
+    requested_at: Mapped[datetime] = mapped_column(sa.DateTime(timezone=True), nullable=False)
+    completed_at: Mapped[datetime | None] = mapped_column(sa.DateTime(timezone=True), nullable=True)
     solved: Mapped[bool | None] = mapped_column(sa.Boolean, nullable=True)
     steps: Mapped[int | None] = mapped_column(sa.Integer, nullable=True)
     success_dropped: Mapped[bool | None] = mapped_column(sa.Boolean, nullable=True)
@@ -627,12 +572,8 @@ class EvalRun(Base):
             "adversarial",
             name="uq_eval_runs_challenge_version_id_profile_adversarial",
         ),
-        CheckConstraint(
-            f"profile IN ({_EVAL_PROFILE_IN_LIST})", name="profile_valid"
-        ),
-        CheckConstraint(
-            f"status IN ({_EVAL_RUN_STATUS_IN_LIST})", name="status_valid"
-        ),
+        CheckConstraint(f"profile IN ({_EVAL_PROFILE_IN_LIST})", name="profile_valid"),
+        CheckConstraint(f"status IN ({_EVAL_RUN_STATUS_IN_LIST})", name="status_valid"),
         CheckConstraint("steps IS NULL OR steps >= 0", name="steps_non_negative"),
         # completed_at is set iff the record is terminal.
         CheckConstraint(
@@ -683,9 +624,7 @@ class CompetitionChallenge(Base):
     decay_function: Mapped[str] = mapped_column(
         sa.Text, nullable=False, server_default=sa.text("'static'")
     )
-    decay: Mapped[int] = mapped_column(
-        sa.Integer, nullable=False, server_default=sa.text("0")
-    )
+    decay: Mapped[int] = mapped_column(sa.Integer, nullable=False, server_default=sa.text("0"))
     first_blood_enabled: Mapped[bool] = mapped_column(
         sa.Boolean, nullable=False, server_default=sa.text("true")
     )
@@ -695,9 +634,7 @@ class CompetitionChallenge(Base):
     first_blood_bonus_percent: Mapped[float] = mapped_column(
         sa.Double, nullable=False, server_default=sa.text("0")
     )
-    archived_at: Mapped[datetime | None] = mapped_column(
-        sa.DateTime(timezone=True), nullable=True
-    )
+    archived_at: Mapped[datetime | None] = mapped_column(sa.DateTime(timezone=True), nullable=True)
     created_at: Mapped[datetime] = mapped_column(
         sa.DateTime(timezone=True), nullable=False, server_default=sa.func.now()
     )
@@ -712,16 +649,10 @@ class CompetitionChallenge(Base):
             f"decay_function IN ({_DECAY_FUNCTION_IN_LIST})", name="decay_function_valid"
         ),
         CheckConstraint("initial_value >= 0", name="initial_value_non_negative"),
-        CheckConstraint(
-            "minimum_value <= initial_value", name="minimum_le_initial"
-        ),
+        CheckConstraint("minimum_value <= initial_value", name="minimum_le_initial"),
         CheckConstraint("decay >= 0", name="decay_non_negative"),
-        CheckConstraint(
-            "first_blood_bonus_points >= 0", name="first_blood_points_non_negative"
-        ),
-        CheckConstraint(
-            "first_blood_bonus_percent >= 0", name="first_blood_percent_non_negative"
-        ),
+        CheckConstraint("first_blood_bonus_points >= 0", name="first_blood_points_non_negative"),
+        CheckConstraint("first_blood_bonus_percent >= 0", name="first_blood_percent_non_negative"),
         Index("ix_competition_challenges_competition_id", "competition_id"),
     )
 
@@ -750,9 +681,7 @@ class Submission(Base):
     user_id: Mapped[uuid.UUID | None] = mapped_column(
         sa.Uuid, ForeignKey("users.id", ondelete="RESTRICT"), nullable=True
     )
-    submitted_at: Mapped[datetime] = mapped_column(
-        sa.DateTime(timezone=True), nullable=False
-    )
+    submitted_at: Mapped[datetime] = mapped_column(sa.DateTime(timezone=True), nullable=False)
     correct: Mapped[bool] = mapped_column(sa.Boolean, nullable=False)
     instance_seed: Mapped[str | None] = mapped_column(sa.Text, nullable=True)
     created_at: Mapped[datetime] = mapped_column(
@@ -812,9 +741,7 @@ class Solve(Base):
         nullable=False,
     )
     submission_id: Mapped[uuid.UUID] = mapped_column(sa.Uuid, nullable=False)
-    solved_at: Mapped[datetime] = mapped_column(
-        sa.DateTime(timezone=True), nullable=False
-    )
+    solved_at: Mapped[datetime] = mapped_column(sa.DateTime(timezone=True), nullable=False)
     instance_seed: Mapped[str | None] = mapped_column(sa.Text, nullable=True)
     created_at: Mapped[datetime] = mapped_column(
         sa.DateTime(timezone=True), nullable=False, server_default=sa.func.now()
@@ -857,9 +784,7 @@ class ScoreEvent(Base):
 
     __tablename__ = "score_events"
 
-    seq: Mapped[int] = mapped_column(
-        sa.BigInteger, sa.Identity(always=True), primary_key=True
-    )
+    seq: Mapped[int] = mapped_column(sa.BigInteger, sa.Identity(always=True), primary_key=True)
     competition_id: Mapped[uuid.UUID] = mapped_column(
         sa.Uuid, ForeignKey("competitions.id", ondelete="RESTRICT"), nullable=False
     )
@@ -873,9 +798,7 @@ class ScoreEvent(Base):
     )
     type: Mapped[str] = mapped_column(sa.Text, nullable=False)
     ts: Mapped[str] = mapped_column(sa.Text, nullable=False)
-    payload: Mapped[dict] = mapped_column(
-        JSONB, nullable=False, server_default=sa.text("'{}'")
-    )
+    payload: Mapped[dict] = mapped_column(JSONB, nullable=False, server_default=sa.text("'{}'"))
     submission_id: Mapped[uuid.UUID | None] = mapped_column(
         sa.Uuid, ForeignKey("submissions.id", ondelete="RESTRICT"), nullable=True
     )
@@ -887,9 +810,7 @@ class ScoreEvent(Base):
     )
 
     __table_args__ = (
-        CheckConstraint(
-            f"type IN ({_SCORE_EVENT_TYPE_IN_LIST})", name="type_valid"
-        ),
+        CheckConstraint(f"type IN ({_SCORE_EVENT_TYPE_IN_LIST})", name="type_valid"),
         Index("ix_score_events_competition_id_seq", "competition_id", "seq"),
         Index("ix_score_events_type", "type"),
     )
@@ -916,12 +837,8 @@ class Job(Base):
     status: Mapped[str] = mapped_column(
         sa.Text, nullable=False, server_default=sa.text("'queued'"), default="queued"
     )
-    priority: Mapped[int] = mapped_column(
-        sa.Integer, nullable=False, server_default=sa.text("100")
-    )
-    payload: Mapped[dict] = mapped_column(
-        JSONB, nullable=False, server_default=sa.text("'{}'")
-    )
+    priority: Mapped[int] = mapped_column(sa.Integer, nullable=False, server_default=sa.text("100"))
+    payload: Mapped[dict] = mapped_column(JSONB, nullable=False, server_default=sa.text("'{}'"))
     idempotency_key: Mapped[str] = mapped_column(sa.Text, nullable=False)
     required_capabilities: Mapped[list[str]] = mapped_column(
         ARRAY(sa.Text), nullable=False, server_default=sa.text("'{}'::text[]")
@@ -935,26 +852,18 @@ class Job(Base):
     backoff_base_seconds: Mapped[int] = mapped_column(
         sa.Integer, nullable=False, server_default=sa.text("30")
     )
-    available_at: Mapped[datetime] = mapped_column(
-        sa.DateTime(timezone=True), nullable=False
-    )
+    available_at: Mapped[datetime] = mapped_column(sa.DateTime(timezone=True), nullable=False)
     claimed_by: Mapped[str | None] = mapped_column(sa.Text, nullable=True)
     lease_token: Mapped[uuid.UUID | None] = mapped_column(sa.Uuid, nullable=True)
     lease_expires_at: Mapped[datetime | None] = mapped_column(
         sa.DateTime(timezone=True), nullable=True
     )
-    heartbeat_at: Mapped[datetime | None] = mapped_column(
-        sa.DateTime(timezone=True), nullable=True
-    )
+    heartbeat_at: Mapped[datetime | None] = mapped_column(sa.DateTime(timezone=True), nullable=True)
     cancel_requested_at: Mapped[datetime | None] = mapped_column(
         sa.DateTime(timezone=True), nullable=True
     )
-    started_at: Mapped[datetime | None] = mapped_column(
-        sa.DateTime(timezone=True), nullable=True
-    )
-    finished_at: Mapped[datetime | None] = mapped_column(
-        sa.DateTime(timezone=True), nullable=True
-    )
+    started_at: Mapped[datetime | None] = mapped_column(sa.DateTime(timezone=True), nullable=True)
+    finished_at: Mapped[datetime | None] = mapped_column(sa.DateTime(timezone=True), nullable=True)
     error_class: Mapped[str | None] = mapped_column(sa.Text, nullable=True)
     error_detail: Mapped[str | None] = mapped_column(sa.Text, nullable=True)
     result_json: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
@@ -980,9 +889,7 @@ class Job(Base):
             f"error_class IS NULL OR error_class IN ({_JOB_ERROR_CLASS_IN_LIST})",
             name="error_class_valid",
         ),
-        CheckConstraint(
-            r"idempotency_key !~ '^\s*$'", name="idempotency_key_non_empty"
-        ),
+        CheckConstraint(r"idempotency_key !~ '^\s*$'", name="idempotency_key_non_empty"),
         CheckConstraint("priority >= 0", name="priority_non_negative"),
         CheckConstraint("max_attempts >= 1", name="max_attempts_positive"),
         CheckConstraint(
@@ -997,12 +904,9 @@ class Job(Base):
             "AND lease_expires_at IS NOT NULL)",
             name="lease_state",
         ),
+        CheckConstraint("status <> 'running' OR started_at IS NOT NULL", name="running_started"),
         CheckConstraint(
-            "status <> 'running' OR started_at IS NOT NULL", name="running_started"
-        ),
-        CheckConstraint(
-            f"(status IN ({_TERMINAL_JOB_STATUS_IN_LIST})) = "
-            "(finished_at IS NOT NULL)",
+            f"(status IN ({_TERMINAL_JOB_STATUS_IN_LIST})) = (finished_at IS NOT NULL)",
             name="terminal_finished",
         ),
         CheckConstraint(
@@ -1044,17 +948,13 @@ class JobTransition(Base):
     worker_id: Mapped[str | None] = mapped_column(sa.Text, nullable=True)
     error_class: Mapped[str | None] = mapped_column(sa.Text, nullable=True)
     error_detail: Mapped[str | None] = mapped_column(sa.Text, nullable=True)
-    occurred_at: Mapped[datetime] = mapped_column(
-        sa.DateTime(timezone=True), nullable=False
-    )
+    occurred_at: Mapped[datetime] = mapped_column(sa.DateTime(timezone=True), nullable=False)
     created_at: Mapped[datetime] = mapped_column(
         sa.DateTime(timezone=True), nullable=False, server_default=sa.func.now()
     )
 
     __table_args__ = (
-        CheckConstraint(
-            f"to_status IN ({_JOB_STATUS_IN_LIST})", name="to_status_valid"
-        ),
+        CheckConstraint(f"to_status IN ({_JOB_STATUS_IN_LIST})", name="to_status_valid"),
         CheckConstraint(
             f"from_status IS NULL OR from_status IN ({_JOB_STATUS_IN_LIST})",
             name="from_status_valid",
@@ -1087,9 +987,7 @@ class Worker(Base):
     trust_state: Mapped[str] = mapped_column(
         sa.Text, nullable=False, server_default=sa.text("'pending'"), default="pending"
     )
-    revoked_at: Mapped[datetime | None] = mapped_column(
-        sa.DateTime(timezone=True), nullable=True
-    )
+    revoked_at: Mapped[datetime | None] = mapped_column(sa.DateTime(timezone=True), nullable=True)
     drain_requested_at: Mapped[datetime | None] = mapped_column(
         sa.DateTime(timezone=True), nullable=True
     )
@@ -1107,9 +1005,7 @@ class Worker(Base):
     __table_args__ = (
         UniqueConstraint("name", name="uq_workers_name"),
         CheckConstraint(r"name !~ '^\s*$'", name="name_non_empty"),
-        CheckConstraint(
-            f"trust_state IN ({_TRUST_STATE_IN_LIST})", name="trust_state_valid"
-        ),
+        CheckConstraint(f"trust_state IN ({_TRUST_STATE_IN_LIST})", name="trust_state_valid"),
         CheckConstraint(
             "(trust_state = 'revoked') = (revoked_at IS NOT NULL)",
             name="revoked_state_consistent",
@@ -1118,16 +1014,10 @@ class Worker(Base):
             "(quarantined_at IS NULL) = (quarantine_reason IS NULL)",
             name="quarantine_reason_consistent",
         ),
-        CheckConstraint(
-            f"runtime_type IN ({_RUNTIME_TYPE_IN_LIST})", name="runtime_type_valid"
-        ),
+        CheckConstraint(f"runtime_type IN ({_RUNTIME_TYPE_IN_LIST})", name="runtime_type_valid"),
         CheckConstraint("capacity >= 1", name="capacity_positive"),
-        CheckConstraint(
-            "cardinality(architectures) >= 1", name="architectures_non_empty"
-        ),
-        CheckConstraint(
-            "cardinality(capabilities) >= 1", name="capabilities_non_empty"
-        ),
+        CheckConstraint("cardinality(architectures) >= 1", name="architectures_non_empty"),
+        CheckConstraint("cardinality(capabilities) >= 1", name="capabilities_non_empty"),
         CheckConstraint(r"version !~ '^\s*$'", name="version_non_empty"),
         Index("ix_workers_trust_state", "trust_state"),
         # Dispatch eligibility is the conjunction of all three axes.
@@ -1135,8 +1025,7 @@ class Worker(Base):
             "ix_workers_dispatch_eligible",
             "last_heartbeat_at",
             postgresql_where=sa.text(
-                "trust_state = 'trusted' AND quarantined_at IS NULL "
-                "AND drain_requested_at IS NULL"
+                "trust_state = 'trusted' AND quarantined_at IS NULL AND drain_requested_at IS NULL"
             ),
         ),
     )
@@ -1160,24 +1049,16 @@ class WorkerCredential(Base):
     )
     token_hash: Mapped[str] = mapped_column(sa.Text, nullable=False)
     scopes: Mapped[list[str]] = mapped_column(ARRAY(sa.Text), nullable=False)
-    issued_at: Mapped[datetime] = mapped_column(
-        sa.DateTime(timezone=True), nullable=False
-    )
-    expires_at: Mapped[datetime] = mapped_column(
-        sa.DateTime(timezone=True), nullable=False
-    )
-    revoked_at: Mapped[datetime | None] = mapped_column(
-        sa.DateTime(timezone=True), nullable=True
-    )
+    issued_at: Mapped[datetime] = mapped_column(sa.DateTime(timezone=True), nullable=False)
+    expires_at: Mapped[datetime] = mapped_column(sa.DateTime(timezone=True), nullable=False)
+    revoked_at: Mapped[datetime | None] = mapped_column(sa.DateTime(timezone=True), nullable=True)
     created_at: Mapped[datetime] = mapped_column(
         sa.DateTime(timezone=True), nullable=False, server_default=sa.func.now()
     )
 
     __table_args__ = (
         UniqueConstraint("token_hash", name="uq_worker_credentials_token_hash"),
-        CheckConstraint(
-            "token_hash ~ '^[0-9a-f]{64}$'", name="token_hash_format"
-        ),
+        CheckConstraint("token_hash ~ '^[0-9a-f]{64}$'", name="token_hash_format"),
         CheckConstraint("expires_at > issued_at", name="expiry_after_issue"),
         CheckConstraint("cardinality(scopes) >= 1", name="scopes_non_empty"),
         # At most one live credential per worker -- rotation is race-proof.
@@ -1216,18 +1097,14 @@ class ScoreProjectionOutbox(Base):
     status: Mapped[str] = mapped_column(
         sa.Text, nullable=False, server_default=sa.text("'pending'")
     )
-    attempts: Mapped[int] = mapped_column(
-        sa.Integer, nullable=False, server_default=sa.text("0")
-    )
+    attempts: Mapped[int] = mapped_column(sa.Integer, nullable=False, server_default=sa.text("0"))
     last_error: Mapped[str | None] = mapped_column(sa.Text, nullable=True)
     created_at: Mapped[datetime] = mapped_column(
         sa.DateTime(timezone=True), nullable=False, server_default=sa.func.now()
     )
 
     __table_args__ = (
-        CheckConstraint(
-            f"status IN ({_PROJECTION_STATUS_IN_LIST})", name="status_valid"
-        ),
+        CheckConstraint(f"status IN ({_PROJECTION_STATUS_IN_LIST})", name="status_valid"),
         CheckConstraint("attempts >= 0", name="attempts_nonnegative"),
         Index(
             "ix_score_projection_outbox_pending_seq",
@@ -1253,16 +1130,12 @@ class ScoreboardProjection(Base):
         primary_key=True,
     )
     as_of_seq: Mapped[int] = mapped_column(sa.BigInteger, nullable=False)
-    entries: Mapped[dict] = mapped_column(
-        JSONB, nullable=False, server_default=sa.text("'{}'")
-    )
+    entries: Mapped[dict] = mapped_column(JSONB, nullable=False, server_default=sa.text("'{}'"))
     computed_at: Mapped[datetime] = mapped_column(
         sa.DateTime(timezone=True), nullable=False, server_default=sa.func.now()
     )
 
-    __table_args__ = (
-        CheckConstraint("as_of_seq >= 0", name="as_of_seq_nonnegative"),
-    )
+    __table_args__ = (CheckConstraint("as_of_seq >= 0", name="as_of_seq_nonnegative"),)
 
 
 class ResourceQuota(Base):
@@ -1292,15 +1165,9 @@ class ResourceQuota(Base):
 
     __table_args__ = (
         # Also the composite-FK target for quota_reservation_items.
-        UniqueConstraint(
-            "scope_type", "scope_key", "dimension", name="uq_resource_quotas_scope"
-        ),
-        CheckConstraint(
-            f"scope_type IN ({_QUOTA_SCOPE_IN_LIST})", name="scope_type_valid"
-        ),
-        CheckConstraint(
-            f"dimension IN ({_QUOTA_DIMENSION_IN_LIST})", name="dimension_valid"
-        ),
+        UniqueConstraint("scope_type", "scope_key", "dimension", name="uq_resource_quotas_scope"),
+        CheckConstraint(f"scope_type IN ({_QUOTA_SCOPE_IN_LIST})", name="scope_type_valid"),
+        CheckConstraint(f"dimension IN ({_QUOTA_DIMENSION_IN_LIST})", name="dimension_valid"),
         CheckConstraint("limit_value >= 0", name="limit_non_negative"),
         CheckConstraint("reserved_value >= 0", name="reserved_non_negative"),
         # A ceiling dimension is a scalar cap: it never counts, so its counter
@@ -1328,23 +1195,15 @@ class QuotaReservation(Base):
     competition_key: Mapped[str | None] = mapped_column(sa.Text, nullable=True)
     team_key: Mapped[str | None] = mapped_column(sa.Text, nullable=True)
     challenge_key: Mapped[str | None] = mapped_column(sa.Text, nullable=True)
-    state: Mapped[str] = mapped_column(
-        sa.Text, nullable=False, server_default=sa.text("'held'")
-    )
-    expires_at: Mapped[datetime] = mapped_column(
-        sa.DateTime(timezone=True), nullable=False
-    )
-    released_at: Mapped[datetime | None] = mapped_column(
-        sa.DateTime(timezone=True), nullable=True
-    )
+    state: Mapped[str] = mapped_column(sa.Text, nullable=False, server_default=sa.text("'held'"))
+    expires_at: Mapped[datetime] = mapped_column(sa.DateTime(timezone=True), nullable=False)
+    released_at: Mapped[datetime | None] = mapped_column(sa.DateTime(timezone=True), nullable=True)
     created_at: Mapped[datetime] = mapped_column(
         sa.DateTime(timezone=True), nullable=False, server_default=sa.func.now()
     )
 
     __table_args__ = (
-        CheckConstraint(
-            f"state IN ({_RESERVATION_STATE_IN_LIST})", name="state_valid"
-        ),
+        CheckConstraint(f"state IN ({_RESERVATION_STATE_IN_LIST})", name="state_valid"),
         CheckConstraint(
             "(state = 'released') = (released_at IS NOT NULL)",
             name="released_state_consistent",
@@ -1431,9 +1290,7 @@ class WorkerImageCache(Base):
     cached_at: Mapped[datetime] = mapped_column(
         sa.DateTime(timezone=True), nullable=False, server_default=sa.func.now()
     )
-    last_used_at: Mapped[datetime | None] = mapped_column(
-        sa.DateTime(timezone=True), nullable=True
-    )
+    last_used_at: Mapped[datetime | None] = mapped_column(sa.DateTime(timezone=True), nullable=True)
 
     __table_args__ = (
         UniqueConstraint(
@@ -1479,13 +1336,9 @@ class Instance(Base):
     assigned_worker_id: Mapped[uuid.UUID | None] = mapped_column(
         sa.Uuid, ForeignKey("workers.id", ondelete="RESTRICT"), nullable=True
     )
-    generation: Mapped[int] = mapped_column(
-        sa.Integer, nullable=False, server_default=sa.text("1")
-    )
+    generation: Mapped[int] = mapped_column(sa.Integer, nullable=False, server_default=sa.text("1"))
     image_ref: Mapped[str | None] = mapped_column(sa.Text, nullable=True)
-    expires_at: Mapped[datetime | None] = mapped_column(
-        sa.DateTime(timezone=True), nullable=True
-    )
+    expires_at: Mapped[datetime | None] = mapped_column(sa.DateTime(timezone=True), nullable=True)
     instance_seed: Mapped[str | None] = mapped_column(sa.Text, nullable=True)
     created_at: Mapped[datetime] = mapped_column(
         sa.DateTime(timezone=True), nullable=False, server_default=sa.func.now()
@@ -1503,12 +1356,8 @@ class Instance(Base):
             ["teams.id", "teams.competition_id"],
             ondelete="RESTRICT",
         ),
-        CheckConstraint(
-            f"state IN ({_INSTANCE_STATE_IN_LIST})", name="state_valid"
-        ),
-        CheckConstraint(
-            f"desired_state IN ({_DESIRED_STATE_IN_LIST})", name="desired_state_valid"
-        ),
+        CheckConstraint(f"state IN ({_INSTANCE_STATE_IN_LIST})", name="state_valid"),
+        CheckConstraint(f"desired_state IN ({_DESIRED_STATE_IN_LIST})", name="desired_state_valid"),
         CheckConstraint("generation >= 1", name="generation_positive"),
         Index("ix_instances_competition_id_team_id", "competition_id", "team_id"),
         Index("ix_instances_challenge_version_id", "challenge_version_id"),
@@ -1547,9 +1396,7 @@ class InstanceEndpoint(Base):
     )
 
     __table_args__ = (
-        UniqueConstraint(
-            "instance_id", "name", name="uq_instance_endpoints_instance_id_name"
-        ),
+        UniqueConstraint("instance_id", "name", name="uq_instance_endpoints_instance_id_name"),
         CheckConstraint("port >= 1 AND port <= 65535", name="port_valid"),
         CheckConstraint(r"host !~ '^\s*$'", name="host_non_empty"),
         CheckConstraint(r"protocol !~ '^\s*$'", name="protocol_non_empty"),
@@ -1576,12 +1423,8 @@ class RuntimeResource(Base):
     worker_id: Mapped[uuid.UUID] = mapped_column(
         sa.Uuid, ForeignKey("workers.id", ondelete="RESTRICT"), nullable=False
     )
-    generation: Mapped[int] = mapped_column(
-        sa.Integer, nullable=False, server_default=sa.text("1")
-    )
-    state: Mapped[str] = mapped_column(
-        sa.Text, nullable=False, server_default=sa.text("'active'")
-    )
+    generation: Mapped[int] = mapped_column(sa.Integer, nullable=False, server_default=sa.text("1"))
+    state: Mapped[str] = mapped_column(sa.Text, nullable=False, server_default=sa.text("'active'"))
     created_at: Mapped[datetime] = mapped_column(
         sa.DateTime(timezone=True), nullable=False, server_default=sa.func.now()
     )
@@ -1624,17 +1467,13 @@ class InstanceCredential(Base):
     scopes: Mapped[list[str]] = mapped_column(
         ARRAY(sa.Text), nullable=False, server_default=sa.text("'{}'::text[]")
     )
-    expires_at: Mapped[datetime | None] = mapped_column(
-        sa.DateTime(timezone=True), nullable=True
-    )
+    expires_at: Mapped[datetime | None] = mapped_column(sa.DateTime(timezone=True), nullable=True)
     created_at: Mapped[datetime] = mapped_column(
         sa.DateTime(timezone=True), nullable=False, server_default=sa.func.now()
     )
 
     __table_args__ = (
-        UniqueConstraint(
-            "instance_id", "name", name="uq_instance_credentials_instance_id_name"
-        ),
+        UniqueConstraint("instance_id", "name", name="uq_instance_credentials_instance_id_name"),
         CheckConstraint(r"secret_ref !~ '^\s*$'", name="secret_ref_non_empty"),
         Index("ix_instance_credentials_instance_id", "instance_id"),
     )
@@ -1654,16 +1493,12 @@ class HealthObservation(Base):
     )
     observed_state: Mapped[str] = mapped_column(sa.Text, nullable=False)
     healthy: Mapped[bool] = mapped_column(sa.Boolean, nullable=False)
-    detail: Mapped[dict] = mapped_column(
-        JSONB, nullable=False, server_default=sa.text("'{}'")
-    )
+    detail: Mapped[dict] = mapped_column(JSONB, nullable=False, server_default=sa.text("'{}'"))
     worker_id: Mapped[uuid.UUID] = mapped_column(
         sa.Uuid, ForeignKey("workers.id", ondelete="RESTRICT"), nullable=False
     )
     generation: Mapped[int] = mapped_column(sa.Integer, nullable=False)
-    observed_at: Mapped[datetime] = mapped_column(
-        sa.DateTime(timezone=True), nullable=False
-    )
+    observed_at: Mapped[datetime] = mapped_column(sa.DateTime(timezone=True), nullable=False)
     created_at: Mapped[datetime] = mapped_column(
         sa.DateTime(timezone=True), nullable=False, server_default=sa.func.now()
     )
@@ -1698,17 +1533,13 @@ class InstanceEvent(Base):
     reason: Mapped[str] = mapped_column(sa.Text, nullable=False)
     actor: Mapped[str] = mapped_column(sa.Text, nullable=False)
     generation: Mapped[int] = mapped_column(sa.Integer, nullable=False)
-    occurred_at: Mapped[datetime] = mapped_column(
-        sa.DateTime(timezone=True), nullable=False
-    )
+    occurred_at: Mapped[datetime] = mapped_column(sa.DateTime(timezone=True), nullable=False)
     created_at: Mapped[datetime] = mapped_column(
         sa.DateTime(timezone=True), nullable=False, server_default=sa.func.now()
     )
 
     __table_args__ = (
-        CheckConstraint(
-            f"to_state IN ({_INSTANCE_STATE_IN_LIST})", name="to_state_valid"
-        ),
+        CheckConstraint(f"to_state IN ({_INSTANCE_STATE_IN_LIST})", name="to_state_valid"),
         CheckConstraint(
             f"from_state IS NULL OR from_state IN ({_INSTANCE_STATE_IN_LIST})",
             name="from_state_valid",
@@ -1741,9 +1572,7 @@ class AuthCredential(Base):
     created_at: Mapped[datetime] = mapped_column(
         sa.DateTime(timezone=True), nullable=False, server_default=sa.func.now()
     )
-    updated_at: Mapped[datetime] = mapped_column(
-        sa.DateTime(timezone=True), nullable=False
-    )
+    updated_at: Mapped[datetime] = mapped_column(sa.DateTime(timezone=True), nullable=False)
 
     __table_args__ = (
         UniqueConstraint("user_id", name="uq_auth_credentials_user_id"),
@@ -1754,9 +1583,7 @@ class AuthCredential(Base):
             r"password_hash ~ '^\S+\$\S+$'",
             name="password_hash_encoded",
         ),
-        CheckConstraint(
-            "updated_at >= created_at", name="updated_after_created"
-        ),
+        CheckConstraint("updated_at >= created_at", name="updated_after_created"),
     )
 
 
@@ -1779,27 +1606,19 @@ class AuthSession(Base):
         sa.Uuid, ForeignKey("users.id", ondelete="RESTRICT"), nullable=False
     )
     token_hash: Mapped[str] = mapped_column(sa.Text, nullable=False)
-    issued_at: Mapped[datetime] = mapped_column(
-        sa.DateTime(timezone=True), nullable=False
-    )
-    expires_at: Mapped[datetime] = mapped_column(
-        sa.DateTime(timezone=True), nullable=False
-    )
+    issued_at: Mapped[datetime] = mapped_column(sa.DateTime(timezone=True), nullable=False)
+    expires_at: Mapped[datetime] = mapped_column(sa.DateTime(timezone=True), nullable=False)
     rotated_from: Mapped[uuid.UUID | None] = mapped_column(
         sa.Uuid, ForeignKey("sessions.id", ondelete="RESTRICT"), nullable=True
     )
-    revoked_at: Mapped[datetime | None] = mapped_column(
-        sa.DateTime(timezone=True), nullable=True
-    )
+    revoked_at: Mapped[datetime | None] = mapped_column(sa.DateTime(timezone=True), nullable=True)
     created_at: Mapped[datetime] = mapped_column(
         sa.DateTime(timezone=True), nullable=False, server_default=sa.func.now()
     )
 
     __table_args__ = (
         UniqueConstraint("token_hash", name="uq_sessions_token_hash"),
-        CheckConstraint(
-            "token_hash ~ '^[0-9a-f]{64}$'", name="token_hash_format"
-        ),
+        CheckConstraint("token_hash ~ '^[0-9a-f]{64}$'", name="token_hash_format"),
         CheckConstraint("expires_at > issued_at", name="expiry_after_issue"),
         Index(
             "ix_sessions_user_id_live",
@@ -1826,11 +1645,7 @@ class UserSystemRole(Base):
         sa.DateTime(timezone=True), nullable=False, server_default=sa.func.now()
     )
 
-    __table_args__ = (
-        CheckConstraint(
-            f"role IN ({_SYSTEM_ROLE_IN_LIST})", name="role_valid"
-        ),
-    )
+    __table_args__ = (CheckConstraint(f"role IN ({_SYSTEM_ROLE_IN_LIST})", name="role_valid"),)
 
 
 class OidcLoginTransaction(Base):
@@ -1853,18 +1668,12 @@ class OidcLoginTransaction(Base):
     created_at: Mapped[datetime] = mapped_column(
         sa.DateTime(timezone=True), nullable=False, server_default=sa.func.now()
     )
-    expires_at: Mapped[datetime] = mapped_column(
-        sa.DateTime(timezone=True), nullable=False
-    )
+    expires_at: Mapped[datetime] = mapped_column(sa.DateTime(timezone=True), nullable=False)
 
     __table_args__ = (
         UniqueConstraint("state_hash", name="uq_oidc_login_transactions_state_hash"),
-        CheckConstraint(
-            "state_hash ~ '^[0-9a-f]{64}$'", name="state_hash_format"
-        ),
-        CheckConstraint(
-            "binding_hash ~ '^[0-9a-f]{64}$'", name="binding_hash_format"
-        ),
+        CheckConstraint("state_hash ~ '^[0-9a-f]{64}$'", name="state_hash_format"),
+        CheckConstraint("binding_hash ~ '^[0-9a-f]{64}$'", name="binding_hash_format"),
         CheckConstraint("expires_at > created_at", name="expiry_after_created"),
     )
 
@@ -1891,17 +1700,13 @@ class AuditEvent(Base):
     outcome: Mapped[str] = mapped_column(sa.Text, nullable=False)
     request_id: Mapped[str] = mapped_column(sa.Text, nullable=False)
     reason: Mapped[str | None] = mapped_column(sa.Text, nullable=True)
-    occurred_at: Mapped[datetime] = mapped_column(
-        sa.DateTime(timezone=True), nullable=False
-    )
+    occurred_at: Mapped[datetime] = mapped_column(sa.DateTime(timezone=True), nullable=False)
     created_at: Mapped[datetime] = mapped_column(
         sa.DateTime(timezone=True), nullable=False, server_default=sa.func.now()
     )
 
     __table_args__ = (
-        CheckConstraint(
-            f"outcome IN ({_AUDIT_OUTCOME_IN_LIST})", name="outcome_valid"
-        ),
+        CheckConstraint(f"outcome IN ({_AUDIT_OUTCOME_IN_LIST})", name="outcome_valid"),
         Index("ix_audit_events_actor", "actor"),
         Index("ix_audit_events_action", "action"),
         Index("ix_audit_events_outcome", "outcome"),
@@ -1937,9 +1742,7 @@ class ReportSnapshot(Base):
     )
 
     __table_args__ = (
-        CheckConstraint(
-            f"report_type IN ({_REPORT_TYPE_IN_LIST})", name="report_type_valid"
-        ),
+        CheckConstraint(f"report_type IN ({_REPORT_TYPE_IN_LIST})", name="report_type_valid"),
         CheckConstraint(r"subject !~ '^\s*$'", name="subject_non_empty"),
         CheckConstraint(r"created_by !~ '^\s*$'", name="created_by_non_empty"),
         Index("ix_report_snapshots_type_subject", "report_type", "subject"),

@@ -87,9 +87,7 @@ class SqlAlchemyAuthCredentialRepository:
         user_uuid = _resolve.user_uuid(self._session, credential.user_email)
         row = self._row_for_user(user_uuid)
         if row is None:
-            raise LookupError(
-                f"credential not found for user: {credential.user_email!r}"
-            )
+            raise LookupError(f"credential not found for user: {credential.user_email!r}")
         auth_credential_to_orm(credential, user_uuid, existing=row)
         self._session.flush()
 
@@ -160,9 +158,7 @@ class SqlAlchemyOidcLoginTransactionRepository:
         self._session.add(oidc_login_transaction_to_orm(txn))
         self._session.flush()
 
-    def consume(
-        self, state_hash: str, now: datetime
-    ) -> OidcLoginTransaction | None:
+    def consume(self, state_hash: str, now: datetime) -> OidcLoginTransaction | None:
         """Atomically CONSUME the transaction for ``state_hash``: lock the row,
         DELETE it (so it can never be replayed -- one-time-use), and return it
         ONLY if it is still live at ``now``. An unknown / already-consumed state
@@ -189,9 +185,7 @@ class SqlAlchemyOidcLoginTransactionRepository:
         the number removed. Called opportunistically at ``add`` time so the
         pre-auth table cannot accumulate abandoned rows."""
         result = self._session.execute(
-            delete(OidcLoginTransactionRow).where(
-                OidcLoginTransactionRow.expires_at <= to_utc(now)
-            )
+            delete(OidcLoginTransactionRow).where(OidcLoginTransactionRow.expires_at <= to_utc(now))
         )
         self._session.flush()
         return result.rowcount
@@ -209,9 +203,7 @@ class SqlAlchemySystemRoleRepository:
         existing = self._session.get(UserSystemRoleRow, (user_uuid, assignment.role))
         if existing is not None:
             return  # idempotent re-grant
-        self._session.add(
-            UserSystemRoleRow(user_id=user_uuid, role=assignment.role)
-        )
+        self._session.add(UserSystemRoleRow(user_id=user_uuid, role=assignment.role))
         self._session.flush()
 
     def revoke(self, user_email: str, role: str) -> bool:
@@ -236,8 +228,6 @@ class SqlAlchemySystemRoleRepository:
         except LookupError:
             return frozenset()
         rows = self._session.scalars(
-            select(UserSystemRoleRow.role).where(
-                UserSystemRoleRow.user_id == user_uuid
-            )
+            select(UserSystemRoleRow.role).where(UserSystemRoleRow.user_id == user_uuid)
         ).all()
         return frozenset(rows)

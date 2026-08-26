@@ -92,9 +92,7 @@ def get_worker_instance_service(
     database: Database = Depends(get_database),
 ) -> WorkerInstanceService:
     scheduling = SchedulingService(database)
-    lifecycle = InstanceLifecycleService(
-        database, scheduling=scheduling, jobs=JobService(database)
-    )
+    lifecycle = InstanceLifecycleService(database, scheduling=scheduling, jobs=JobService(database))
     return WorkerInstanceService(
         lifecycle, WorkerEnrollmentService(database), scheduling=scheduling
     )

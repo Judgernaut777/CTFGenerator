@@ -140,9 +140,7 @@ def _migrated_database():
 class WorkerLoopIntegrationTests(unittest.TestCase):
     def setUp(self) -> None:
         self._instance_ids: list[str] = []
-        self._backend = DockerRuntimeBackend(
-            require_rootless=False, acknowledged_gaps=_ACKED
-        )
+        self._backend = DockerRuntimeBackend(require_rootless=False, acknowledged_gaps=_ACKED)
 
     def tearDown(self) -> None:
         for iid in self._instance_ids:
@@ -155,7 +153,8 @@ class WorkerLoopIntegrationTests(unittest.TestCase):
         with db.session_scope() as s:
             SqlAlchemyCompetitionRepository(s).add(
                 CompetitionConfig(
-                    competition_id="cup", name="Cup",
+                    competition_id="cup",
+                    name="Cup",
                     start_time=_NOW - timedelta(hours=1),
                     end_time=_NOW + timedelta(hours=47),
                 )
@@ -166,9 +165,14 @@ class WorkerLoopIntegrationTests(unittest.TestCase):
             )
             SqlAlchemyChallengeVersionRepository(s).add(
                 ChallengeVersion(
-                    definition_slug="sql", version_no=1, state="draft",
-                    family_version="1.0", seed="s", spec_sha256="h1",
-                    spec={"t": 1}, spec_version="1.0",
+                    definition_slug="sql",
+                    version_no=1,
+                    state="draft",
+                    family_version="1.0",
+                    seed="s",
+                    spec_sha256="h1",
+                    spec={"t": 1},
+                    spec_version="1.0",
                 )
             )
         with db.session_scope() as s:
@@ -177,9 +181,12 @@ class WorkerLoopIntegrationTests(unittest.TestCase):
             reg = SqlAlchemyWorkerRegistry(s)
             reg.add(
                 WorkerIdentity(
-                    "w1", "docker-rootless", ("aarch64", "x86_64"),
+                    "w1",
+                    "docker-rootless",
+                    ("aarch64", "x86_64"),
                     ("launch_instance", "stop_instance", "delete_runtime_resources"),
-                    4, "1",
+                    4,
+                    "1",
                 )
             )
             reg.heartbeat("w1", _NOW)
@@ -199,12 +206,19 @@ class WorkerLoopIntegrationTests(unittest.TestCase):
         token = f"{CREDENTIAL_TOKEN_PREFIX}.{issued.credential_id}.{issued.secret}"
         arch = self._backend.probe().architecture  # arm64 host -> aarch64, never hardcoded
         client = LocalControlPlaneClient(
-            jobs=worker_jobs, instances=worker_instances, lifecycle=lifecycle,
-            scheduling=scheduling, token=token, architecture=arch,
+            jobs=worker_jobs,
+            instances=worker_instances,
+            lifecycle=lifecycle,
+            scheduling=scheduling,
+            token=token,
+            architecture=arch,
         )
         worker = Worker(
             WorkerConfig(worker_name="w1", lease_seconds=120),
-            client, self._backend, command=("sleep", "3600"), clock=lambda: _NOW,
+            client,
+            self._backend,
+            command=("sleep", "3600"),
+            clock=lambda: _NOW,
         )
         return scheduling, jobs, lifecycle, worker
 
@@ -215,8 +229,11 @@ class WorkerLoopIntegrationTests(unittest.TestCase):
             iid = str(uuid.uuid4())
             self._instance_ids.append(iid)
             lifecycle.request_instance(
-                instance_id=iid, competition_id="cup", team_name="Red",
-                definition_slug="sql", version_no=1,
+                instance_id=iid,
+                competition_id="cup",
+                team_name="Red",
+                definition_slug="sql",
+                version_no=1,
                 requirements=WorkerRequirements(
                     architecture="aarch64",
                     required_capabilities=frozenset({"launch_instance"}),
@@ -224,7 +241,9 @@ class WorkerLoopIntegrationTests(unittest.TestCase):
                 pooled_items=(
                     ReservationItem("platform", PLATFORM_SCOPE_KEY, "active_instances", 1),
                 ),
-                expires_at=_LATER, now=_NOW, image_ref="alpine:latest",
+                expires_at=_LATER,
+                now=_NOW,
+                image_ref="alpine:latest",
             )
             # One loop iteration claims + runs the launch job.
             self.assertTrue(worker.run_once())
@@ -233,7 +252,8 @@ class WorkerLoopIntegrationTests(unittest.TestCase):
             # A real container exists and a RuntimeResource was recorded.
             cid = subprocess.run(
                 ["docker", "ps", "-q", "--filter", f"label=ctfgen.instance={iid}"],
-                capture_output=True, text=True,
+                capture_output=True,
+                text=True,
             ).stdout.strip()
             self.assertTrue(cid, "no running container after launch")
             with db.session_scope() as s:
@@ -248,7 +268,8 @@ class WorkerLoopIntegrationTests(unittest.TestCase):
             self.assertEqual(lifecycle.get(iid).state, "stopped")
             gone = subprocess.run(
                 ["docker", "ps", "-aq", "--filter", f"label=ctfgen.instance={iid}"],
-                capture_output=True, text=True,
+                capture_output=True,
+                text=True,
             ).stdout.strip()
             self.assertEqual(gone, "", "container not removed after stop")
             self.assertEqual(scheduling.get_reservation(iid).state, "released")

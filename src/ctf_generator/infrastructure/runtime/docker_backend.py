@@ -245,7 +245,11 @@ def policy_to_run_flags(
         # this is the container's ONLY writable path, so a root:root tmpfs would
         # leave a uid-65534 process with nowhere to write. noexec/nosuid/nodev is
         # defence in depth against dropping an executable payload here.
-        f"/tmp:rw,size={policy.tmpfs_mb}m,mode=1770,uid={non_root_uid},"  # noqa: S108
+        # A docker --tmpfs mount spec (a container path), not a host temp file:
+        # B108 does not apply because this is the in-container writable path
+        # mandated by the sandbox policy (read-only rootfs; see comment above).
+        # Container path for --tmpfs, not a host temp file.
+        f"/tmp:rw,size={policy.tmpfs_mb}m,mode=1770,uid={non_root_uid},"  # nosec B108 -- container tmpfs mount path, not host temp  # noqa: S108
         f"gid={non_root_uid},noexec,nosuid,nodev",
         # Resource envelope. --memory-swap == --memory disables swap (no swap
         # escape past the memory cap). --cpus from milli-cpus. --pids-limit caps
@@ -328,12 +332,9 @@ class DockerRuntimeBackend:
         bad = acknowledged_gaps - ACKNOWLEDGEABLE_GAPS
         if bad:
             raise ValueError(
-                f"unknown acknowledged_gaps {sorted(bad)}; allowed "
-                f"{sorted(ACKNOWLEDGEABLE_GAPS)}"
+                f"unknown acknowledged_gaps {sorted(bad)}; allowed {sorted(ACKNOWLEDGEABLE_GAPS)}"
             )
-        if build_mirror_network is not None and not _DOCKER_NAME_RE.match(
-            build_mirror_network
-        ):
+        if build_mirror_network is not None and not _DOCKER_NAME_RE.match(build_mirror_network):
             raise ValueError(
                 "build_mirror_network must be a docker-name-safe string "
                 f"({_DOCKER_NAME_RE.pattern}); got {build_mirror_network!r}"
@@ -408,12 +409,8 @@ class DockerRuntimeBackend:
     def probe(self) -> DockerHostProbe:
         """Read raw host facts from ``docker info``/``version`` (never refuses to
         represent a rootful host)."""
-        info = json.loads(
-            self._run(["info", "--format", "{{json .}}"], timeout=30).stdout
-        )
-        version = json.loads(
-            self._run(["version", "--format", "{{json .}}"], timeout=15).stdout
-        )
+        info = json.loads(self._run(["info", "--format", "{{json .}}"], timeout=30).stdout)
+        version = json.loads(self._run(["version", "--format", "{{json .}}"], timeout=15).stdout)
         security = info.get("SecurityOptions") or []
         sec_text = " ".join(security).lower()
         rootless = any("rootless" in s.lower() for s in security)
@@ -444,9 +441,7 @@ class DockerRuntimeBackend:
                 "this host yields no valid RuntimeCapabilities (see probe() for the "
                 "raw facts)"
             )
-        info = json.loads(
-            self._run(["info", "--format", "{{json .}}"], timeout=30).stdout
-        )
+        info = json.loads(self._run(["info", "--format", "{{json .}}"], timeout=30).stdout)
         mem_bytes = int(info.get("MemTotal") or 0)
         max_mb = max(1, mem_bytes // (1024 * 1024)) if mem_bytes else 512
         return RuntimeCapabilities(
@@ -619,9 +614,7 @@ class DockerRuntimeBackend:
                         f"failed to install required host-block INPUT DROP for "
                         f"{subnet}; refusing to launch (rc={added.returncode})"
                     )
-                _LOG.warning(
-                    "best-effort host-block rule %s not installed", rule[0]
-                )
+                _LOG.warning("best-effort host-block rule %s not installed", rule[0])
 
     def _remove_host_block(self, subnet: str) -> None:
         """Remove the host-block DROP rules for ``subnet`` (idempotent: a missing
@@ -782,9 +775,7 @@ class DockerRuntimeBackend:
         the image is absent locally. Same inspect idiom ``build_image`` uses to
         report the digest, so a launch-time compare against the recorded digest is
         string-exact for byte-identical image content."""
-        out = self._run(
-            ["image", "inspect", "--format", "{{.Id}}", image_ref], check=False
-        )
+        out = self._run(["image", "inspect", "--format", "{{.Id}}", image_ref], check=False)
         if out.returncode != 0:
             return None
         return out.stdout.strip() or None
@@ -887,8 +878,7 @@ class DockerRuntimeBackend:
         if not subnet:
             self._remove_network(name)
             raise DockerRuntimeError(
-                f"could not read subnet for network {name}; refusing to launch "
-                "without a host-block"
+                f"could not read subnet for network {name}; refusing to launch without a host-block"
             )
         try:
             self._install_host_block(subnet)
@@ -904,7 +894,7 @@ class DockerRuntimeBackend:
                 "network",
                 "inspect",
                 "--format",
-                "{{.Internal}}|{{index .Labels \"" + INSTANCE_LABEL + "\"}}",
+                '{{.Internal}}|{{index .Labels "' + INSTANCE_LABEL + '"}}',
                 network_name,
             ],
             check=False,
@@ -941,9 +931,7 @@ class DockerRuntimeBackend:
         acked = self._gate(request.policy, probe)
         # Compute flags up front so a hard-floor refusal happens before any docker
         # object is created.
-        hardening = policy_to_run_flags(
-            request.policy, probe, non_root_uid=self._non_root_uid
-        )
+        hardening = policy_to_run_flags(request.policy, probe, non_root_uid=self._non_root_uid)
         # The host-block firewall is a HARD FLOOR for an isolated network: if the
         # host cannot enforce it, refuse BEFORE creating anything (never launch a
         # container that can reach the host). ``none`` needs no network at all.
@@ -1035,9 +1023,7 @@ class DockerRuntimeBackend:
         stack on any mid-launch failure so nothing leaks."""
         probe = self.probe()
         acked = self._gate(request.policy, probe)
-        hardening = policy_to_run_flags(
-            request.policy, probe, non_root_uid=self._non_root_uid
-        )
+        hardening = policy_to_run_flags(request.policy, probe, non_root_uid=self._non_root_uid)
         # A stack needs inter-service networking, so it always uses the isolated
         # per-instance network -- which REQUIRES the host-block firewall floor.
         if not self.firewall_available():
@@ -1055,25 +1041,32 @@ class DockerRuntimeBackend:
         network_name, network_id = self._ensure_network(net_request)
         base_name = self._container_name(request.instance_id)
 
-        resources: list[RuntimeResourceRef] = [
-            RuntimeResourceRef("network", network_id)
-        ]
+        resources: list[RuntimeResourceRef] = [RuntimeResourceRef("network", network_id)]
         endpoints: list[RuntimeEndpoint] = []
         container_ids: list[str] = []
         try:
             for spec in request.containers:
                 safe_svc = _slug(spec.service_name, maxlen=24)
                 args: list[str] = [
-                    "run", "-d",
-                    "--name", f"{base_name}-{safe_svc}",
-                    "--network", network_name,
+                    "run",
+                    "-d",
+                    "--name",
+                    f"{base_name}-{safe_svc}",
+                    "--network",
+                    network_name,
                     # Sibling services resolve each other by service name.
-                    "--network-alias", spec.service_name,
-                    "--label", f"{MANAGED_LABEL}=true",
-                    "--label", f"{INSTANCE_LABEL}={request.instance_id}",
-                    "--label", f"{WORKER_LABEL}={self._worker_name}",
-                    "--label", f"{STACK_SERVICE_LABEL}={spec.service_name}",
-                    "--restart", "no",
+                    "--network-alias",
+                    spec.service_name,
+                    "--label",
+                    f"{MANAGED_LABEL}=true",
+                    "--label",
+                    f"{INSTANCE_LABEL}={request.instance_id}",
+                    "--label",
+                    f"{WORKER_LABEL}={self._worker_name}",
+                    "--label",
+                    f"{STACK_SERVICE_LABEL}={spec.service_name}",
+                    "--restart",
+                    "no",
                 ]
                 args += hardening
                 for port in spec.exposed_ports:
@@ -1093,15 +1086,18 @@ class DockerRuntimeBackend:
                         # never collide onto one instance-endpoint record.
                         endpoints.append(
                             RuntimeEndpoint(
-                                container_port=port, host=ip, host_port=port,
+                                container_port=port,
+                                host=ip,
+                                host_port=port,
                                 service=spec.service_name,
                             )
                         )
         except Exception:
             # Any partial stack must not leak: sweep every container of this
             # instance (by label) + the network, then re-raise.
-            _LOG.error("stack launch failed for %s; removing partial stack",
-                       _slug(request.instance_id))
+            _LOG.error(
+                "stack launch failed for %s; removing partial stack", _slug(request.instance_id)
+            )
             self.remove(request.instance_id, None)
             raise
 
@@ -1118,7 +1114,8 @@ class DockerRuntimeBackend:
             _LOG.error(
                 "stack launch for %s has %d non-live container(s) after settle; "
                 "removing the whole stack",
-                _slug(request.instance_id), len(dead),
+                _slug(request.instance_id),
+                len(dead),
             )
             self.remove(request.instance_id, None)
             raise DockerRuntimeError(
@@ -1136,7 +1133,9 @@ class DockerRuntimeBackend:
         )
         _LOG.info(
             "launched stack instance=%s services=%d network=%s gaps=%s",
-            _slug(request.instance_id), len(request.containers), network_name,
+            _slug(request.instance_id),
+            len(request.containers),
+            network_name,
             sorted(acked),
         )
         return LaunchResult(
@@ -1161,9 +1160,7 @@ class DockerRuntimeBackend:
         ip = self._container_ip(container_id, network_name)
         for port in request.exposed_ports:
             if ip:
-                eps.append(
-                    RuntimeEndpoint(container_port=port, host=ip, host_port=port)
-                )
+                eps.append(RuntimeEndpoint(container_port=port, host=ip, host_port=port))
         return tuple(eps)
 
     def _container_ip(self, container_id: str, network_name: str) -> str | None:
@@ -1171,7 +1168,7 @@ class DockerRuntimeBackend:
             [
                 "inspect",
                 "--format",
-                f"{{{{(index .NetworkSettings.Networks \"{network_name}\").IPAddress}}}}",
+                f'{{{{(index .NetworkSettings.Networks "{network_name}").IPAddress}}}}',
                 container_id,
             ],
             check=False,
@@ -1183,9 +1180,7 @@ class DockerRuntimeBackend:
     def stop(self, instance_id: str, container_id: str, *, timeout: int = 10) -> None:
         """Stop a running container (idempotent -- a gone container is not an
         error)."""
-        self._run(
-            ["stop", "--time", str(timeout), container_id], check=False, timeout=timeout + 30
-        )
+        self._run(["stop", "--time", str(timeout), container_id], check=False, timeout=timeout + 30)
 
     def restart(self, instance_id: str, container_id: str, *, timeout: int = 10) -> None:
         self._run(
@@ -1194,9 +1189,7 @@ class DockerRuntimeBackend:
             timeout=timeout + 30,
         )
 
-    def observe(
-        self, instance_id: str, container_id: str | None
-    ) -> RuntimeObservation:
+    def observe(self, instance_id: str, container_id: str | None) -> RuntimeObservation:
         """Report the observed state of one instance's container as a domain
         :class:`RuntimeObservation`."""
         if not container_id:
@@ -1226,9 +1219,7 @@ class DockerRuntimeBackend:
         """Capture the container's logs and return them (the worker persists them
         to a storage ref; raw logs may carry challenge output so they are never
         logged here)."""
-        out = self._run(
-            ["logs", "--tail", str(tail), container_id], check=False, timeout=30
-        )
+        out = self._run(["logs", "--tail", str(tail), container_id], check=False, timeout=30)
         return out.stdout + out.stderr
 
     def remove(self, instance_id: str, container_id: str | None) -> None:
@@ -1263,9 +1254,7 @@ class DockerRuntimeBackend:
         ).stdout.split()
         return out[0] if out else None
 
-    def find_stack_containers(
-        self, instance_id: str
-    ) -> tuple[tuple[str, str], ...]:
+    def find_stack_containers(self, instance_id: str) -> tuple[tuple[str, str], ...]:
         """Every one of THIS worker's containers for ``instance_id`` as
         ``(container_id, service_name)`` pairs, scoped by the worker label so a
         multi-worker host never returns a peer's container. ``service_name`` is the

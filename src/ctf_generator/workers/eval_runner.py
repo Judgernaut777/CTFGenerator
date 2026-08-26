@@ -78,13 +78,9 @@ class SingleHostEvalJobRunner:
         from ctf_generator import agent_eval
 
         with self._database.session_scope() as session:
-            version = SqlAlchemyChallengeVersionRepository(session).get(
-                definition_slug, version_no
-            )
+            version = SqlAlchemyChallengeVersionRepository(session).get(definition_slug, version_no)
         if version is None:
-            raise LookupError(
-                f"challenge version not found: {definition_slug!r} v{version_no}"
-            )
+            raise LookupError(f"challenge version not found: {definition_slug!r} v{version_no}")
         if version.state != "published":
             raise ValueError(
                 f"challenge version {definition_slug!r} v{version_no} is "

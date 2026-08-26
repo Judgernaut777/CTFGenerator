@@ -105,9 +105,7 @@ def _migrated_database():
 
 
 def _requirements() -> WorkerRequirements:
-    return WorkerRequirements(
-        "x86_64", frozenset({"launch_instance", "isolation:container"})
-    )
+    return WorkerRequirements("x86_64", frozenset({"launch_instance", "isolation:container"}))
 
 
 def _make_worker(
@@ -162,8 +160,7 @@ def _cache_image(db, name, image_ref) -> None:
         ).scalar_one()
         s.execute(
             sa.text(
-                "INSERT INTO worker_image_cache (id, worker_id, image_ref) "
-                "VALUES (:id, :w, :img)"
+                "INSERT INTO worker_image_cache (id, worker_id, image_ref) VALUES (:id, :w, :img)"
             ),
             {"id": str(uuid.uuid4()), "w": worker_id, "img": image_ref},
         )
@@ -177,9 +174,7 @@ class CandidateSelectionTests(unittest.TestCase):
             _make_worker(db, "wrong-arch", archs=("arm64",))
             _make_worker(db, "no-cap", caps=("build_challenge",))
             with db.session_scope() as s:
-                cands = SqlAlchemyScheduler(s).candidate_workers(
-                    _requirements(), _NOW, 60
-                )
+                cands = SqlAlchemyScheduler(s).candidate_workers(_requirements(), _NOW, 60)
             self.assertEqual([c.worker_name for c in cands], ["cap-worker"])
 
     def test_excludes_non_dispatch_eligible_workers(self) -> None:
@@ -192,18 +187,14 @@ class CandidateSelectionTests(unittest.TestCase):
             _make_worker(db, "never-beat", heartbeat=None)
             _make_worker(db, "good")
             with db.session_scope() as s:
-                cands = SqlAlchemyScheduler(s).candidate_workers(
-                    _requirements(), _NOW, 60
-                )
+                cands = SqlAlchemyScheduler(s).candidate_workers(_requirements(), _NOW, 60)
             self.assertEqual([c.worker_name for c in cands], ["good"])
 
     def test_no_candidate_when_none_qualify(self) -> None:
         with _migrated_database() as (db, _url):
             _make_worker(db, "wrong", archs=("arm64",))
             with db.session_scope() as s:
-                cands = SqlAlchemyScheduler(s).candidate_workers(
-                    _requirements(), _NOW, 60
-                )
+                cands = SqlAlchemyScheduler(s).candidate_workers(_requirements(), _NOW, 60)
             self.assertEqual(cands, [])
 
     def test_full_worker_excluded(self) -> None:
@@ -212,9 +203,7 @@ class CandidateSelectionTests(unittest.TestCase):
             _saturate_worker(db, "busy", 1)
             _make_worker(db, "free", capacity=1)
             with db.session_scope() as s:
-                cands = SqlAlchemyScheduler(s).candidate_workers(
-                    _requirements(), _NOW, 60
-                )
+                cands = SqlAlchemyScheduler(s).candidate_workers(_requirements(), _NOW, 60)
             self.assertEqual([c.worker_name for c in cands], ["free"])
 
     def test_image_cache_affinity_ranks_first(self) -> None:
@@ -244,9 +233,7 @@ class CandidateSelectionTests(unittest.TestCase):
             _make_worker(db, "cold", heartbeat=_NOW)
             _make_worker(db, "warm", heartbeat=_NOW)
             with db.session_scope() as s:
-                SqlAlchemyWorkerImageCacheRepository(s).record(
-                    "warm", "img:app@sha256:abc", _NOW
-                )
+                SqlAlchemyWorkerImageCacheRepository(s).record("warm", "img:app@sha256:abc", _NOW)
             with db.session_scope() as s:
                 cands = SqlAlchemyScheduler(s).candidate_workers(
                     _requirements(), _NOW, 60, image_ref="img:app@sha256:abc"
@@ -269,9 +256,7 @@ class CandidateSelectionTests(unittest.TestCase):
                         "warm", "img:app@sha256:abc", _NOW
                     )
             with db.session_scope() as s:
-                count = s.execute(
-                    sa.text("SELECT count(*) FROM worker_image_cache")
-                ).scalar_one()
+                count = s.execute(sa.text("SELECT count(*) FROM worker_image_cache")).scalar_one()
             self.assertEqual(count, 1)
 
     def test_free_capacity_reports_capacity_without_quota(self) -> None:
@@ -300,9 +285,7 @@ class SelectAndReserveTests(unittest.TestCase):
             requirements=_requirements(),
             reservation_id=rid,
             pooled_items=(
-                ReservationItem(
-                    "platform", PLATFORM_SCOPE_KEY, "active_instances", pool_amount
-                ),
+                ReservationItem("platform", PLATFORM_SCOPE_KEY, "active_instances", pool_amount),
             ),
             expires_at=_NOW + timedelta(hours=1),
             now=_NOW,
@@ -446,9 +429,7 @@ class SelectAndReserveTests(unittest.TestCase):
                 requirements=_requirements(),
                 reservation_id=rid,
                 pooled_items=(
-                    ReservationItem(
-                        "platform", PLATFORM_SCOPE_KEY, "active_instances", 1
-                    ),
+                    ReservationItem("platform", PLATFORM_SCOPE_KEY, "active_instances", 1),
                 ),
                 expires_at=_NOW - timedelta(minutes=1),  # already expired
                 now=_NOW - timedelta(hours=1),
@@ -488,13 +469,10 @@ class WorkerMatchesEquivalenceTests(unittest.TestCase):
         ]
         with _migrated_database() as (db, _url):
             for name, archs, caps, runtime in specs:
-                _make_worker(
-                    db, name, archs=archs, caps=caps, runtime=runtime, capacity=2
-                )
+                _make_worker(db, name, archs=archs, caps=caps, runtime=runtime, capacity=2)
             with db.session_scope() as s:
                 sql = {
-                    c.worker_name
-                    for c in SqlAlchemyScheduler(s).candidate_workers(req, _NOW, 60)
+                    c.worker_name for c in SqlAlchemyScheduler(s).candidate_workers(req, _NOW, 60)
                 }
             spec = {
                 name
@@ -521,13 +499,10 @@ class WorkerMatchesEquivalenceTests(unittest.TestCase):
         ]
         with _migrated_database() as (db, _url):
             for name, archs, caps, runtime in specs:
-                _make_worker(
-                    db, name, archs=archs, caps=caps, runtime=runtime, capacity=2
-                )
+                _make_worker(db, name, archs=archs, caps=caps, runtime=runtime, capacity=2)
             with db.session_scope() as s:
                 sql = {
-                    c.worker_name
-                    for c in SqlAlchemyScheduler(s).candidate_workers(req, _NOW, 60)
+                    c.worker_name for c in SqlAlchemyScheduler(s).candidate_workers(req, _NOW, 60)
                 }
             spec = {
                 name
@@ -568,8 +543,7 @@ class WorkerMatchesEquivalenceTests(unittest.TestCase):
             _make_worker(db, "pending", trust="pending")
             with db.session_scope() as s:
                 sql = {
-                    c.worker_name
-                    for c in SqlAlchemyScheduler(s).candidate_workers(req, _NOW, 60)
+                    c.worker_name for c in SqlAlchemyScheduler(s).candidate_workers(req, _NOW, 60)
                 }
             self.assertEqual(sql, {"ok"})
 

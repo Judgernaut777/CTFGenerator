@@ -50,12 +50,8 @@ def _run_main(env: dict[str, str]):
 
     with (
         mock.patch.dict("os.environ", env, clear=True),
-        mock.patch.object(
-            docker_backend, "DockerRuntimeBackend", side_effect=_fake_backend
-        ),
-        mock.patch.object(
-            http_client, "HttpControlPlaneClient", return_value=mock.MagicMock()
-        ),
+        mock.patch.object(docker_backend, "DockerRuntimeBackend", side_effect=_fake_backend),
+        mock.patch.object(http_client, "HttpControlPlaneClient", return_value=mock.MagicMock()),
         mock.patch.object(worker_mod, "Worker", return_value=mock.MagicMock()),
     ):
         rc = worker_mod.main([])
@@ -79,14 +75,10 @@ class WorkerMainGapsTest(unittest.TestCase):
         # Explicit acknowledgement disables the rootless requirement and passes
         # exactly the named gaps (whitespace-tolerant).
         self.assertFalse(kwargs["require_rootless"])
-        self.assertEqual(
-            kwargs["acknowledged_gaps"], frozenset({"rootless", "user_namespace"})
-        )
+        self.assertEqual(kwargs["acknowledged_gaps"], frozenset({"rootless", "user_namespace"}))
 
     def test_unknown_gap_is_refused(self) -> None:
-        rc, kwargs = _run_main(
-            {**_BASE_ENV, "CTFGEN_WORKER_ACKNOWLEDGED_GAPS": "rootless,seccomp"}
-        )
+        rc, kwargs = _run_main({**_BASE_ENV, "CTFGEN_WORKER_ACKNOWLEDGED_GAPS": "rootless,seccomp"})
         # seccomp is NOT acknowledgeable -> hard fail before building a backend.
         self.assertEqual(rc, 2)
         self.assertEqual(kwargs, {})

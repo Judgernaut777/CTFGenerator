@@ -46,7 +46,7 @@ class PathValidationTests(unittest.TestCase):
                 validate_relative_path(bad)
 
     def test_rejects_absolute(self) -> None:
-        for bad in ("/etc/passwd", "/tmp/x"):
+        for bad in ("/etc/passwd", "/tmp/x"):  # noqa: S108 -- path only used as a rejected-input fixture; never created
             with self.assertRaises(PathValidationError):
                 validate_relative_path(bad)
 

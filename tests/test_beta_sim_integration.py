@@ -75,9 +75,7 @@ class BetaSimIntegrationTests(unittest.TestCase):
     def test_scoreboard_reconstructed_matches_live_state(self) -> None:
         r = self._result.recon
         self.assertGreaterEqual(r.live_rows, 1, "the seeded scoreboard must be non-empty")
-        self.assertEqual(
-            r.reconstructed_rows, r.live_rows, "same number of ranked teams"
-        )
+        self.assertEqual(r.reconstructed_rows, r.live_rows, "same number of ranked teams")
         self.assertTrue(
             r.parity,
             f"live projection cache must byte-equal the event refold: {r.detail}",

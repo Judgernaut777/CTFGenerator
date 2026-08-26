@@ -292,9 +292,7 @@ class SolveRepositoryTests(unittest.TestCase):
                 SqlAlchemySolveRepository(s).add(_solve(solve_id, sid))
             with db.session_scope() as s:
                 got = SqlAlchemySolveRepository(s).get(solve_id)
-                by_chal = SqlAlchemySolveRepository(s).get_for_challenge(
-                    "cup", "Red", "sql", 1
-                )
+                by_chal = SqlAlchemySolveRepository(s).get_for_challenge("cup", "Red", "sql", 1)
         self.assertEqual(got.solve_id, solve_id)
         self.assertEqual(got.submission_id, sid)
         self.assertEqual(by_chal.solve_id, solve_id)
@@ -345,9 +343,7 @@ class SolveRepositoryTests(unittest.TestCase):
                 )
             with self.assertRaises(IntegrityError):
                 with db.session_scope() as s:
-                    SqlAlchemySolveRepository(s).add(
-                        _solve(solve_id, sid, team_name="Blue")
-                    )
+                    SqlAlchemySolveRepository(s).add(_solve(solve_id, sid, team_name="Blue"))
 
     def test_append_only_trigger_blocks_mutation(self) -> None:
         sid, solve_id = _uid(), _uid()
@@ -443,9 +439,7 @@ class ScoreLedgerTests(unittest.TestCase):
                 comp = s.execute(
                     sa.text("SELECT id FROM competitions WHERE slug='cup'")
                 ).scalar_one()
-                team = s.execute(
-                    sa.text("SELECT id FROM teams WHERE name='Red'")
-                ).scalar_one()
+                team = s.execute(sa.text("SELECT id FROM teams WHERE name='Red'")).scalar_one()
                 ver = s.execute(
                     sa.text("SELECT id FROM challenge_versions WHERE version_no=1")
                 ).scalar_one()
@@ -504,9 +498,7 @@ class TransactionalProcessingTests(unittest.TestCase):
             with db.session_scope() as s:
                 self.assertIsNotNone(SqlAlchemyLedgerSubmissionRepository(s).get(sid))
                 self.assertIsNotNone(SqlAlchemySolveRepository(s).get(solve_id))
-                self.assertEqual(
-                    len(SqlAlchemyScoreLedger(s).list_for_competition("cup")), 1
-                )
+                self.assertEqual(len(SqlAlchemyScoreLedger(s).list_for_competition("cup")), 1)
 
     def test_duplicate_solve_rolls_back_whole_transaction(self) -> None:
         # Processing a duplicate solve inside one UoW must roll back the
@@ -609,9 +601,7 @@ class LedgerFkAndMigrationTests(unittest.TestCase):
                     self.assertIn(t, insp.get_table_names())
                 with engine.connect() as conn:
                     self.assertEqual(
-                        conn.execute(
-                            sa.text("SELECT version_num FROM alembic_version")
-                        ).scalar(),
+                        conn.execute(sa.text("SELECT version_num FROM alembic_version")).scalar(),
                         "0005_ledger",
                     )
                 # Down one step: ledger tables gone, challenge tables remain, and
@@ -623,9 +613,7 @@ class LedgerFkAndMigrationTests(unittest.TestCase):
                 with engine.connect() as conn:
                     fns = (
                         conn.execute(
-                            sa.text(
-                                "SELECT proname FROM pg_proc WHERE proname='reject_mutation'"
-                            )
+                            sa.text("SELECT proname FROM pg_proc WHERE proname='reject_mutation'")
                         )
                         .scalars()
                         .all()
@@ -637,9 +625,7 @@ class LedgerFkAndMigrationTests(unittest.TestCase):
                 command.downgrade(cfg, "base")
                 with engine.connect() as conn:
                     self.assertEqual(
-                        conn.execute(
-                            sa.text("SELECT count(*) FROM alembic_version")
-                        ).scalar(),
+                        conn.execute(sa.text("SELECT count(*) FROM alembic_version")).scalar(),
                         0,
                     )
                     # A full teardown leaves no ledger machinery behind: both the

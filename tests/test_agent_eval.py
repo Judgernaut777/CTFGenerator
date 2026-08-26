@@ -26,7 +26,6 @@ from ctf_generator.agent_eval import (
 from ctf_generator.models import ResponseSpec, TriggerSpec
 from ctf_generator.scenario import ScriptedDefender
 
-
 DESCRIPTION_MD = """# Widget Vault
 
 Start at:
@@ -39,11 +38,15 @@ Use the `X-Session: letmein` request header. The flag format is `ctf{...}`.
 HINTS_YAML = 'hints:\n  - "Sessions are just a shared secret."\n'
 
 
-def _write_challenge(root: Path, *, description: str = DESCRIPTION_MD, hints: str = HINTS_YAML) -> Path:
+def _write_challenge(
+    root: Path, *, description: str = DESCRIPTION_MD, hints: str = HINTS_YAML
+) -> Path:
     challenge = root / "widget-vault"
     (challenge / "public").mkdir(parents=True)
     (challenge / "private").mkdir(parents=True)
-    (challenge / "challenge.yaml").write_text("title: Widget Vault\nfamily: none\n", encoding="utf-8")
+    (challenge / "challenge.yaml").write_text(
+        "title: Widget Vault\nfamily: none\n", encoding="utf-8"
+    )
     (challenge / "public" / "description.md").write_text(description, encoding="utf-8")
     (challenge / "public" / "hints.yaml").write_text(hints, encoding="utf-8")
     return challenge
@@ -52,7 +55,7 @@ def _write_challenge(root: Path, *, description: str = DESCRIPTION_MD, hints: st
 class FakeHTTPClient:
     """Deterministic fake: one endpoint, one secret header, no network."""
 
-    def __init__(self, secret: str = "letmein", flag: str = "ctf{fake_flag_123456}") -> None:
+    def __init__(self, secret: str = "letmein", flag: str = "ctf{fake_flag_123456}") -> None:  # noqa: S107 -- fake credential for offline FakeHTTPClient; never a real secret
         self.secret = secret
         self.flag = flag
         self.calls: list[tuple[str, str, dict]] = []
@@ -95,10 +98,14 @@ class FakeAnthropicClient:
 
 
 def _openai_tool_call(call_id: str, name: str, arguments: dict) -> SimpleNamespace:
-    return SimpleNamespace(id=call_id, function=SimpleNamespace(name=name, arguments=json.dumps(arguments)))
+    return SimpleNamespace(
+        id=call_id, function=SimpleNamespace(name=name, arguments=json.dumps(arguments))
+    )
 
 
-def _openai_message(text: str | None = None, tool_calls: list[SimpleNamespace] | None = None) -> SimpleNamespace:
+def _openai_message(
+    text: str | None = None, tool_calls: list[SimpleNamespace] | None = None
+) -> SimpleNamespace:
     return SimpleNamespace(content=text, tool_calls=tool_calls or [])
 
 
@@ -140,7 +147,7 @@ class ScriptedSolverAgentTests(unittest.TestCase):
                 base_url="http://fake-app",
                 public_dir=challenge / "public",
                 http=http,
-                rng=random.Random(0),
+                rng=random.Random(0),  # noqa: S311 -- seeded RNG for deterministic challenge generation; not for secrets
                 max_steps=8,
                 deadline=float("inf"),
             )
@@ -155,14 +162,14 @@ class ScriptedSolverAgentTests(unittest.TestCase):
     def test_fails_when_secret_does_not_match(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             challenge = _write_challenge(Path(temp_dir))
-            http = FakeHTTPClient(secret="different-secret")
+            http = FakeHTTPClient(secret="different-secret")  # noqa: S106 -- fake credential exercising header-mismatch rejection
             agent = ScriptedSolverAgent()
 
             transcript = agent.solve(
                 base_url="http://fake-app",
                 public_dir=challenge / "public",
                 http=http,
-                rng=random.Random(0),
+                rng=random.Random(0),  # noqa: S311 -- seeded RNG for deterministic challenge generation; not for secrets
                 max_steps=8,
                 deadline=float("inf"),
             )
@@ -173,7 +180,9 @@ class ScriptedSolverAgentTests(unittest.TestCase):
     def test_respects_max_steps_budget(self) -> None:
         description = "\n".join(f"- `GET /path{i}`" for i in range(5))
         with tempfile.TemporaryDirectory() as temp_dir:
-            challenge = _write_challenge(Path(temp_dir), description=description, hints="hints: []\n")
+            challenge = _write_challenge(
+                Path(temp_dir), description=description, hints="hints: []\n"
+            )
             http = FakeHTTPClient()
             agent = ScriptedSolverAgent()
 
@@ -181,7 +190,7 @@ class ScriptedSolverAgentTests(unittest.TestCase):
                 base_url="http://fake-app",
                 public_dir=challenge / "public",
                 http=http,
-                rng=random.Random(0),
+                rng=random.Random(0),  # noqa: S311 -- seeded RNG for deterministic challenge generation; not for secrets
                 max_steps=2,
                 deadline=float("inf"),
             )
@@ -238,12 +247,16 @@ class RunAgentEvalTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as temp_dir:
             challenge = _write_challenge(Path(temp_dir))
             with self.assertRaises(ValueError):
-                run_agent_eval(challenge, "not-a-real-profile", already_running=True, http=FakeHTTPClient())
+                run_agent_eval(
+                    challenge, "not-a-real-profile", already_running=True, http=FakeHTTPClient()
+                )
 
     def test_static_validation_failure_short_circuits(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             challenge = Path(temp_dir) / "missing"
-            report = run_agent_eval(challenge, "writeup_replay", already_running=True, http=FakeHTTPClient())
+            report = run_agent_eval(
+                challenge, "writeup_replay", already_running=True, http=FakeHTTPClient()
+            )
 
         self.assertFalse(report.solved)
         self.assertTrue(any("does not exist" in note for note in report.notes))
@@ -394,7 +407,7 @@ class LlmSolverAgentTests(unittest.TestCase):
                     base_url="http://fake-app",
                     public_dir=challenge / "public",
                     http=FakeHTTPClient(),
-                    rng=random.Random(0),
+                    rng=random.Random(0),  # noqa: S311 -- seeded RNG for deterministic challenge generation; not for secrets
                     max_steps=1,
                     deadline=float("inf"),
                 )
@@ -418,7 +431,7 @@ class LlmSolverAgentTests(unittest.TestCase):
                 base_url="http://fake-app",
                 public_dir=challenge / "public",
                 http=http,
-                rng=random.Random(0),
+                rng=random.Random(0),  # noqa: S311 -- seeded RNG for deterministic challenge generation; not for secrets
                 max_steps=5,
                 deadline=float("inf"),
             )
@@ -433,9 +446,15 @@ class LlmSolverAgentTests(unittest.TestCase):
     def test_solve_stops_when_model_gives_up(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             challenge = _write_challenge(Path(temp_dir))
-            http = FakeHTTPClient(secret="different-secret")
+            http = FakeHTTPClient(secret="different-secret")  # noqa: S106 -- fake credential for offline eval harness
             turns = [
-                [_tool_use_block("call-1", "http_request", {"method": "GET", "path": "/api/flag", "headers": {}})],
+                [
+                    _tool_use_block(
+                        "call-1",
+                        "http_request",
+                        {"method": "GET", "path": "/api/flag", "headers": {}},
+                    )
+                ],
                 [_text_block("Nothing else worth trying; giving up.")],
             ]
             client = FakeAnthropicClient(turns)
@@ -445,7 +464,7 @@ class LlmSolverAgentTests(unittest.TestCase):
                 base_url="http://fake-app",
                 public_dir=challenge / "public",
                 http=http,
-                rng=random.Random(0),
+                rng=random.Random(0),  # noqa: S311 -- seeded RNG for deterministic challenge generation; not for secrets
                 max_steps=5,
                 deadline=float("inf"),
             )
@@ -458,8 +477,12 @@ class LlmSolverAgentTests(unittest.TestCase):
     def test_solve_respects_max_steps_budget(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             challenge = _write_challenge(Path(temp_dir))
-            http = FakeHTTPClient(secret="different-secret")
-            decision = [_tool_use_block("call-1", "http_request", {"method": "GET", "path": "/api/flag", "headers": {}})]
+            http = FakeHTTPClient(secret="different-secret")  # noqa: S106 -- fake credential for offline eval harness
+            decision = [
+                _tool_use_block(
+                    "call-1", "http_request", {"method": "GET", "path": "/api/flag", "headers": {}}
+                )
+            ]
             client = FakeAnthropicClient([decision])
             agent = LlmSolverAgent(provider="anthropic", client=client)
 
@@ -467,7 +490,7 @@ class LlmSolverAgentTests(unittest.TestCase):
                 base_url="http://fake-app",
                 public_dir=challenge / "public",
                 http=http,
-                rng=random.Random(0),
+                rng=random.Random(0),  # noqa: S311 -- seeded RNG for deterministic challenge generation; not for secrets
                 max_steps=3,
                 deadline=float("inf"),
             )
@@ -481,7 +504,9 @@ class LlmSolverAgentTests(unittest.TestCase):
             challenge = _write_challenge(Path(temp_dir))
             http = FakeHTTPClient()
             tool_call = _openai_tool_call(
-                "call-1", "http_request", {"method": "GET", "path": "/api/flag", "headers": {"X-Session": "letmein"}}
+                "call-1",
+                "http_request",
+                {"method": "GET", "path": "/api/flag", "headers": {"X-Session": "letmein"}},
             )
             client = FakeOpenAIClient([_openai_message(tool_calls=[tool_call])])
             agent = LlmSolverAgent(provider="openai", client=client)
@@ -490,7 +515,7 @@ class LlmSolverAgentTests(unittest.TestCase):
                 base_url="http://fake-app",
                 public_dir=challenge / "public",
                 http=http,
-                rng=random.Random(0),
+                rng=random.Random(0),  # noqa: S311 -- seeded RNG for deterministic challenge generation; not for secrets
                 max_steps=5,
                 deadline=float("inf"),
             )
@@ -579,9 +604,7 @@ class OpenAiEmptyChoicesTests(unittest.TestCase):
     def test_none_choices_raises_clear_runtime_error(self) -> None:
         class _NoChoicesClient:
             def __init__(self) -> None:
-                self.chat = SimpleNamespace(
-                    completions=SimpleNamespace(create=self._create)
-                )
+                self.chat = SimpleNamespace(completions=SimpleNamespace(create=self._create))
 
             def _create(self, **kwargs):
                 return SimpleNamespace(

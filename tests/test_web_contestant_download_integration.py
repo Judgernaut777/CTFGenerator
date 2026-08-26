@@ -125,9 +125,7 @@ class ContestantDownloadWebTests(unittest.TestCase):
                 )
 
                 self.assertEqual(resp.status_code, 200, resp.text)
-                self.assertEqual(
-                    resp.headers["content-type"], "application/x-tar"
-                )
+                self.assertEqual(resp.headers["content-type"], "application/x-tar")
                 self.assertEqual(
                     resp.headers["content-disposition"],
                     f'attachment; filename="{_SLUG}-v{ver}.tar"',
@@ -218,9 +216,7 @@ class ContestantDownloadWebTests(unittest.TestCase):
         with ws.web_client(artifact_store=None) as (client, db, _svc):
             ver, _spec = _seed_published(db, ws.COMP_A, _SLUG)
             ws.login(client, ws.EVE)
-            resp = client.get(
-                f"/app/competitions/{ws.COMP_A}/challenges/{_SLUG}/{ver}/download"
-            )
+            resp = client.get(f"/app/competitions/{ws.COMP_A}/challenges/{_SLUG}/{ver}/download")
             self.assertEqual(resp.status_code, 404, resp.text)
             self.assertNotIn("Traceback", resp.text)
 

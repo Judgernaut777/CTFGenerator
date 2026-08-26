@@ -1,16 +1,17 @@
 from __future__ import annotations
 
-import json
 import tempfile
 import unittest
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 
 from ctf_generator import cli, report_index, report_writer
 
 
-def _envelope(command, identifier, result, status="passed", timestamp=None, commit="abcdef1234567890"):
-    ts = timestamp or datetime(2026, 7, 3, 14, 25, 30, tzinfo=timezone.utc)
+def _envelope(
+    command, identifier, result, status="passed", timestamp=None, commit="abcdef1234567890"
+):
+    ts = timestamp or datetime(2026, 7, 3, 14, 25, 30, tzinfo=UTC)
     return report_writer.build_report(
         command,
         {"type": "challenge", "identifier": identifier},
@@ -60,9 +61,7 @@ class RowFromReportTests(unittest.TestCase):
         self.assertEqual(row.git_commit_short, "-")
 
     def test_bool_total_is_not_a_score(self) -> None:
-        row = report_index.row_from_report(
-            {"command": "x", "result": {"total": True}}, "b.json"
-        )
+        row = report_index.row_from_report({"command": "x", "result": {"total": True}}, "b.json")
         self.assertIsNone(row.score_total)
 
 
@@ -100,15 +99,19 @@ class LoadIndexTests(unittest.TestCase):
             report_writer.write_report(
                 d,
                 _envelope(
-                    "score", "later", {"total": 1.0},
-                    timestamp=datetime(2026, 7, 3, 20, 0, 0, tzinfo=timezone.utc),
+                    "score",
+                    "later",
+                    {"total": 1.0},
+                    timestamp=datetime(2026, 7, 3, 20, 0, 0, tzinfo=UTC),
                 ),
             )
             report_writer.write_report(
                 d,
                 _envelope(
-                    "score", "earlier", {"total": 2.0},
-                    timestamp=datetime(2026, 7, 3, 8, 0, 0, tzinfo=timezone.utc),
+                    "score",
+                    "earlier",
+                    {"total": 2.0},
+                    timestamp=datetime(2026, 7, 3, 8, 0, 0, tzinfo=UTC),
                 ),
             )
             index = report_index.load_index(d)
@@ -118,7 +121,11 @@ class LoadIndexTests(unittest.TestCase):
 class RenderTableTests(unittest.TestCase):
     def test_table_contains_row_values(self) -> None:
         index = report_index.ReportIndex(
-            rows=[report_index.row_from_report(_envelope("score", "chal-x", {"total": 87.5}), "r.json")]
+            rows=[
+                report_index.row_from_report(
+                    _envelope("score", "chal-x", {"total": 87.5}), "r.json"
+                )
+            ]
         )
         out = report_index.render_table(index)
         self.assertIn("command", out)
@@ -141,7 +148,11 @@ class RenderTableTests(unittest.TestCase):
 class RenderHtmlTests(unittest.TestCase):
     def test_self_contained_document(self) -> None:
         index = report_index.ReportIndex(
-            rows=[report_index.row_from_report(_envelope("score", "chal-x", {"total": 87.5}), "r.json")]
+            rows=[
+                report_index.row_from_report(
+                    _envelope("score", "chal-x", {"total": 87.5}), "r.json"
+                )
+            ]
         )
         out = report_index.render_html(index)
         self.assertTrue(out.startswith("<!DOCTYPE html>"))
@@ -159,7 +170,11 @@ class RenderHtmlTests(unittest.TestCase):
     def test_html_escapes_subject_identifier(self) -> None:
         payload = "<img src=x onerror=1>"
         index = report_index.ReportIndex(
-            rows=[report_index.row_from_report(_envelope("validate", payload, {"errors": []}), "r.json")]
+            rows=[
+                report_index.row_from_report(
+                    _envelope("validate", payload, {"errors": []}), "r.json"
+                )
+            ]
         )
         out = report_index.render_html(index)
         self.assertNotIn("<img src=x onerror=1>", out)

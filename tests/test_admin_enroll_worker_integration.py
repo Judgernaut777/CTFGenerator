@@ -79,14 +79,10 @@ class EnrollWorkerCliTests(unittest.TestCase):
             # The CLI reads the DSN from the environment, like the real deployment.
             with unittest_env(CTFGEN_DATABASE_URL=url):
                 with redirect_stdout(buf):
-                    rc = admin_main(
-                        ["enroll-worker", "--name", "w-cli-1", "--capacity", "2"]
-                    )
+                    rc = admin_main(["enroll-worker", "--name", "w-cli-1", "--capacity", "2"])
             self.assertEqual(rc, 0)
             out = buf.getvalue()
-            token_line = [
-                ln for ln in out.splitlines() if ln.startswith("CTFGEN_WORKER_TOKEN=")
-            ]
+            token_line = [ln for ln in out.splitlines() if ln.startswith("CTFGEN_WORKER_TOKEN=")]
             self.assertEqual(len(token_line), 1, out)
             token = token_line[0].split("=", 1)[1]
             self.assertTrue(token.startswith("ctfw1."), token)

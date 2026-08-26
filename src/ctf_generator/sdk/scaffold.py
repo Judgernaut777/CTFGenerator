@@ -62,9 +62,7 @@ def _parse_modes(modes: str) -> tuple[str, ...]:
         raise ScaffoldError("at least one mode is required")
     unknown = [m for m in parsed if m not in KNOWN_MODES]
     if unknown:
-        raise ScaffoldError(
-            f"unknown mode(s) {unknown}: valid modes are {sorted(KNOWN_MODES)}"
-        )
+        raise ScaffoldError(f"unknown mode(s) {unknown}: valid modes are {sorted(KNOWN_MODES)}")
     return parsed
 
 
@@ -227,7 +225,7 @@ if __name__ == "__main__":
     unittest.main()
 '''
 
-_ENTRY_POINT_TEMPLATE = '''\
+_ENTRY_POINT_TEMPLATE = """\
 # Registering the `__NAME__` family
 
 To distribute this family as an installable plugin, declare a
@@ -250,7 +248,7 @@ discovered, **linted**, and registered automatically by `ctfgen` at CLI startup
 (via `sdk.plugins.bootstrap_family_plugins`). Only lint-clean families are
 registered; a plugin that fails the linter is skipped with a warning and never
 crashes the app. See `docs/CHALLENGE_SDK.md` for the full contract.
-'''
+"""
 
 
 def render_family_module(name: str, category: str, modes: tuple[str, ...], brief: str) -> str:
@@ -322,15 +320,12 @@ def scaffold_family(
     targets = {rel: dest / rel for rel in files}
     symlinks = sorted(str(p) for p in targets.values() if p.is_symlink())
     if symlinks:
-        raise ScaffoldError(
-            f"refusing to write through symlink(s) in --dest: {symlinks}"
-        )
+        raise ScaffoldError(f"refusing to write through symlink(s) in --dest: {symlinks}")
     if not force:
         existing = sorted(str(path) for path in targets.values() if path.exists())
         if existing:
             raise ScaffoldError(
-                "refusing to overwrite existing file(s) (pass --force to "
-                f"overwrite): {existing}"
+                f"refusing to overwrite existing file(s) (pass --force to overwrite): {existing}"
             )
 
     written: list[Path] = []

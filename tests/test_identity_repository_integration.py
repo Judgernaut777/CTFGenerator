@@ -15,35 +15,39 @@ import os
 import unittest
 import uuid
 from contextlib import contextmanager
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 
 try:  # heavy deps are optional; guard so import never fails the host suite
     import sqlalchemy as sa
-    from sqlalchemy.engine import make_url
-    from sqlalchemy.exc import IntegrityError
     from alembic import command
     from alembic.config import Config as AlembicConfig
+    from sqlalchemy.engine import make_url
+    from sqlalchemy.exc import IntegrityError
 
     from ctf_generator.domain.challenges.models import CompetitionConfig
     from ctf_generator.domain.identity.models import Membership, Team, User
-    from ctf_generator.infrastructure.database.config import DatabaseConfig
-    from ctf_generator.infrastructure.database.session import Database
-    from ctf_generator.infrastructure.database.models import (
-        Membership as MembershipRow,
-        Team as TeamRow,
-        User as UserRow,
-    )
     from ctf_generator.infrastructure.database.competition_repository import (
         SqlAlchemyCompetitionRepository,
     )
-    from ctf_generator.infrastructure.database.user_repository import (
-        SqlAlchemyUserRepository,
+    from ctf_generator.infrastructure.database.config import DatabaseConfig
+    from ctf_generator.infrastructure.database.membership_repository import (
+        SqlAlchemyMembershipRepository,
     )
+    from ctf_generator.infrastructure.database.models import (
+        Membership as MembershipRow,
+    )
+    from ctf_generator.infrastructure.database.models import (
+        Team as TeamRow,
+    )
+    from ctf_generator.infrastructure.database.models import (
+        User as UserRow,
+    )
+    from ctf_generator.infrastructure.database.session import Database
     from ctf_generator.infrastructure.database.team_repository import (
         SqlAlchemyTeamRepository,
     )
-    from ctf_generator.infrastructure.database.membership_repository import (
-        SqlAlchemyMembershipRepository,
+    from ctf_generator.infrastructure.database.user_repository import (
+        SqlAlchemyUserRepository,
     )
 
     _IMPORT_ERROR: str | None = None
@@ -78,7 +82,7 @@ def _isolated_database():
         admin.dispose()
 
 
-def _alembic_config(url) -> "AlembicConfig":
+def _alembic_config(url) -> AlembicConfig:
     cfg = AlembicConfig(os.path.join(_REPO_ROOT, "alembic.ini"))
     cfg.set_main_option("script_location", os.path.join(_REPO_ROOT, "alembic"))
     cfg.set_main_option("sqlalchemy.url", str(url))
@@ -97,8 +101,8 @@ def _migrated_database():
             db.dispose()
 
 
-def _competition(competition_id: str = "spring-ctf-2026") -> "CompetitionConfig":
-    start = datetime(2026, 6, 1, 9, 0, tzinfo=timezone.utc)
+def _competition(competition_id: str = "spring-ctf-2026") -> CompetitionConfig:
+    start = datetime(2026, 6, 1, 9, 0, tzinfo=UTC)
     return CompetitionConfig(
         competition_id=competition_id,
         name=f"Competition {competition_id}",
@@ -294,9 +298,7 @@ class MembershipRepositoryIntegrationTests(unittest.TestCase):
             comp = _seed_competition(db)
             self._seed_people(db, comp, with_team=None)
             with db.session_scope() as s:
-                SqlAlchemyMembershipRepository(s).add(
-                    Membership("player@x.io", comp, "organizer")
-                )
+                SqlAlchemyMembershipRepository(s).add(Membership("player@x.io", comp, "organizer"))
             with db.session_scope() as s:
                 got = SqlAlchemyMembershipRepository(s).get("player@x.io", comp)
         self.assertEqual(got.role, "organizer")
@@ -310,9 +312,7 @@ class MembershipRepositoryIntegrationTests(unittest.TestCase):
             with db.session_scope() as s:
                 SqlAlchemyUserRepository(s).add(User("Alice@X.io", "Alice"))
             with db.session_scope() as s:
-                SqlAlchemyMembershipRepository(s).add(
-                    Membership("alice@x.io", comp, "player")
-                )
+                SqlAlchemyMembershipRepository(s).add(Membership("alice@x.io", comp, "player"))
             with db.session_scope() as s:
                 repo = SqlAlchemyMembershipRepository(s)
                 got = repo.get("ALICE@X.IO", comp)
@@ -328,9 +328,7 @@ class MembershipRepositoryIntegrationTests(unittest.TestCase):
             with db.session_scope() as s:
                 SqlAlchemyUserRepository(s).add(User("player@x.io", "Player"))
                 SqlAlchemyTeamRepository(s).add(Team(comp_b, "Red"))
-                SqlAlchemyMembershipRepository(s).add(
-                    Membership("player@x.io", comp_a, "player")
-                )
+                SqlAlchemyMembershipRepository(s).add(Membership("player@x.io", comp_a, "player"))
             with self.assertRaises(LookupError):
                 with db.session_scope() as s:
                     SqlAlchemyMembershipRepository(s).update(
@@ -342,9 +340,7 @@ class MembershipRepositoryIntegrationTests(unittest.TestCase):
             comp = _seed_competition(db)
             with self.assertRaises(LookupError):
                 with db.session_scope() as s:
-                    SqlAlchemyMembershipRepository(s).add(
-                        Membership("ghost@x.io", comp, "player")
-                    )
+                    SqlAlchemyMembershipRepository(s).add(Membership("ghost@x.io", comp, "player"))
 
     def test_add_missing_competition_raises_lookuperror(self) -> None:
         with _migrated_database() as (db, _url):
@@ -478,9 +474,7 @@ class MembershipRepositoryIntegrationTests(unittest.TestCase):
                 m.add(Membership("u2@x.io", comp_a, "player"))
                 m.add(Membership("u1@x.io", comp_b, "observer"))
             with db.session_scope() as s:
-                members_a = SqlAlchemyMembershipRepository(s).list_for_competition(
-                    comp_a
-                )
+                members_a = SqlAlchemyMembershipRepository(s).list_for_competition(comp_a)
         self.assertEqual(len(members_a), 2)
         self.assertTrue(all(isinstance(x, Membership) for x in members_a))
         self.assertEqual(
@@ -511,9 +505,7 @@ class IdentityConstraintTests(unittest.TestCase):
                 SqlAlchemyTeamRepository(s).add(Team("comp-b", "Red"))
             with db.session_scope() as s:
                 user_id = s.scalars(
-                    sa.select(UserRow.id).where(
-                        sa.func.lower(UserRow.email) == "player@x.io"
-                    )
+                    sa.select(UserRow.id).where(sa.func.lower(UserRow.email) == "player@x.io")
                 ).one()
                 comp_a_id = s.execute(
                     sa.text("SELECT id FROM competitions WHERE slug = :slug"),
@@ -540,9 +532,7 @@ class IdentityConstraintTests(unittest.TestCase):
                 SqlAlchemyUserRepository(s).add(User("player@x.io", "Player"))
             with db.session_scope() as s:
                 user_id = s.scalars(
-                    sa.select(UserRow.id).where(
-                        sa.func.lower(UserRow.email) == "player@x.io"
-                    )
+                    sa.select(UserRow.id).where(sa.func.lower(UserRow.email) == "player@x.io")
                 ).one()
                 comp_id = s.execute(
                     sa.text("SELECT id FROM competitions WHERE slug = :slug"),
@@ -587,14 +577,10 @@ class IdentityConstraintTests(unittest.TestCase):
             comp = _seed_competition(db)
             with db.session_scope() as s:
                 SqlAlchemyUserRepository(s).add(User("player@x.io", "Player"))
-                SqlAlchemyMembershipRepository(s).add(
-                    Membership("player@x.io", comp, "player")
-                )
+                SqlAlchemyMembershipRepository(s).add(Membership("player@x.io", comp, "player"))
             with self.assertRaises(IntegrityError):
                 with db.session_scope() as s:
-                    s.execute(
-                        sa.text("DELETE FROM users WHERE lower(email) = 'player@x.io'")
-                    )
+                    s.execute(sa.text("DELETE FROM users WHERE lower(email) = 'player@x.io'"))
 
     def test_fk_restrict_blocks_deleting_referenced_team(self) -> None:
         with _migrated_database() as (db, _url):

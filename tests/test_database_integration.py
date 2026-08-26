@@ -19,10 +19,10 @@ from contextlib import contextmanager
 
 try:  # heavy deps are optional; guard so import never fails the host suite
     import sqlalchemy as sa
-    from sqlalchemy.engine import make_url
     from alembic import command
     from alembic.config import Config as AlembicConfig
     from alembic.script import ScriptDirectory
+    from sqlalchemy.engine import make_url
 
     from ctf_generator.infrastructure.database.config import DatabaseConfig
     from ctf_generator.infrastructure.database.session import Database
@@ -71,7 +71,7 @@ def _isolated_database():
         admin.dispose()
 
 
-def _alembic_config(url) -> "AlembicConfig":
+def _alembic_config(url) -> AlembicConfig:
     cfg = AlembicConfig(os.path.join(_REPO_ROOT, "alembic.ini"))
     cfg.set_main_option("script_location", os.path.join(_REPO_ROOT, "alembic"))
     cfg.set_main_option("sqlalchemy.url", str(url))

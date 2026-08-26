@@ -25,9 +25,7 @@ class Pbkdf2HasherTests(unittest.TestCase):
 
     def test_default_meets_owasp_floor(self) -> None:
         self.assertGreaterEqual(DEFAULT_PBKDF2_ITERATIONS, 600_000)
-        self.assertEqual(
-            default_password_hasher().iterations, DEFAULT_PBKDF2_ITERATIONS
-        )
+        self.assertEqual(default_password_hasher().iterations, DEFAULT_PBKDF2_ITERATIONS)
 
     def test_hash_verify_round_trip(self) -> None:
         encoded = self.hasher.hash("correct horse battery staple")

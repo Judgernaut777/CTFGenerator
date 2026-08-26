@@ -23,7 +23,10 @@ _NOW = datetime(2026, 7, 12, 12, 0, tzinfo=UTC)
 class ProjectionTaskTests(unittest.TestCase):
     def test_valid_pending_task(self) -> None:
         t = ProjectionTask(
-            seq=1, competition_id="cup", status="pending", attempts=0,
+            seq=1,
+            competition_id="cup",
+            status="pending",
+            attempts=0,
             created_at=_NOW,
         )
         self.assertIsNone(t.last_error)
@@ -33,14 +36,20 @@ class ProjectionTaskTests(unittest.TestCase):
             with self.subTest(bad=bad):
                 with self.assertRaises(ValueError):
                     ProjectionTask(
-                        seq=bad, competition_id="cup", status="pending",
-                        attempts=0, created_at=_NOW,
+                        seq=bad,
+                        competition_id="cup",
+                        status="pending",
+                        attempts=0,
+                        created_at=_NOW,
                     )
 
     def test_rejects_unknown_status(self) -> None:
         with self.assertRaises(ValueError):
             ProjectionTask(
-                seq=1, competition_id="cup", status="done", attempts=0,
+                seq=1,
+                competition_id="cup",
+                status="done",
+                attempts=0,
                 created_at=_NOW,
             )
         self.assertEqual(VALID_PROJECTION_TASK_STATUSES, {"pending", "failed"})
@@ -48,16 +57,17 @@ class ProjectionTaskTests(unittest.TestCase):
     def test_rejects_negative_attempts(self) -> None:
         with self.assertRaises(ValueError):
             ProjectionTask(
-                seq=1, competition_id="cup", status="failed", attempts=-1,
+                seq=1,
+                competition_id="cup",
+                status="failed",
+                attempts=-1,
                 created_at=_NOW,
             )
 
 
 class ScoreboardProjectionRecordTests(unittest.TestCase):
     def test_valid_record(self) -> None:
-        r = ScoreboardProjectionRecord(
-            competition_id="cup", as_of_seq=0, entries={"entries": []}
-        )
+        r = ScoreboardProjectionRecord(competition_id="cup", as_of_seq=0, entries={"entries": []})
         self.assertEqual(r.as_of_seq, 0)
 
     def test_rejects_negative_as_of_seq(self) -> None:

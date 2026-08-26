@@ -27,8 +27,8 @@ from __future__ import annotations
 from datetime import datetime
 from typing import Protocol
 
-from ..competitions.events import Event
 from ..challenges.models import ChallengeScoringConfig, CompetitionConfig, SolveEvent
+from ..competitions.events import Event
 
 # --- Engine protocol ---------------------------------------------------------
 

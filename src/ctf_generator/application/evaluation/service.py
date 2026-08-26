@@ -55,6 +55,7 @@ def eval_job_idempotency_key(
     run back to its completed job) so the two can never drift out of format."""
     return f"eval:{definition_slug}:v{version_no}:{profile}:{adversarial}"
 
+
 # Free-text notes/error reported by a (15b) worker are the ONLY vector by which a
 # secret could reach this otherwise secret-free record, so redact defensively. Two
 # secret classes named by the job invariant: (1) challenge FLAGS -- ctf{...}/
@@ -140,8 +141,7 @@ class EvalRunService:
         those errors."""
         if profile not in VALID_EVAL_PROFILES:
             raise ValueError(
-                f"unknown eval profile: {profile!r}; "
-                f"choices: {sorted(VALID_EVAL_PROFILES)}"
+                f"unknown eval profile: {profile!r}; choices: {sorted(VALID_EVAL_PROFILES)}"
             )
 
         eval_run_id = str(uuid.uuid4())
@@ -162,8 +162,7 @@ class EvalRunService:
                 )
                 if version is None:
                     raise LookupError(
-                        f"challenge version not found: "
-                        f"{definition_slug!r} v{version_no}"
+                        f"challenge version not found: {definition_slug!r} v{version_no}"
                     )
                 if version.state != "published":
                     raise EvalVersionNotPublishedError(
@@ -171,9 +170,7 @@ class EvalRunService:
                         f"{version.state!r}, not published; cannot evaluate"
                     )
                 repo = SqlAlchemyEvalRunRepository(session)
-                existing = repo.get_for_version(
-                    definition_slug, version_no, profile, adversarial
-                )
+                existing = repo.get_for_version(definition_slug, version_no, profile, adversarial)
                 if existing is not None:
                     stored = existing
                 else:
@@ -223,9 +220,7 @@ class EvalRunService:
 
     # -- record result -------------------------------------------------------
 
-    def record_result(
-        self, eval_run_id: str, result: EvalResultInput, now: datetime
-    ) -> EvalRun:
+    def record_result(self, eval_run_id: str, result: EvalResultInput, now: datetime) -> EvalRun:
         """Project a completed eval's ADVISORY result onto its record.
 
         Transitions ``pending``/``running`` -> ``succeeded`` (with the
@@ -287,9 +282,7 @@ class EvalRunService:
         with self._database.session_scope() as session:
             return SqlAlchemyEvalRunRepository(session).get(eval_run_id)
 
-    def list_for_version(
-        self, definition_slug: str, version_no: int
-    ) -> list[EvalRun]:
+    def list_for_version(self, definition_slug: str, version_no: int) -> list[EvalRun]:
         with self._database.session_scope() as session:
             return SqlAlchemyEvalRunRepository(session).list_for_version(
                 definition_slug, version_no

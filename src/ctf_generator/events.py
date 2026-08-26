@@ -16,9 +16,6 @@ from .domain.competitions.events import (
     Event,
     EventStore,
     InMemoryEventStore,
-    _default_clock,
-    _event_to_dict,
-    _format_ts,
 )
 from .infrastructure.event_store import JsonlEventStore
 

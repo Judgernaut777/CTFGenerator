@@ -283,9 +283,7 @@ class PaginationTests(unittest.TestCase):
         self.assertIsNotNone(page1.next_cursor)
         # The boundary item (c01, encoded in the cursor) is deleted before page 2.
         remaining = ["c00", "c02", "c03", "c04"]
-        page2 = paginate(
-            remaining, key=lambda x: x, limit=2, cursor=page1.next_cursor
-        )
+        page2 = paginate(remaining, key=lambda x: x, limit=2, cursor=page1.next_cursor)
         self.assertEqual(page2.items, ["c02", "c03"])  # tail NOT skipped
 
     def test_paginate_walks_all_items_once_int_keys(self) -> None:
@@ -309,9 +307,7 @@ class ETagTests(unittest.TestCase):
         self.assertEqual(a, b)
 
     def test_different_payload_different_etag(self) -> None:
-        self.assertNotEqual(
-            compute_etag({"name": "x"}), compute_etag({"name": "y"})
-        )
+        self.assertNotEqual(compute_etag({"name": "x"}), compute_etag({"name": "y"}))
 
     def test_if_match_comparison_tolerates_weak_prefix_and_quotes(self) -> None:
         etag = compute_etag({"name": "x"})
@@ -378,15 +374,18 @@ class PermissionScopeMapTests(unittest.TestCase):
             by_scope[scope].add(perm)
         self.assertEqual(
             by_scope[PermissionScope.SYSTEM],
-            {Permission.USER_READ, Permission.USER_WRITE,
-             Permission.JOB_READ, Permission.JOB_OPERATE,
-             Permission.AUDIT_READ, Permission.METRICS_READ},
+            {
+                Permission.USER_READ,
+                Permission.USER_WRITE,
+                Permission.JOB_READ,
+                Permission.JOB_OPERATE,
+                Permission.AUDIT_READ,
+                Permission.METRICS_READ,
+            },
         )
         self.assertIn(Permission.CHALLENGE_WRITE, by_scope[PermissionScope.AUTHORING])
         self.assertIn(Permission.BUILD_CREATE, by_scope[PermissionScope.AUTHORING])
-        self.assertIn(
-            Permission.COMPETITION_WRITE, by_scope[PermissionScope.COMPETITION]
-        )
+        self.assertIn(Permission.COMPETITION_WRITE, by_scope[PermissionScope.COMPETITION])
         self.assertIn(Permission.INSTANCE_OPERATE, by_scope[PermissionScope.COMPETITION])
 
 
@@ -407,9 +406,7 @@ class ScopedAuthorizationTests(unittest.TestCase):
         admin = principal_for("a", {"admin"}, system_roles={"admin"})
         for cid in ("A", "B", "anything"):
             assert_competition_permission(admin, cid, Permission.COMPETITION_WRITE)
-            self.assertIn(
-                Permission.INSTANCE_OPERATE, competition_permissions(admin, cid)
-            )
+            self.assertIn(Permission.INSTANCE_OPERATE, competition_permissions(admin, cid))
 
     def test_missing_competition_id_fails_closed(self) -> None:
         admin = principal_for("a", {"admin"}, system_roles={"admin"})
@@ -435,18 +432,15 @@ class ScopedAuthorizationTests(unittest.TestCase):
         admin = principal_for("a", {"admin"}, system_roles={"admin"})
         self.assertIsNone(authorized_competitions(admin, Permission.INSTANCE_READ))
         org = self._organizer_of("A")
-        self.assertEqual(
-            authorized_competitions(org, Permission.INSTANCE_READ), frozenset({"A"})
-        )
+        self.assertEqual(authorized_competitions(org, Permission.INSTANCE_READ), frozenset({"A"}))
         player = principal_for("p", {"player"}, memberships={"A": ("player", "Red")})
         # A player holds instance:read nowhere.
-        self.assertEqual(
-            authorized_competitions(player, Permission.INSTANCE_READ), frozenset()
-        )
+        self.assertEqual(authorized_competitions(player, Permission.INSTANCE_READ), frozenset())
 
     def test_submission_team_scope_is_per_competition(self) -> None:
         player = principal_for(
-            "p", {"player"},
+            "p",
+            {"player"},
             memberships={"A": ("player", "Red"), "B": ("player", "Blue")},
         )
         self.assertEqual(submission_team_scope(player, "A").team, "Red")
@@ -486,9 +480,7 @@ class RateLimitTests(unittest.TestCase):
         client = TestClient(app, raise_server_exceptions=False)
         first = client.get("/api/v1/competitions", headers={"Authorization": "Bearer t"})
         # first may pass the limiter (then 500 for no-DB) or be allowed; drain it.
-        limited = client.get(
-            "/api/v1/competitions", headers={"Authorization": "Bearer t"}
-        )
+        limited = client.get("/api/v1/competitions", headers={"Authorization": "Bearer t"})
         # At least one of the two exhausts the single-token bucket.
         statuses = {first.status_code, limited.status_code}
         self.assertIn(429, statuses)
@@ -512,12 +504,8 @@ class AppLevelErrorTests(unittest.TestCase):
         # A real system admin (system_roles) so the per-competition-scoped GET
         # /competitions authorizes it deployment-wide and the request reaches the
         # (boom) service -- the point here is the opaque 500, not authorization.
-        auth = StubAuthenticator(
-            {"t": principal_for("a", {"admin"}, system_roles={"admin"})}
-        )
-        app = create_app(
-            ApiSettings(), database=_BoomDatabase(), authenticator=auth
-        )
+        auth = StubAuthenticator({"t": principal_for("a", {"admin"}, system_roles={"admin"})})
+        app = create_app(ApiSettings(), database=_BoomDatabase(), authenticator=auth)
         return TestClient(app, raise_server_exceptions=False)
 
     def test_service_failure_is_opaque_500_with_real_request_id(self) -> None:
@@ -566,18 +554,14 @@ class AppLevelErrorTests(unittest.TestCase):
 
     def test_malformed_authorization_scheme_is_401(self) -> None:
         client = self._client()
-        r = client.get(
-            "/api/v1/competitions/x", headers={"Authorization": "Basic Zm9v"}
-        )
+        r = client.get("/api/v1/competitions/x", headers={"Authorization": "Basic Zm9v"})
         self.assertEqual(r.status_code, 401)
         self.assertEqual(r.json()["error"]["code"], "unauthorized")
 
     def test_empty_bearer_token_is_401(self) -> None:
         client = self._client()
         for value in ("Bearer ", "Bearer    "):
-            r = client.get(
-                "/api/v1/competitions/x", headers={"Authorization": value}
-            )
+            r = client.get("/api/v1/competitions/x", headers={"Authorization": value})
             self.assertEqual(r.status_code, 401, value)
             self.assertEqual(r.json()["error"]["code"], "unauthorized")
 

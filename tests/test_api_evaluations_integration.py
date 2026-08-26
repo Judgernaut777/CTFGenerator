@@ -94,9 +94,7 @@ def _client_and_db():
         command.upgrade(_alembic_config(url), "head")
         db = Database(DatabaseConfig(url=url))
         try:
-            app = create_app(
-                ApiSettings(), database=db, authenticator=_authenticator()
-            )
+            app = create_app(ApiSettings(), database=db, authenticator=_authenticator())
             yield TestClient(app), db
         finally:
             db.dispose()
@@ -107,38 +105,48 @@ def _auth(token: str = _ADMIN) -> dict[str, str]:
 
 
 def _seed_published_version(client: TestClient) -> None:
-    assert client.post(
-        "/api/v1/challenge-definitions",
-        headers=_auth(),
-        json={"family": "web", "slug": _SLUG, "title": "SQLi"},
-    ).status_code == 201
-    assert client.post(
-        "/api/v1/challenge-versions",
-        headers=_auth(),
-        json={
-            "definition_slug": _SLUG,
-            "seed": "s",
-            "family_version": "1.0.0",
-            "spec": {"title": "SQLi"},
-        },
-    ).status_code == 201
-    assert client.post(
-        f"/api/v1/challenge-versions/{_SLUG}/1/publish", headers=_auth()
-    ).status_code == 200
+    assert (
+        client.post(
+            "/api/v1/challenge-definitions",
+            headers=_auth(),
+            json={"family": "web", "slug": _SLUG, "title": "SQLi"},
+        ).status_code
+        == 201
+    )
+    assert (
+        client.post(
+            "/api/v1/challenge-versions",
+            headers=_auth(),
+            json={
+                "definition_slug": _SLUG,
+                "seed": "s",
+                "family_version": "1.0.0",
+                "spec": {"title": "SQLi"},
+            },
+        ).status_code
+        == 201
+    )
+    assert (
+        client.post(f"/api/v1/challenge-versions/{_SLUG}/1/publish", headers=_auth()).status_code
+        == 200
+    )
 
 
 def _seed_second_draft(client: TestClient) -> None:
     # A second version (v2) left as DRAFT -- request against it must 409.
-    assert client.post(
-        "/api/v1/challenge-versions",
-        headers=_auth(),
-        json={
-            "definition_slug": _SLUG,
-            "seed": "s2",
-            "family_version": "1.0.0",
-            "spec": {"title": "SQLi", "rev": 2},
-        },
-    ).status_code == 201
+    assert (
+        client.post(
+            "/api/v1/challenge-versions",
+            headers=_auth(),
+            json={
+                "definition_slug": _SLUG,
+                "seed": "s2",
+                "family_version": "1.0.0",
+                "spec": {"title": "SQLi", "rev": 2},
+            },
+        ).status_code
+        == 201
+    )
 
 
 @unittest.skipUnless(_ENABLED, _SKIP_REASON)
@@ -147,8 +155,7 @@ class EvaluationsApiIntegrationTests(unittest.TestCase):
         with _client_and_db() as (client, db):
             _seed_published_version(client)
             r = client.post(
-                f"/api/v1/challenge-versions/{_SLUG}/1/evaluations"
-                "?profile=writeup_replay",
+                f"/api/v1/challenge-versions/{_SLUG}/1/evaluations?profile=writeup_replay",
                 headers=_auth(_AUTHOR),
             )
             self.assertEqual(r.status_code, 202, r.text)
@@ -172,9 +179,7 @@ class EvaluationsApiIntegrationTests(unittest.TestCase):
             self.assertEqual(count, 1)
 
             # Read one.
-            detail = client.get(
-                f"/api/v1/evaluations/{eval_run_id}", headers=_auth(_ORGANIZER)
-            )
+            detail = client.get(f"/api/v1/evaluations/{eval_run_id}", headers=_auth(_ORGANIZER))
             self.assertEqual(detail.status_code, 200, detail.text)
             self.assertEqual(detail.json()["eval_run_id"], eval_run_id)
 
@@ -185,34 +190,25 @@ class EvaluationsApiIntegrationTests(unittest.TestCase):
             )
             self.assertEqual(listed.status_code, 200, listed.text)
             self.assertEqual(listed.json()["schema"], "ctfgen.eval-run-list")
-            self.assertIn(
-                eval_run_id, [e["eval_run_id"] for e in listed.json()["data"]]
-            )
+            self.assertIn(eval_run_id, [e["eval_run_id"] for e in listed.json()["data"]])
 
     def test_re_request_is_idempotent(self) -> None:
         with _client_and_db() as (client, db):
             _seed_published_version(client)
             first = client.post(
-                f"/api/v1/challenge-versions/{_SLUG}/1/evaluations"
-                "?profile=writeup_replay",
+                f"/api/v1/challenge-versions/{_SLUG}/1/evaluations?profile=writeup_replay",
                 headers=_auth(_AUTHOR),
             )
             second = client.post(
-                f"/api/v1/challenge-versions/{_SLUG}/1/evaluations"
-                "?profile=writeup_replay",
+                f"/api/v1/challenge-versions/{_SLUG}/1/evaluations?profile=writeup_replay",
                 headers=_auth(_AUTHOR),
             )
             self.assertEqual(first.status_code, 202, first.text)
             self.assertEqual(second.status_code, 200, second.text)
-            self.assertEqual(
-                first.json()["eval_run_id"], second.json()["eval_run_id"]
-            )
+            self.assertEqual(first.json()["eval_run_id"], second.json()["eval_run_id"])
             with db.session_scope() as s:
                 count = s.execute(
-                    sa.text(
-                        "SELECT count(*) FROM jobs "
-                        "WHERE job_type='run_agent_evaluation'"
-                    )
+                    sa.text("SELECT count(*) FROM jobs WHERE job_type='run_agent_evaluation'")
                 ).scalar_one()
             self.assertEqual(count, 1)
 
@@ -220,8 +216,7 @@ class EvaluationsApiIntegrationTests(unittest.TestCase):
         with _client_and_db() as (client, db):
             _seed_published_version(client)
             r = client.post(
-                f"/api/v1/challenge-versions/{_SLUG}/99/evaluations"
-                "?profile=writeup_replay",
+                f"/api/v1/challenge-versions/{_SLUG}/99/evaluations?profile=writeup_replay",
                 headers=_auth(_AUTHOR),
             )
             self.assertEqual(r.status_code, 404, r.text)
@@ -231,8 +226,7 @@ class EvaluationsApiIntegrationTests(unittest.TestCase):
             _seed_published_version(client)
             _seed_second_draft(client)
             r = client.post(
-                f"/api/v1/challenge-versions/{_SLUG}/2/evaluations"
-                "?profile=writeup_replay",
+                f"/api/v1/challenge-versions/{_SLUG}/2/evaluations?profile=writeup_replay",
                 headers=_auth(_AUTHOR),
             )
             self.assertEqual(r.status_code, 409, r.text)
@@ -252,8 +246,7 @@ class EvaluationsApiIntegrationTests(unittest.TestCase):
             _seed_published_version(client)
             probes = [
                 client.post(
-                    f"/api/v1/challenge-versions/{_SLUG}/1/evaluations"
-                    "?profile=writeup_replay",
+                    f"/api/v1/challenge-versions/{_SLUG}/1/evaluations?profile=writeup_replay",
                     headers=_auth(_PLAYER),
                 ),
                 client.get(

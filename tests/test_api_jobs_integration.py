@@ -85,9 +85,7 @@ def _authenticator() -> StubAuthenticator:
             # Jobs are a SYSTEM surface (flat require_permission, unchanged in
             # M10b); admin/support are deployment-global system roles.
             _ADMIN: principal_for("admin-user", {"admin"}, system_roles={"admin"}),
-            _SUPPORT: principal_for(
-                "support-user", {"support"}, system_roles={"support"}
-            ),
+            _SUPPORT: principal_for("support-user", {"support"}, system_roles={"support"}),
             _ORGANIZER: principal_for("org-user", {"organizer"}),
             _PLAYER: principal_for("player-user", {"player"}, team="Red"),
         }
@@ -100,9 +98,7 @@ def _client_and_db():
         command.upgrade(_alembic_config(url), "head")
         db = Database(DatabaseConfig(url=url))
         try:
-            app = create_app(
-                ApiSettings(), database=db, authenticator=_authenticator()
-            )
+            app = create_app(ApiSettings(), database=db, authenticator=_authenticator())
             yield TestClient(app), db
         finally:
             db.dispose()
@@ -140,9 +136,7 @@ def _drive_to_dead_letter(db: Database, job: Job) -> None:
         with db.session_scope() as s:
             SqlAlchemyJobQueue(s).start(job.job_id, lease.lease_token, now)
         with db.session_scope() as s:
-            SqlAlchemyJobQueue(s).fail(
-                job.job_id, lease.lease_token, "transient", None, True, now
-            )
+            SqlAlchemyJobQueue(s).fail(job.job_id, lease.lease_token, "transient", None, True, now)
 
 
 @unittest.skipUnless(_ENABLED, _SKIP_REASON)
@@ -169,18 +163,14 @@ class JobsApiIntegrationTests(unittest.TestCase):
             self.assertEqual(lst.status_code, 200, lst.text)
             self.assertIn(job.job_id, [j["job_id"] for j in lst.json()["data"]])
 
-            retry = client.post(
-                f"/api/v1/jobs/{job.job_id}/retry", headers=_auth(_SUPPORT)
-            )
+            retry = client.post(f"/api/v1/jobs/{job.job_id}/retry", headers=_auth(_SUPPORT))
             self.assertEqual(retry.status_code, 200, retry.text)
             self.assertEqual(retry.json()["status"], "queued")
 
     def test_cancel_job(self) -> None:
         with _client_and_db() as (client, db):
             job = _enqueue(db, _job())
-            r = client.post(
-                f"/api/v1/jobs/{job.job_id}/cancel", headers=_auth(_ADMIN)
-            )
+            r = client.post(f"/api/v1/jobs/{job.job_id}/cancel", headers=_auth(_ADMIN))
             self.assertEqual(r.status_code, 200, r.text)
             self.assertEqual(r.json()["status"], "cancelled")
 
@@ -188,9 +178,7 @@ class JobsApiIntegrationTests(unittest.TestCase):
         with _client_and_db() as (client, db):
             secret_flag = "CTF{super-secret-flag-leak-check}"  # noqa: S105
             secret_seed = "seed-abcdef-secret"  # noqa: S105
-            job = _enqueue(
-                db, _job(payload={"flag": secret_flag, "seed": secret_seed})
-            )
+            job = _enqueue(db, _job(payload={"flag": secret_flag, "seed": secret_seed}))
             r = client.get(f"/api/v1/jobs/{job.job_id}", headers=_auth(_ADMIN))
             self.assertEqual(r.status_code, 200, r.text)
             self.assertNotIn(secret_flag, r.text)
@@ -209,9 +197,7 @@ class JobsApiIntegrationTests(unittest.TestCase):
                     ("post", f"/api/v1/jobs/{job.job_id}/retry"),
                 ):
                     r = getattr(client, method)(path, headers=_auth(token))
-                    self.assertEqual(
-                        r.status_code, 403, f"{token} {method} {path}: {r.text}"
-                    )
+                    self.assertEqual(r.status_code, 403, f"{token} {method} {path}: {r.text}")
             # support (ops staff) may read.
             ok = client.get(f"/api/v1/jobs/{job.job_id}", headers=_auth(_SUPPORT))
             self.assertEqual(ok.status_code, 200, ok.text)

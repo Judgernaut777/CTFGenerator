@@ -62,9 +62,7 @@ class FakeIdp:
         self.client_id = client_id
         self.client_secret = client_secret
         self.kid = "test-key-1"
-        self._private = rsa.generate_private_key(
-            public_exponent=65537, key_size=2048
-        )
+        self._private = rsa.generate_private_key(public_exponent=65537, key_size=2048)
         self._public = self._private.public_key()
         self.authorization_endpoint = f"{self.issuer}/authorize"
         self.token_endpoint = f"{self.issuer}/token"
@@ -118,19 +116,14 @@ class FakeIdp:
         claims.update(overrides)
         for key in omit:
             claims.pop(key, None)
-        return jwt.encode(
-            claims, self._private, algorithm="RS256", headers={"kid": self.kid}
-        )
+        return jwt.encode(claims, self._private, algorithm="RS256", headers={"kid": self.kid})
 
     def none_token(self, **overrides) -> str:
         """An UNSIGNED ``alg:none`` token (the classic downgrade attack)."""
         header = {"alg": "none", "typ": "JWT", "kid": self.kid}
         claims = self._default_claims()
         claims.update(overrides)
-        return (
-            f"{_b64url(json.dumps(header).encode())}."
-            f"{_b64url(json.dumps(claims).encode())}."
-        )
+        return f"{_b64url(json.dumps(header).encode())}.{_b64url(json.dumps(claims).encode())}."
 
     def hs256_confusion_token(self, **overrides) -> str:
         """An HS256 token forged with the RSA PUBLIC key (PEM) as the HMAC secret
@@ -145,8 +138,7 @@ class FakeIdp:
         claims = self._default_claims()
         claims.update(overrides)
         signing_input = (
-            f"{_b64url(json.dumps(header).encode())}."
-            f"{_b64url(json.dumps(claims).encode())}"
+            f"{_b64url(json.dumps(header).encode())}.{_b64url(json.dumps(claims).encode())}"
         )
         signature = hmac.new(
             self._public_pem(), signing_input.encode("ascii"), hashlib.sha256
@@ -175,9 +167,7 @@ class FakeIdp:
         query = parse_qs(urlparse(authorization_url).query)
         return {k: v[0] for k, v in query.items()}
 
-    def register_code(
-        self, ctx: dict[str, str], *, id_token: str | None = None
-    ) -> str:
+    def register_code(self, ctx: dict[str, str], *, id_token: str | None = None) -> str:
         """Issue an authorization ``code`` for a parsed auth request, recording
         the PKCE ``code_challenge`` + ``redirect_uri`` (enforced at token time).
         Defaults to a valid ID token minted with the request's ``nonce``."""
@@ -191,9 +181,7 @@ class FakeIdp:
         }
         return code
 
-    def authorize(
-        self, authorization_url: str, *, id_token: str | None = None
-    ) -> str:
+    def authorize(self, authorization_url: str, *, id_token: str | None = None) -> str:
         """Convenience: parse + register in one call. Returns the ``code``."""
         return self.register_code(self.parse_auth(authorization_url), id_token=id_token)
 
@@ -207,9 +195,7 @@ class FakeIdp:
     def _handle(self, request: httpx.Request) -> httpx.Response:
         url = str(request.url)
         path = request.url.path
-        if request.method == "GET" and path.endswith(
-            "/.well-known/openid-configuration"
-        ):
+        if request.method == "GET" and path.endswith("/.well-known/openid-configuration"):
             return httpx.Response(200, json=self.discovery())
         if request.method == "GET" and url == self.jwks_uri:
             return httpx.Response(200, json=self.jwks())

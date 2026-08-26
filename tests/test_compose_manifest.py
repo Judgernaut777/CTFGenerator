@@ -108,14 +108,10 @@ class ComposeManifestTests(unittest.TestCase):
 
     def test_unknown_dependency_is_refused(self) -> None:
         with self.assertRaises(ComposeManifestError):
-            parse_compose_manifest(
-                "services:\n  a: {build: ./a, depends_on: [ghost]}\n"
-            )
+            parse_compose_manifest("services:\n  a: {build: ./a, depends_on: [ghost]}\n")
 
     def test_too_many_services_is_refused(self) -> None:
-        svcs = "".join(
-            f"  s{i}: {{build: ./s{i}}}\n" for i in range(MAX_STACK_SERVICES + 1)
-        )
+        svcs = "".join(f"  s{i}: {{build: ./s{i}}}\n" for i in range(MAX_STACK_SERVICES + 1))
         with self.assertRaises(ComposeManifestError):
             parse_compose_manifest("services:\n" + svcs)
 

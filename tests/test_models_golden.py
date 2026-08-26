@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import unittest
+from dataclasses import FrozenInstanceError
 from datetime import datetime
 
 from ctf_generator.models import (
@@ -246,7 +247,7 @@ class SubmissionAndSolveEventTests(unittest.TestCase):
             submitted_at=datetime(2026, 1, 1),
             correct=True,
         )
-        with self.assertRaises(Exception):
+        with self.assertRaises(FrozenInstanceError):
             submission.correct = False  # type: ignore[misc]
 
 
@@ -255,9 +256,7 @@ class ScoringDataclassSerializationTests(unittest.TestCase):
         config = ChallengeScoringConfig(challenge_id="chal-1")
         mapping = config.to_mapping()
         self.assertEqual(mapping["challenge_id"], "chal-1")
-        self.assertEqual(
-            mapping["first_blood_bonus"], FirstBloodBonusConfig().to_mapping()
-        )
+        self.assertEqual(mapping["first_blood_bonus"], FirstBloodBonusConfig().to_mapping())
 
     def test_competition_config_to_mapping_handles_optional_datetimes(self) -> None:
         start = datetime(2026, 1, 1)

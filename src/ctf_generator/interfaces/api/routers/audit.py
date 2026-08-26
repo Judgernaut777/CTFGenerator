@@ -95,8 +95,7 @@ def list_audit_events(
 ):
     if outcome is not None and outcome not in VALID_AUDIT_OUTCOMES:
         raise ValueError(
-            f"invalid outcome filter: {outcome!r} "
-            f"(one of {sorted(VALID_AUDIT_OUTCOMES)})"
+            f"invalid outcome filter: {outcome!r} (one of {sorted(VALID_AUDIT_OUTCOMES)})"
         )
     since_dt = _parse_time(since, "since")
     until_dt = _parse_time(until, "until")

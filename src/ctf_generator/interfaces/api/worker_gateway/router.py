@@ -164,9 +164,7 @@ def heartbeat_job(
     ctx: WorkerAuthContext = Depends(require_worker),
     service=Depends(get_worker_job_service),
 ):
-    cancel = service.heartbeat(
-        ctx.token, job_id, body.lease_token, body.lease_seconds, _now()
-    )
+    cancel = service.heartbeat(ctx.token, job_id, body.lease_token, body.lease_seconds, _now())
     return HeartbeatResponse(cancel_requested=cancel)
 
 
@@ -200,8 +198,13 @@ def fail_job(
     service=Depends(get_worker_job_service),
 ):
     service.fail(
-        ctx.token, job_id, body.lease_token, body.error_class,
-        body.error_detail, body.retryable, _now(),
+        ctx.token,
+        job_id,
+        body.lease_token,
+        body.error_class,
+        body.error_detail,
+        body.retryable,
+        _now(),
     )
     _audit(request, ctx.name, "worker.job.fail", job_id)
     return Response(status_code=204)
@@ -330,7 +333,9 @@ def fetch_build_bundle(
         ctx.token, definition_slug, version_no, job_id, lease_token, _now()
     )
     _audit(
-        request, ctx.name, "worker.build.fetch_bundle",
+        request,
+        ctx.name,
+        "worker.build.fetch_bundle",
         f"{definition_slug}:v{version_no}",
     )
     return Response(

@@ -64,9 +64,7 @@ _SUBMISSION_NS = uuid.UUID("6f8a5c2e-9d41-4b7a-8f2b-2a1c9e0d7b31")
 def _submission_id(request: Request, principal: Principal, competition_id: str) -> str:
     key = request.headers.get("Idempotency-Key")
     if key:
-        return str(
-            uuid.uuid5(_SUBMISSION_NS, f"{principal.subject}:{competition_id}:{key}")
-        )
+        return str(uuid.uuid5(_SUBMISSION_NS, f"{principal.subject}:{competition_id}:{key}"))
     return str(uuid.uuid4())
 
 
@@ -87,9 +85,7 @@ def submit_answer(
     request: Request,
     competition_id: str,
     body: SubmissionCreateRequest,
-    principal: Principal = Depends(
-        require_competition_permission(Permission.SUBMISSION_CREATE)
-    ),
+    principal: Principal = Depends(require_competition_permission(Permission.SUBMISSION_CREATE)),
     service=Depends(get_submission_processing_service),
 ):
     # Tenancy: submission:create is already scoped to THIS competition by the
@@ -124,21 +120,15 @@ def submit_answer(
             instance_seed=body.instance_seed,
         )
     )
-    envelope = resource_envelope(
-        SUBMISSION_SCHEMA, submission_outcome_to_response(outcome)
-    )
+    envelope = resource_envelope(SUBMISSION_SCHEMA, submission_outcome_to_response(outcome))
     etag = compute_etag(submission_concurrency_payload(outcome.submission))
     record_audit(
         request,
         principal,
         action="submission.create",
-        target=(
-            f"{competition_id}/{body.team}/{body.definition_slug}/v{body.version_no}"
-        ),
+        target=(f"{competition_id}/{body.team}/{body.definition_slug}/v{body.version_no}"),
     )
-    remember(
-        request, idem_scope, body_json, status_code=201, envelope=envelope, etag=etag
-    )
+    remember(request, idem_scope, body_json, status_code=201, envelope=envelope, etag=etag)
     return respond(201, envelope, etag=etag)
 
 
@@ -156,9 +146,7 @@ def list_submissions(
     ),
     limit: int | None = Query(default=None, ge=1),
     cursor: str | None = Query(default=None),
-    principal: Principal = Depends(
-        require_competition_permission(Permission.SUBMISSION_READ)
-    ),
+    principal: Principal = Depends(require_competition_permission(Permission.SUBMISSION_READ)),
     service=Depends(get_submission_query_service),
 ):
     access = submission_team_scope(principal, competition_id)
@@ -220,9 +208,7 @@ def get_submission(
         not_found=f"submission not found: {submission_id!r}",
     )
     access = submission_team_scope(principal, submission.competition_id)
-    if not access.unrestricted and (
-        access.team is None or submission.team_name != access.team
-    ):
+    if not access.unrestricted and (access.team is None or submission.team_name != access.team):
         # Cross-tenant (or teamless): 404 -- never confirm existence to a
         # principal not entitled to see the row.
         raise LookupError(f"submission not found: {submission_id!r}")

@@ -52,9 +52,7 @@ class ResourceQuotaTests(unittest.TestCase):
 
     def test_available_never_negative_after_limit_reduction(self) -> None:
         # A lowered limit below reserved is legal (holds grandfathered).
-        self.assertEqual(
-            ResourceQuota("team", "t", "active_instances", 2, 5).available, 0
-        )
+        self.assertEqual(ResourceQuota("team", "t", "active_instances", 2, 5).available, 0)
 
     def test_ceiling_dimension_forbids_nonzero_reserved(self) -> None:
         with self.assertRaises(ValueError):
@@ -171,9 +169,7 @@ class WorkerRequirementsAndMatchTests(unittest.TestCase):
             requirements_from_family(fam, "arm64")
 
     def test_worker_matches_all_axes(self) -> None:
-        req = WorkerRequirements(
-            "x86_64", frozenset({"launch_instance", "isolation:container"})
-        )
+        req = WorkerRequirements("x86_64", frozenset({"launch_instance", "isolation:container"}))
         self.assertTrue(
             worker_matches(
                 architectures=("x86_64",),
@@ -195,9 +191,7 @@ class WorkerRequirementsAndMatchTests(unittest.TestCase):
         )
 
     def test_worker_matches_fails_on_missing_capability(self) -> None:
-        req = WorkerRequirements(
-            "x86_64", frozenset({"launch_instance", "isolation:raw_tcp"})
-        )
+        req = WorkerRequirements("x86_64", frozenset({"launch_instance", "isolation:raw_tcp"}))
         self.assertFalse(
             worker_matches(
                 architectures=("x86_64",),
@@ -318,15 +312,11 @@ class RuntimeCapabilitiesTests(unittest.TestCase):
             self._caps(rootless=False)
 
     def test_satisfies_policy(self) -> None:
-        self.assertTrue(
-            self._caps().satisfies(ContainerPolicy(memory_mb=512, cpu_millis=1000))
-        )
+        self.assertTrue(self._caps().satisfies(ContainerPolicy(memory_mb=512, cpu_millis=1000)))
 
     def test_refuses_policy_over_memory(self) -> None:
         self.assertFalse(
-            self._caps(max_memory_mb=256).satisfies(
-                ContainerPolicy(memory_mb=512, cpu_millis=1000)
-            )
+            self._caps(max_memory_mb=256).satisfies(ContainerPolicy(memory_mb=512, cpu_millis=1000))
         )
 
     def test_refuses_policy_without_seccomp(self) -> None:

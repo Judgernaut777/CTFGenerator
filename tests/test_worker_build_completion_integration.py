@@ -128,9 +128,7 @@ def _migrated_database():
 
 
 def _enroll(db, enrollment, name, *, caps=_BUILD_CAPS) -> str:
-    enrollment.register_worker(
-        Worker(name, "docker-rootless", ("x86_64",), caps, 2, "1.0.0")
-    )
+    enrollment.register_worker(Worker(name, "docker-rootless", ("x86_64",), caps, 2, "1.0.0"))
     return enrollment.approve_worker(name, _NOW).token()
 
 
@@ -236,9 +234,9 @@ class BuildStackCompletionTests(unittest.TestCase):
             with db.session_scope() as s:
                 single = list(s.scalars(sa.select(ChallengeBuildImageRow)))
                 stack = list(s.scalars(sa.select(StackImageRow)))
-                resolved = SqlAlchemyChallengeBuildStackImageRepository(
-                    s
-                ).stack_for_primary_image(_SLUG, 1, _PRIMARY_IMG)
+                resolved = SqlAlchemyChallengeBuildStackImageRepository(s).stack_for_primary_image(
+                    _SLUG, 1, _PRIMARY_IMG
+                )
         # The primary is in the single-image registry (back-compat).
         self.assertEqual(len(single), 1)
         self.assertEqual(single[0].image_ref, _PRIMARY_IMG)
@@ -258,9 +256,16 @@ class BuildStackCompletionTests(unittest.TestCase):
             with self.assertRaises(sa.exc.IntegrityError):
                 with db.session_scope() as s:
                     SqlAlchemyChallengeBuildStackImageRepository(s).add_service(
-                        _SLUG, 1, service_name="alpha", image_ref=_PRIMARY_IMG,
-                        image_digest="sha256:" + "aa" * 32, bundle_sha256="   ",
-                        depends_on=(), expose=(), is_primary=True, now=_NOW,
+                        _SLUG,
+                        1,
+                        service_name="alpha",
+                        image_ref=_PRIMARY_IMG,
+                        image_digest="sha256:" + "aa" * 32,
+                        bundle_sha256="   ",
+                        depends_on=(),
+                        expose=(),
+                        is_primary=True,
+                        now=_NOW,
                     )
 
     def test_stack_write_is_idempotent(self) -> None:
@@ -276,9 +281,7 @@ class BuildStackCompletionTests(unittest.TestCase):
             _enqueue_build_job(db)
             _run_to_completion(svc, token, _STACK_RESULT)
             with db.session_scope() as s:
-                count = s.scalar(
-                    sa.select(sa.func.count()).select_from(StackImageRow)
-                )
+                count = s.scalar(sa.select(sa.func.count()).select_from(StackImageRow))
         self.assertEqual(count, 2)  # alpha + beta, not 4
 
 
@@ -296,9 +299,7 @@ class BuildCompletionSideEffectTests(unittest.TestCase):
             with db.session_scope() as s:
                 cache_rows = list(s.scalars(sa.select(WorkerImageCacheRow)))
                 registry_rows = list(s.scalars(sa.select(ChallengeBuildImageRow)))
-                worker_id = s.scalar(
-                    sa.select(WorkerRow.id).where(WorkerRow.name == "wbuild")
-                )
+                worker_id = s.scalar(sa.select(WorkerRow.id).where(WorkerRow.name == "wbuild"))
 
         # Affinity cache: exactly one row, keyed to the AUTHENTICATED worker.
         self.assertEqual(len(cache_rows), 1)
@@ -323,15 +324,11 @@ class BuildCompletionSideEffectTests(unittest.TestCase):
             svc = WorkerJobService(db, enrollment)
             _enqueue_build_job(db)
             # Even if the payload lies about identity, it is ignored.
-            _run_to_completion(
-                svc, token, {**_BUILD_RESULT, "worker_id": "other-worker"}
-            )
+            _run_to_completion(svc, token, {**_BUILD_RESULT, "worker_id": "other-worker"})
 
             with db.session_scope() as s:
                 cache = s.scalars(sa.select(WorkerImageCacheRow)).one()
-                wbuild_id = s.scalar(
-                    sa.select(WorkerRow.id).where(WorkerRow.name == "wbuild")
-                )
+                wbuild_id = s.scalar(sa.select(WorkerRow.id).where(WorkerRow.name == "wbuild"))
         self.assertEqual(cache.worker_id, wbuild_id)
 
     def test_non_build_completion_writes_no_image_rows(self) -> None:

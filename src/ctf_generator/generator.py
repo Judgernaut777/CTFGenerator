@@ -7,6 +7,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 from . import build, families
+from .families import RenderedFile, normalize_renderer_output
 from .models import ChallengeSpec
 from .spec_generator import default_spec
 from .yaml_writer import dump_yaml
@@ -23,7 +24,7 @@ def create_challenge(
     family: str,
     force: bool = False,
     spec: ChallengeSpec | None = None,
-    cve_record: "CveRecord | None" = None,
+    cve_record: CveRecord | None = None,
 ) -> Path:
     # Spec-first: when a caller supplies a structured spec (e.g. from `ctfgen
     # spec`), it is the source of truth, including its seed. Otherwise fall back
@@ -31,13 +32,15 @@ def create_challenge(
     if spec is None:
         spec = default_spec(seed=seed, title=title, difficulty=difficulty, family=family)
 
-    rng = random.Random(_seed_int(spec.seed))
-    files = dict(families.get(spec.family).render(spec, rng, cve_record))
+    rng = random.Random(_seed_int(spec.seed))  # noqa: S311 -- deterministic seeded RNG for reproducible challenge generation; not used for secrets
+    raw_files = dict(families.get(spec.family).render(spec, rng, cve_record))
+    # Normalize renderer output (str|bytes -> RenderedFile) at the single seam.
+    norm_files = normalize_renderer_output(raw_files)
     spec_mapping = spec.to_mapping()
-    files["challenge.yaml"] = dump_yaml(spec_mapping)
+    norm_files["challenge.yaml"] = RenderedFile.from_value(dump_yaml(spec_mapping))
 
     if spec.scenario.enabled:
-        files["private/scenario_timeline.json"] = (
+        norm_files["private/scenario_timeline.json"] = RenderedFile.from_value(
             json.dumps(spec.scenario.to_mapping(), indent=2, sort_keys=True) + "\n"
         )
 
@@ -49,7 +52,7 @@ def create_challenge(
     ).hexdigest()
     return build.write_build(
         output_dir,
-        files,
+        norm_files,
         meta=build.BuildMeta(
             family=spec.family,
             seed=spec.seed,
@@ -68,7 +71,7 @@ def create_challenge_from_cve(
     family: str | None = None,
     title: str | None = None,
     force: bool = False,
-    source: "CveSource | None" = None,
+    source: CveSource | None = None,
 ) -> Path:
     """Generate a challenge grounded in a real CVE record.
 

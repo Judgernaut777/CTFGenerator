@@ -2,11 +2,10 @@ from __future__ import annotations
 
 import json
 import unittest
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from unittest import mock
 
 import ctf_generator.dashboard_server as ds
-
 from ctf_generator.competition_service import ChallengeCatalog, ChallengeMeta, CompetitionService
 from ctf_generator.dashboard_server import (
     CSRF_HEADER,
@@ -21,8 +20,8 @@ from ctf_generator.events import InMemoryEventStore
 from ctf_generator.models import ChallengeScoringConfig, CompetitionConfig
 from ctf_generator.scoring_engine import StaticPointsEngine
 
-START = datetime(2026, 1, 1, 0, 0, 0, tzinfo=timezone.utc)
-END = datetime(2026, 1, 1, 10, 0, 0, tzinfo=timezone.utc)
+START = datetime(2026, 1, 1, 0, 0, 0, tzinfo=UTC)
+END = datetime(2026, 1, 1, 10, 0, 0, tzinfo=UTC)
 
 
 class ScriptedClock:
@@ -64,7 +63,9 @@ def make_catalog() -> ChallengeCatalog:
     return ChallengeCatalog.from_entries(
         {
             "web-1": ChallengeMeta(
-                scoring=ChallengeScoringConfig(challenge_id="web-1", initial_value=500, minimum_value=100),
+                scoring=ChallengeScoringConfig(
+                    challenge_id="web-1", initial_value=500, minimum_value=100
+                ),
                 title="Web One",
                 category="web",
             ),
@@ -86,8 +87,8 @@ def make_service() -> CompetitionService:
 def make_auth(**overrides) -> AuthConfig:
     kwargs = dict(
         admin_username="admin",
-        password="hunter2",
-        public_token="pub-token-fixed",
+        password="hunter2",  # noqa: S106 -- fake credential for dashboard auth harness
+        public_token="pub-token-fixed",  # noqa: S106 -- fake public token for dashboard auth harness
         session_ttl_seconds=300,
         pbkdf2_iterations=1000,  # keep tests fast; production default is higher
         salt=b"fixed-salt-16bb",
@@ -96,8 +97,10 @@ def make_auth(**overrides) -> AuthConfig:
     return AuthConfig.create(**kwargs)
 
 
-def login_request(username: str = "admin", password: str = "hunter2") -> DashboardRequest:
-    return DashboardRequest(method="POST", path="/login", body=json.dumps({"username": username, "password": password}))
+def login_request(username: str = "admin", password: str = "hunter2") -> DashboardRequest:  # noqa: S107 -- fake credential default for login-request factory
+    return DashboardRequest(
+        method="POST", path="/login", body=json.dumps({"username": username, "password": password})
+    )
 
 
 class Harness:
@@ -112,7 +115,9 @@ class Harness:
         self.clock = ScriptedClock(moments or [START + timedelta(seconds=i) for i in range(50)])
 
     def call(self, request: DashboardRequest):
-        return dispatch(request, service=self.service, sessions=self.sessions, auth=self.auth, clock=self.clock)
+        return dispatch(
+            request, service=self.service, sessions=self.sessions, auth=self.auth, clock=self.clock
+        )
 
     def login(self) -> tuple[str, str]:
         response = self.call(login_request())
@@ -136,7 +141,7 @@ class LoginTests(unittest.TestCase):
 
     def test_login_rejects_bad_password(self) -> None:
         h = Harness()
-        response = h.call(login_request(password="wrong"))
+        response = h.call(login_request(password="wrong"))  # noqa: S106 -- deliberately wrong fake credential for rejection test
 
         self.assertEqual(response.status, 401)
         self.assertEqual(h.sessions.get("tok-1"), None)
@@ -157,7 +162,9 @@ class LoginTests(unittest.TestCase):
         h = Harness()
         token, _ = h.login()
 
-        response = h.call(DashboardRequest(method="POST", path="/logout", cookies={SESSION_COOKIE: token}))
+        response = h.call(
+            DashboardRequest(method="POST", path="/logout", cookies={SESSION_COOKIE: token})
+        )
 
         self.assertEqual(response.status, 200)
         self.assertIsNone(h.sessions.get(token))
@@ -173,7 +180,9 @@ class AdminAuthTests(unittest.TestCase):
     def test_unknown_session_token_rejected(self) -> None:
         h = Harness()
         response = h.call(
-            DashboardRequest(method="GET", path="/api/progress", cookies={SESSION_COOKIE: "bogus-token"})
+            DashboardRequest(
+                method="GET", path="/api/progress", cookies={SESSION_COOKIE: "bogus-token"}
+            )
         )
 
         self.assertEqual(response.status, 401)
@@ -182,7 +191,9 @@ class AdminAuthTests(unittest.TestCase):
         h = Harness()
         token, _ = h.login()
 
-        response = h.call(DashboardRequest(method="GET", path="/api/progress", cookies={SESSION_COOKIE: token}))
+        response = h.call(
+            DashboardRequest(method="GET", path="/api/progress", cookies={SESSION_COOKIE: token})
+        )
 
         self.assertEqual(response.status, 200)
         payload = json.loads(response.body)
@@ -194,12 +205,16 @@ class AdminAuthTests(unittest.TestCase):
         h = Harness()
         token, _ = h.login()
 
-        first = h.call(DashboardRequest(method="GET", path="/api/progress", cookies={SESSION_COOKIE: token}))
+        first = h.call(
+            DashboardRequest(method="GET", path="/api/progress", cookies={SESSION_COOKIE: token})
+        )
         self.assertEqual(first.status, 200)
         self.assertNotIn(SESSION_COOKIE, first.cookies)  # no rotation cookie set
 
         # Same token still works on subsequent reads.
-        second = h.call(DashboardRequest(method="GET", path="/api/progress", cookies={SESSION_COOKIE: token}))
+        second = h.call(
+            DashboardRequest(method="GET", path="/api/progress", cookies={SESSION_COOKIE: token})
+        )
         self.assertEqual(second.status, 200)
 
     def test_concurrent_polls_sharing_one_cookie_all_succeed(self) -> None:
@@ -209,7 +224,9 @@ class AdminAuthTests(unittest.TestCase):
         h = Harness()
         token, _ = h.login()
         for path in ("/api/leaderboard", "/api/progress", "/api/feed"):
-            resp = h.call(DashboardRequest(method="GET", path=path, cookies={SESSION_COOKIE: token}))
+            resp = h.call(
+                DashboardRequest(method="GET", path=path, cookies={SESSION_COOKIE: token})
+            )
             self.assertEqual(resp.status, 200, f"{path} should not 401")
 
     def test_post_rotates_token_and_old_token_dies(self) -> None:
@@ -231,10 +248,16 @@ class AdminAuthTests(unittest.TestCase):
         self.assertNotEqual(new_token, token)
 
         # Old token is dead after a state-changing POST.
-        replay = h.call(DashboardRequest(method="GET", path="/api/progress", cookies={SESSION_COOKIE: token}))
+        replay = h.call(
+            DashboardRequest(method="GET", path="/api/progress", cookies={SESSION_COOKIE: token})
+        )
         self.assertEqual(replay.status, 401)
         # New token works.
-        ok = h.call(DashboardRequest(method="GET", path="/api/progress", cookies={SESSION_COOKIE: new_token}))
+        ok = h.call(
+            DashboardRequest(
+                method="GET", path="/api/progress", cookies={SESSION_COOKIE: new_token}
+            )
+        )
         self.assertEqual(ok.status, 200)
 
     def test_expired_session_rejected(self) -> None:
@@ -242,7 +265,9 @@ class AdminAuthTests(unittest.TestCase):
         h = Harness(ttl_seconds=1, moments=[START, START + timedelta(seconds=10)])
         token, _ = h.login()
 
-        response = h.call(DashboardRequest(method="GET", path="/api/progress", cookies={SESSION_COOKIE: token}))
+        response = h.call(
+            DashboardRequest(method="GET", path="/api/progress", cookies={SESSION_COOKIE: token})
+        )
 
         self.assertEqual(response.status, 401)
 
@@ -263,7 +288,9 @@ class AdminAuthTests(unittest.TestCase):
         h.service.record_event("solve", "alpha", "web-1", payload={"submission_id": "s1"})
         token, _ = h.login()
 
-        response = h.call(DashboardRequest(method="GET", path="/api/leaderboard", cookies={SESSION_COOKIE: token}))
+        response = h.call(
+            DashboardRequest(method="GET", path="/api/leaderboard", cookies={SESSION_COOKIE: token})
+        )
 
         payload = json.loads(response.body)
         self.assertEqual(payload["leaderboard"]["entries"][0]["team_id"], "alpha")
@@ -275,7 +302,12 @@ class AdminAuthTests(unittest.TestCase):
         token, _ = h.login()
 
         response = h.call(
-            DashboardRequest(method="GET", path="/api/feed", query={"since": "1"}, cookies={SESSION_COOKIE: token})
+            DashboardRequest(
+                method="GET",
+                path="/api/feed",
+                query={"since": "1"},
+                cookies={SESSION_COOKIE: token},
+            )
         )
 
         payload = json.loads(response.body)
@@ -325,7 +357,12 @@ class CsrfTests(unittest.TestCase):
                 cookies={SESSION_COOKIE: token},
                 headers={CSRF_HEADER: csrf},
                 body=json.dumps(
-                    {"type": "solve", "team_id": "alpha", "challenge_id": "web-1", "payload": {"submission_id": "s1"}}
+                    {
+                        "type": "solve",
+                        "team_id": "alpha",
+                        "challenge_id": "web-1",
+                        "payload": {"submission_id": "s1"},
+                    }
                 ),
             )
         )
@@ -356,7 +393,9 @@ class CsrfTests(unittest.TestCase):
         )
 
         # Original token still valid since the CSRF-rejected request never rotated it.
-        response = h.call(DashboardRequest(method="GET", path="/api/progress", cookies={SESSION_COOKIE: token}))
+        response = h.call(
+            DashboardRequest(method="GET", path="/api/progress", cookies={SESSION_COOKIE: token})
+        )
         self.assertEqual(response.status, 200)
 
 
@@ -367,7 +406,9 @@ class PublicRouteTests(unittest.TestCase):
 
         response = h.call(
             DashboardRequest(
-                method="GET", path="/public/scoreboard", headers={PUBLIC_TOKEN_HEADER: h.auth.public_token}
+                method="GET",
+                path="/public/scoreboard",
+                headers={PUBLIC_TOKEN_HEADER: h.auth.public_token},
             )
         )
 
@@ -382,7 +423,9 @@ class PublicRouteTests(unittest.TestCase):
         h = Harness()
 
         response = h.call(
-            DashboardRequest(method="GET", path="/public/scoreboard", query={"token": h.auth.public_token})
+            DashboardRequest(
+                method="GET", path="/public/scoreboard", query={"token": h.auth.public_token}
+            )
         )
 
         self.assertEqual(response.status, 200)
@@ -396,7 +439,9 @@ class PublicRouteTests(unittest.TestCase):
     def test_public_scoreboard_rejects_wrong_token(self) -> None:
         h = Harness()
         response = h.call(
-            DashboardRequest(method="GET", path="/public/scoreboard", headers={PUBLIC_TOKEN_HEADER: "nope"})
+            DashboardRequest(
+                method="GET", path="/public/scoreboard", headers={PUBLIC_TOKEN_HEADER: "nope"}
+            )
         )
 
         self.assertEqual(response.status, 401)
@@ -407,7 +452,9 @@ class PublicRouteTests(unittest.TestCase):
 
         # Admin session cookie alone (no public token) must not grant access.
         response = h.call(
-            DashboardRequest(method="GET", path="/public/scoreboard", cookies={SESSION_COOKIE: token})
+            DashboardRequest(
+                method="GET", path="/public/scoreboard", cookies={SESSION_COOKIE: token}
+            )
         )
 
         self.assertEqual(response.status, 401)
@@ -417,7 +464,9 @@ class PublicRouteTests(unittest.TestCase):
 
         # Public token used as if it were the session cookie value.
         response = h.call(
-            DashboardRequest(method="GET", path="/api/progress", cookies={SESSION_COOKIE: h.auth.public_token})
+            DashboardRequest(
+                method="GET", path="/api/progress", cookies={SESSION_COOKIE: h.auth.public_token}
+            )
         )
         self.assertEqual(response.status, 401)
 
@@ -425,7 +474,9 @@ class PublicRouteTests(unittest.TestCase):
         # doesn't help -- admin routes never look at that header.
         response = h.call(
             DashboardRequest(
-                method="GET", path="/api/progress", headers={PUBLIC_TOKEN_HEADER: h.auth.public_token}
+                method="GET",
+                path="/api/progress",
+                headers={PUBLIC_TOKEN_HEADER: h.auth.public_token},
             )
         )
         self.assertEqual(response.status, 401)
@@ -433,10 +484,16 @@ class PublicRouteTests(unittest.TestCase):
     def test_public_feed_is_redacted(self) -> None:
         h = Harness()
         h.service.record_event("attempt", "alpha", "web-1")
-        h.service.record_event("solve", "alpha", "web-1", payload={"submission_id": "s1", "flag": "CTF{x}"})
+        h.service.record_event(
+            "solve", "alpha", "web-1", payload={"submission_id": "s1", "flag": "CTF{x}"}
+        )
 
         response = h.call(
-            DashboardRequest(method="GET", path="/public/feed", headers={PUBLIC_TOKEN_HEADER: h.auth.public_token})
+            DashboardRequest(
+                method="GET",
+                path="/public/feed",
+                headers={PUBLIC_TOKEN_HEADER: h.auth.public_token},
+            )
         )
 
         payload = json.loads(response.body)
@@ -520,7 +577,9 @@ class HtmlRouteTests(unittest.TestCase):
         auth = make_auth()
         clock = ScriptedClock([START + timedelta(seconds=i) for i in range(10)])
 
-        login = dispatch(login_request(), service=service, sessions=sessions, auth=auth, clock=clock)
+        login = dispatch(
+            login_request(), service=service, sessions=sessions, auth=auth, clock=clock
+        )
         token = login.cookies[SESSION_COOKIE]
 
         response = dispatch(
@@ -565,7 +624,7 @@ class MultiAdminTests(unittest.TestCase):
     def make_multi_auth(self) -> AuthConfig:
         return AuthConfig.from_users(
             [("admin", "hunter2"), ("root", "toor")],
-            public_token="pub-token-fixed",
+            public_token="pub-token-fixed",  # noqa: S106 -- fake public token for dashboard test
             session_ttl_seconds=300,
             pbkdf2_iterations=1000,
             salt=b"fixed-salt-16bb",
@@ -652,7 +711,7 @@ class LoginTimingTests(unittest.TestCase):
     def test_multi_admin_hashes_regardless_of_username(self) -> None:
         auth = AuthConfig.from_users(
             [("admin", "hunter2"), ("root", "toor")],
-            public_token="pub-token-fixed",
+            public_token="pub-token-fixed",  # noqa: S106 -- fake public token for dashboard test
             pbkdf2_iterations=1000,
             salt=b"fixed-salt-16bb",
         )
@@ -687,18 +746,20 @@ class LoginTimingTests(unittest.TestCase):
 
 class Pbkdf2StrengthTests(unittest.TestCase):
     def test_default_iterations_meet_owasp_2023_minimum(self) -> None:
-        auth = AuthConfig.create("admin", "pw", public_token="x")
+        auth = AuthConfig.create("admin", "pw", public_token="x")  # noqa: S106 -- fake public token for dashboard test
         self.assertGreaterEqual(auth.pbkdf2_iterations, 600_000)
 
     def test_from_users_default_iterations_meet_owasp_2023_minimum(self) -> None:
-        auth = AuthConfig.from_users([("admin", "pw")], public_token="x")
+        auth = AuthConfig.from_users([("admin", "pw")], public_token="x")  # noqa: S106 -- fake public token for dashboard test
         self.assertGreaterEqual(auth.pbkdf2_iterations, 600_000)
 
 
 class SecurityHeaderTests(unittest.TestCase):
     def test_html_pages_carry_csp_and_hardening_headers(self) -> None:
         h = Harness()
-        resp = h.call(DashboardRequest(method="GET", path="/login", headers={"Accept": "text/html"}))
+        resp = h.call(
+            DashboardRequest(method="GET", path="/login", headers={"Accept": "text/html"})
+        )
         self.assertEqual(resp.status, 200)
         self.assertIn("Content-Security-Policy", resp.headers)
         self.assertIn("frame-ancestors 'none'", resp.headers["Content-Security-Policy"])
@@ -708,7 +769,9 @@ class SecurityHeaderTests(unittest.TestCase):
     def test_json_responses_carry_nosniff(self) -> None:
         h = Harness()
         token, _ = h.login()
-        resp = h.call(DashboardRequest(method="GET", path="/api/progress", cookies={SESSION_COOKIE: token}))
+        resp = h.call(
+            DashboardRequest(method="GET", path="/api/progress", cookies={SESSION_COOKIE: token})
+        )
         self.assertEqual(resp.headers["X-Content-Type-Options"], "nosniff")
 
 
@@ -748,11 +811,15 @@ class LiveTimeDecayScoringTests(unittest.TestCase):
         # Clock stays a few seconds past START for every read.
         clock = ScriptedClock([START + timedelta(seconds=i) for i in range(1, 20)])
 
-        login = dispatch(login_request(), service=service, sessions=sessions, auth=auth, clock=clock)
+        login = dispatch(
+            login_request(), service=service, sessions=sessions, auth=auth, clock=clock
+        )
         token = login.cookies[SESSION_COOKIE]
 
         response = dispatch(
-            DashboardRequest(method="GET", path="/api/leaderboard", cookies={SESSION_COOKIE: token}),
+            DashboardRequest(
+                method="GET", path="/api/leaderboard", cookies={SESSION_COOKIE: token}
+            ),
             service=service,
             sessions=sessions,
             auth=auth,

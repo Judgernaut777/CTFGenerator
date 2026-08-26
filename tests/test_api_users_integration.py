@@ -84,9 +84,7 @@ def _client():
         command.upgrade(_alembic_config(url), "head")
         db = Database(DatabaseConfig(url=url))
         try:
-            app = create_app(
-                ApiSettings(), database=db, authenticator=_authenticator()
-            )
+            app = create_app(ApiSettings(), database=db, authenticator=_authenticator())
             yield TestClient(app)
         finally:
             db.dispose()
@@ -138,9 +136,7 @@ class UsersApiIntegrationTests(unittest.TestCase):
             self.assertEqual([u["email"] for u in first.json()["data"]], ["Ada@example.com"])
             self.assertTrue(first.json()["page"]["has_more"])
             cursor = first.json()["page"]["next_cursor"]
-            second = client.get(
-                f"/api/v1/users?limit=1&cursor={cursor}", headers=_auth()
-            )
+            second = client.get(f"/api/v1/users?limit=1&cursor={cursor}", headers=_auth())
             self.assertEqual(second.status_code, 200)
             self.assertEqual([u["email"] for u in second.json()["data"]], ["bob@example.com"])
 

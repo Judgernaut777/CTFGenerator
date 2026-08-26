@@ -93,9 +93,7 @@ class WebAuthBridgeTests(unittest.TestCase):
             # Grab a CSRF token from a rendered page (logout is CSRF-protected).
             csrf = ws.extract_csrf(client.get("/app/").text)
             self.assertTrue(csrf)
-            out = client.post(
-                "/app/logout", data={"csrf_token": csrf}, follow_redirects=False
-            )
+            out = client.post("/app/logout", data={"csrf_token": csrf}, follow_redirects=False)
             self.assertEqual(out.status_code, 303, out.text)
             self.assertTrue(out.headers["location"].endswith("/app/login"))
             # Cookie cleared, and the OLD token no longer resolves -> redirect to

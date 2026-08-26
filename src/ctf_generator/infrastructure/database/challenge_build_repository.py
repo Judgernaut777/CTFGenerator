@@ -31,9 +31,7 @@ class SqlAlchemyChallengeBuildRepository:
     def __init__(self, session: Session) -> None:
         self._session = session
 
-    def _version_uuid_and_sha(
-        self, definition_slug: str, version_no: int
-    ) -> tuple[uuid.UUID, str]:
+    def _version_uuid_and_sha(self, definition_slug: str, version_no: int) -> tuple[uuid.UUID, str]:
         """Resolve ``(definition_slug, version_no)`` to ``(version_uuid,
         spec_sha256)``. Raises :class:`LookupError` if the version is missing."""
         result = self._session.execute(
@@ -48,9 +46,7 @@ class SqlAlchemyChallengeBuildRepository:
             )
         ).one_or_none()
         if result is None:
-            raise LookupError(
-                f"challenge version not found: {definition_slug!r} v{version_no}"
-            )
+            raise LookupError(f"challenge version not found: {definition_slug!r} v{version_no}")
         return result.id, result.spec_sha256
 
     def add(self, build: ChallengeBuild) -> None:
@@ -92,9 +88,7 @@ class SqlAlchemyChallengeBuildRepository:
         build_row, definition_slug, version_no = row
         return challenge_build_from_orm(build_row, definition_slug, version_no)
 
-    def list_for_version(
-        self, definition_slug: str, version_no: int
-    ) -> list[ChallengeBuild]:
+    def list_for_version(self, definition_slug: str, version_no: int) -> list[ChallengeBuild]:
         rows = self._session.scalars(
             select(ChallengeBuildRow)
             .join(
@@ -110,6 +104,4 @@ class SqlAlchemyChallengeBuildRepository:
                 ChallengeVersionRow.version_no == version_no,
             )
         )
-        return [
-            challenge_build_from_orm(row, definition_slug, version_no) for row in rows
-        ]
+        return [challenge_build_from_orm(row, definition_slug, version_no) for row in rows]

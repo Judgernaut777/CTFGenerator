@@ -55,9 +55,7 @@ def create_team(
     principal: Principal = Depends(get_principal),
     service=Depends(get_team_service),
 ):
-    assert_competition_permission(
-        principal, body.competition_id, Permission.TEAM_WRITE
-    )
+    assert_competition_permission(principal, body.competition_id, Permission.TEAM_WRITE)
     body_json = body.model_dump(mode="json")
     scope = f"{principal.subject}:{_CREATE_SCOPE}"
     replayed = replay(request, scope, body_json)
@@ -73,9 +71,7 @@ def create_team(
         action="team.create",
         target=f"{team.competition_id}/{team.name}",
     )
-    remember(
-        request, scope, body_json, status_code=201, envelope=envelope, etag=etag
-    )
+    remember(request, scope, body_json, status_code=201, envelope=envelope, etag=etag)
     return respond(201, envelope, etag=etag)
 
 
@@ -85,9 +81,7 @@ def create_team(
     responses={k: ERROR_RESPONSES[k] for k in (400, 401, 403, 422, 429)},
 )
 def list_teams(
-    competition_id: str = Query(
-        ..., min_length=1, description="Owning competition (required)"
-    ),
+    competition_id: str = Query(..., min_length=1, description="Owning competition (required)"),
     limit: int | None = Query(default=None, ge=1),
     cursor: str | None = Query(default=None),
     # The competition is a required QUERY param, so scope team:read to it here.
@@ -95,9 +89,7 @@ def list_teams(
     service=Depends(get_team_service),
 ):
     assert_competition_permission(principal, competition_id, Permission.TEAM_READ)
-    teams = sorted(
-        service.list_for_competition(competition_id), key=lambda t: t.name
-    )
+    teams = sorted(service.list_for_competition(competition_id), key=lambda t: t.name)
     page = paginate(teams, key=lambda t: t.name, limit=limit, cursor=cursor)
     items = [team_to_response(t) for t in page.items]
     envelope = list_envelope(
@@ -120,9 +112,7 @@ def list_teams(
 def get_team(
     competition_id: str,
     name: str,
-    principal: Principal = Depends(
-        require_competition_permission(Permission.TEAM_READ)
-    ),
+    principal: Principal = Depends(require_competition_permission(Permission.TEAM_READ)),
     service=Depends(get_team_service),
 ):
     team = service.get(competition_id, name)

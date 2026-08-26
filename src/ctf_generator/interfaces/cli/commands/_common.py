@@ -72,9 +72,7 @@ def token_override(args: argparse.Namespace) -> str | None:  # noqa: ARG001
     return os.environ.get(TOKEN_ENV)
 
 
-def resolve_api_url(
-    args: argparse.Namespace, *, stored: Session | None = None
-) -> str:
+def resolve_api_url(args: argparse.Namespace, *, stored: Session | None = None) -> str:
     """Resolve the API URL: explicit ``--api-url`` wins, then the stored
     session's origin, then ``$CTFGEN_API_URL``, then the built-in default."""
     if args.api_url:

@@ -122,9 +122,7 @@ class LocalFilesystemArtifactStore:
         real_target = os.path.realpath(target)
         for candidate in (real_parent, real_target):
             try:
-                inside = (
-                    os.path.commonpath([self._root_real, candidate]) == self._root_real
-                )
+                inside = os.path.commonpath([self._root_real, candidate]) == self._root_real
             except ValueError:
                 inside = False
             if not inside:
@@ -163,8 +161,7 @@ class LocalFilesystemArtifactStore:
                 existing = target.read_bytes()
                 if existing != data:
                     raise ArtifactStoreError(
-                        f"artifact already exists with different bytes "
-                        f"(immutable): {key!r}"
+                        f"artifact already exists with different bytes (immutable): {key!r}"
                     ) from None
                 return
             _fsync_dir(target.parent)

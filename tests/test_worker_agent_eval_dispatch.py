@@ -149,9 +149,7 @@ class EvalDispatchTests(unittest.TestCase):
         self.assertTrue(result["solved"])
         self.assertEqual(result["steps"], 3)
         # Allowlist ONLY: no flag/base_url/candidate/credential field.
-        self.assertEqual(
-            set(result), {"eval_run_id", "solved", "steps", "notes"}
-        )
+        self.assertEqual(set(result), {"eval_run_id", "solved", "steps", "notes"})
         # The planted flag is ABSENT from EVERY field of the reported result
         # (serialise the whole dict and search) -- proven redacted, not merely
         # dropped from one field.
@@ -169,8 +167,11 @@ class EvalDispatchTests(unittest.TestCase):
         # branch does) -- pass placeholders since _dispatch now threads them
         # through unconditionally for the build_challenge lease fence.
         outcome = worker._dispatch(
-            "run_agent_evaluation", _eval_payload(), _NOW,
-            job_id="job-eval-1", lease_token="lease-eval-1",
+            "run_agent_evaluation",
+            _eval_payload(),
+            _NOW,
+            job_id="job-eval-1",
+            lease_token="lease-eval-1",
         )
         self.assertIsNotNone(outcome.result)
         self.assertEqual(outcome.result["eval_run_id"], "eval-1")
@@ -183,9 +184,7 @@ class EvalDispatchTests(unittest.TestCase):
             step_delta=2,
             notes=["scenario ticks_run=3", f"note {_PLANTED_FLAG}"],
         )
-        client = _FakeClient(
-            claim_lease=_eval_lease(_eval_payload(adversarial=True))
-        )
+        client = _FakeClient(claim_lease=_eval_lease(_eval_payload(adversarial=True)))
         runner = _FakeEvalRunner(delta)
         _worker(client, runner).run_once()
 
@@ -278,8 +277,7 @@ class ControlPlanePurityTests(unittest.TestCase):
         )
         if proc.returncode == 2:
             self.skipTest(
-                "import graph needs the [db]/[api] extras installed: "
-                + proc.stderr.strip()
+                "import graph needs the [db]/[api] extras installed: " + proc.stderr.strip()
             )
         self.assertEqual(
             proc.returncode,

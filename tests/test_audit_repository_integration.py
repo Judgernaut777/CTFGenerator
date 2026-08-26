@@ -113,9 +113,7 @@ class AuditRepositoryTests(unittest.TestCase):
         # code-head guard lives in test_migration_head_constant.py.)
         cfg = _alembic_config(_TEST_URL)
         sd = ScriptDirectory.from_config(cfg)
-        self.assertEqual(
-            sd.get_revision("0014_audit_events").revision, "0014_audit_events"
-        )
+        self.assertEqual(sd.get_revision("0014_audit_events").revision, "0014_audit_events")
 
     def test_add_and_list_returns_domain_newest_first(self) -> None:
         with _migrated_database() as (db, _url):
@@ -129,21 +127,27 @@ class AuditRepositoryTests(unittest.TestCase):
         self.assertTrue(all(isinstance(e, AuditEvent) for e in page.items))
         self.assertFalse(any(isinstance(e, AuditEventRow) for e in page.items))
         # occurred_at DESC (newest first).
-        self.assertEqual(
-            [e.action for e in page.items], ["a.three", "a.two", "a.one"]
-        )
+        self.assertEqual([e.action for e in page.items], ["a.three", "a.two", "a.one"])
         self.assertIsNone(page.next_cursor)
 
     def test_filters_by_actor_action_outcome_and_time(self) -> None:
         with _migrated_database() as (db, _url):
             with db.session_scope() as s:
                 repo = SqlAlchemyAuditRepository(s)
-                repo.add(_event(actor="alice", action="job.cancel",
-                                outcome="success", offset_seconds=0))
-                repo.add(_event(actor="bob", action="job.cancel",
-                                outcome="denied", offset_seconds=30))
-                repo.add(_event(actor="alice", action="competition.create",
-                                outcome="success", offset_seconds=60))
+                repo.add(
+                    _event(actor="alice", action="job.cancel", outcome="success", offset_seconds=0)
+                )
+                repo.add(
+                    _event(actor="bob", action="job.cancel", outcome="denied", offset_seconds=30)
+                )
+                repo.add(
+                    _event(
+                        actor="alice",
+                        action="competition.create",
+                        outcome="success",
+                        offset_seconds=60,
+                    )
+                )
             with db.session_scope() as s:
                 repo = SqlAlchemyAuditRepository(s)
                 by_actor = repo.list(actor="alice", limit=50)
@@ -197,9 +201,7 @@ class AuditRepositoryTests(unittest.TestCase):
             with self.assertRaises(ProgrammingError):
                 with db.session_scope() as s:
                     s.execute(
-                        sa.text(
-                            "UPDATE audit_events SET outcome = 'denied' WHERE id = :id"
-                        ),
+                        sa.text("UPDATE audit_events SET outcome = 'denied' WHERE id = :id"),
                         {"id": event.audit_event_id},
                     )
 

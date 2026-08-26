@@ -92,7 +92,9 @@ def _authenticator() -> StubAuthenticator:
             # A contestant: no flat AUTHORING read permission (challenge/build/eval),
             # but a SCOREBOARD_READ-bearing membership in _CID.
             _PLAYER: principal_for(
-                "player-user", {"player"}, team="Red",
+                "player-user",
+                {"player"},
+                team="Red",
                 memberships={_CID: ("player", "Red")},
             ),
         }
@@ -105,9 +107,7 @@ def _client_and_db():
         command.upgrade(_alembic_config(url), "head")
         db = Database(DatabaseConfig(url=url))
         try:
-            app = create_app(
-                ApiSettings(), database=db, authenticator=_authenticator()
-            )
+            app = create_app(ApiSettings(), database=db, authenticator=_authenticator())
             yield TestClient(app), db
         finally:
             db.dispose()
@@ -129,42 +129,51 @@ def _competition_body() -> dict:
 
 
 def _seed_version(client: TestClient) -> None:
-    assert client.post(
-        "/api/v1/challenge-definitions",
-        headers=_auth(),
-        json={"family": "web", "slug": _SLUG, "title": "SQLi"},
-    ).status_code == 201
-    assert client.post(
-        "/api/v1/challenge-versions",
-        headers=_auth(),
-        json={
-            "definition_slug": _SLUG,
-            "seed": "s",
-            "family_version": "1.0.0",
-            "spec": {"title": "SQLi", "flag": _FLAG},
-        },
-    ).status_code == 201
+    assert (
+        client.post(
+            "/api/v1/challenge-definitions",
+            headers=_auth(),
+            json={"family": "web", "slug": _SLUG, "title": "SQLi"},
+        ).status_code
+        == 201
+    )
+    assert (
+        client.post(
+            "/api/v1/challenge-versions",
+            headers=_auth(),
+            json={
+                "definition_slug": _SLUG,
+                "seed": "s",
+                "family_version": "1.0.0",
+                "spec": {"title": "SQLi", "flag": _FLAG},
+            },
+        ).status_code
+        == 201
+    )
 
 
 def _seed_competition_with_solve(client: TestClient, db: Database) -> None:
     """Competition + Red team + one published, attached challenge with a solve."""
-    assert client.post(
-        "/api/v1/competitions", headers=_auth(), json=_competition_body()
-    ).status_code == 201
-    assert client.post(
-        "/api/v1/teams",
-        headers=_auth(),
-        json={"competition_id": _CID, "name": "Red"},
-    ).status_code == 201
+    assert (
+        client.post("/api/v1/competitions", headers=_auth(), json=_competition_body()).status_code
+        == 201
+    )
+    assert (
+        client.post(
+            "/api/v1/teams",
+            headers=_auth(),
+            json={"competition_id": _CID, "name": "Red"},
+        ).status_code
+        == 201
+    )
     _seed_version(client)
-    assert client.post(
-        f"/api/v1/challenge-versions/{_SLUG}/1/publish", headers=_auth()
-    ).status_code == 200
+    assert (
+        client.post(f"/api/v1/challenge-versions/{_SLUG}/1/publish", headers=_auth()).status_code
+        == 200
+    )
     with db.session_scope() as session:
         SqlAlchemyChallengePublicationRepository(session).add(
-            ChallengePublication(
-                competition_id=_CID, definition_slug=_SLUG, version_no=1
-            )
+            ChallengePublication(competition_id=_CID, definition_slug=_SLUG, version_no=1)
         )
     r = client.post(
         f"/api/v1/competitions/{_CID}/submissions",
@@ -229,9 +238,7 @@ class VersionReportsApiIntegrationTests(unittest.TestCase):
             )
             self.assertEqual(lst.status_code, 200, lst.text)
             self.assertEqual(lst.json()["schema"], "ctfgen.report-snapshot-list")
-            self.assertIn(
-                report_id, [s["report_id"] for s in lst.json()["data"]]
-            )
+            self.assertIn(report_id, [s["report_id"] for s in lst.json()["data"]])
 
     def test_build_and_eval_reports_snapshot(self) -> None:
         with _client_and_db() as (client, db):

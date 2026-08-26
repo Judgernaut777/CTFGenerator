@@ -47,7 +47,8 @@ class BuildStackIntegrationTests(unittest.TestCase):
         for tag in self._tags:
             subprocess.run(
                 ["docker", "image", "rm", "--force", tag],
-                capture_output=True, text=True,
+                capture_output=True,
+                text=True,
             )
 
     def _stack_bundle(self) -> str:
@@ -88,7 +89,8 @@ class BuildStackIntegrationTests(unittest.TestCase):
             # Each service's image really exists.
             rc = subprocess.run(
                 ["docker", "image", "inspect", s["image_ref"]],
-                capture_output=True, text=True,
+                capture_output=True,
+                text=True,
             ).returncode
             self.assertEqual(rc, 0, s["image_ref"])
         # beta declares host ports -> it is the primary/ingress anchor.

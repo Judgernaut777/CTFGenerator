@@ -190,9 +190,7 @@ class AuthSessionRepositoryTests(unittest.TestCase):
             _seed_user(db)
             sess = self._add(db, "tok-live", expires=_NOW + timedelta(hours=12))
             with db.session_scope() as s:
-                got = SqlAlchemyAuthSessionRepository(s).get_by_token_hash(
-                    _token_hash("tok-live")
-                )
+                got = SqlAlchemyAuthSessionRepository(s).get_by_token_hash(_token_hash("tok-live"))
             self.assertIsNotNone(got)
             self.assertTrue(got.is_live(_NOW + timedelta(hours=1)))
             self.assertEqual(got.user_email, "user@example.com")
@@ -211,9 +209,7 @@ class AuthSessionRepositoryTests(unittest.TestCase):
             _seed_user(db)
             self._add(db, "tok-exp", expires=_NOW + timedelta(minutes=1))
             with db.session_scope() as s:
-                got = SqlAlchemyAuthSessionRepository(s).get_by_token_hash(
-                    _token_hash("tok-exp")
-                )
+                got = SqlAlchemyAuthSessionRepository(s).get_by_token_hash(_token_hash("tok-exp"))
             self.assertFalse(got.is_live(_NOW + timedelta(hours=1)))
 
     def test_revoke_is_idempotent(self) -> None:
@@ -230,9 +226,7 @@ class AuthSessionRepositoryTests(unittest.TestCase):
             _seed_user(db)
             with db.session_scope() as s:
                 self.assertIsNone(
-                    SqlAlchemyAuthSessionRepository(s).get_by_token_hash(
-                        _token_hash("nope")
-                    )
+                    SqlAlchemyAuthSessionRepository(s).get_by_token_hash(_token_hash("nope"))
                 )
 
     def test_freeze_trigger_blocks_arbitrary_update(self) -> None:
@@ -244,9 +238,7 @@ class AuthSessionRepositoryTests(unittest.TestCase):
             with self.assertRaises((ProgrammingError, IntegrityError)):
                 with db.session_scope() as s:
                     s.execute(
-                        sa.text(
-                            "UPDATE sessions SET token_hash = :h WHERE id = :i"
-                        ),
+                        sa.text("UPDATE sessions SET token_hash = :h WHERE id = :i"),
                         {"h": _token_hash("mutated"), "i": sess.session_id},
                     )
 
@@ -273,9 +265,7 @@ class SystemRoleRepositoryTests(unittest.TestCase):
                 repo.grant(SystemRoleAssignment("user@example.com", "admin"))  # no-op
                 repo.grant(SystemRoleAssignment("user@example.com", "support"))
             with db.session_scope() as s:
-                roles = SqlAlchemySystemRoleRepository(s).list_for_user(
-                    "user@example.com"
-                )
+                roles = SqlAlchemySystemRoleRepository(s).list_for_user("user@example.com")
             self.assertEqual(roles, frozenset({"admin", "support"}))
 
             with db.session_scope() as s:
@@ -283,9 +273,7 @@ class SystemRoleRepositoryTests(unittest.TestCase):
                 self.assertTrue(repo.revoke("user@example.com", "support"))
                 self.assertFalse(repo.revoke("user@example.com", "support"))
             with db.session_scope() as s:
-                roles = SqlAlchemySystemRoleRepository(s).list_for_user(
-                    "user@example.com"
-                )
+                roles = SqlAlchemySystemRoleRepository(s).list_for_user("user@example.com")
             self.assertEqual(roles, frozenset({"admin"}))
 
     def test_unknown_user_reads_empty(self) -> None:

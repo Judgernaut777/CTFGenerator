@@ -178,11 +178,16 @@ class DeterminismNoWallClockConformanceTests(unittest.TestCase):
         iso_z = datetime.now(UTC).isoformat().replace("+00:00", "Z")
         self.assertTrue(_looks_like_now(iso_z, now), "ISO-8601 'now' (Z) not detected")
         # ...and does NOT flag the actual provenance-shaped values.
-        for benign in ("1.0", "web_business_logic_tenant_export", "medium", 64, 0,
-                       "a" * 64, self.SEED):
-            self.assertFalse(
-                _looks_like_now(benign, now), f"false positive on {benign!r}"
-            )
+        for benign in (
+            "1.0",
+            "web_business_logic_tenant_export",
+            "medium",
+            64,
+            0,
+            "a" * 64,
+            self.SEED,
+        ):
+            self.assertFalse(_looks_like_now(benign, now), f"false positive on {benign!r}")
 
     def test_same_seed_produces_byte_identical_tree_and_provenance(self) -> None:
         """DETERMINISM: two runs of the same (family, spec, seed) match byte-for-byte."""
@@ -199,9 +204,7 @@ class DeterminismNoWallClockConformanceTests(unittest.TestCase):
         )
         self.assertTrue(manifest_a, "generator produced no files")
         for rel, digest in manifest_a.items():
-            self.assertEqual(
-                digest, manifest_b[rel], f"content of {rel} differs between two runs"
-            )
+            self.assertEqual(digest, manifest_b[rel], f"content of {rel} differs between two runs")
         # The provenance stamps are part of the tree, so this also proves the
         # marker + manifests are byte-identical -- i.e. no field varies.
         for name in (BUILD_MARKER_NAME, PRIVATE_MANIFEST):
@@ -221,16 +224,12 @@ class DeterminismNoWallClockConformanceTests(unittest.TestCase):
         ref = (before + after) / 2.0
 
         self.assertTrue(prov_a, "no provenance stamps were found")
-        self.assertEqual(
-            set(prov_a), set(prov_b), "provenance stamp SET differs between runs"
-        )
+        self.assertEqual(set(prov_a), set(prov_b), "provenance stamp SET differs between runs")
 
         for name, doc_a in prov_a.items():
             doc_b = prov_b[name]
             # (a) No field changes between two runs -> nothing wall-clock/random.
-            self.assertEqual(
-                doc_a, doc_b, f"provenance stamp {name} is not run-to-run stable"
-            )
+            self.assertEqual(doc_a, doc_b, f"provenance stamp {name} is not run-to-run stable")
             # (b) No scalar value looks like the current time.
             for value in _iter_scalars(doc_a):
                 self.assertFalse(
@@ -250,7 +249,8 @@ class DeterminismNoWallClockConformanceTests(unittest.TestCase):
                 f"content-derived field {field} drifted between two runs",
             )
             self.assertRegex(
-                str(private_a[field]), r"^[0-9a-f]{64}$",
+                str(private_a[field]),
+                r"^[0-9a-f]{64}$",
                 f"{field} is not a SHA-256 digest",
             )
 

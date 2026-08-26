@@ -110,9 +110,7 @@ def oidc_callback(
     service=Depends(get_oidc_service),
 ):
     binding_secret = request.cookies.get(_TXN_COOKIE)
-    issued = service.handle_callback(
-        code, state, binding_secret, datetime.now(UTC)
-    )
+    issued = service.handle_callback(code, state, binding_secret, datetime.now(UTC))
     audit(
         audit_sink(request),
         actor=issued.user_email,

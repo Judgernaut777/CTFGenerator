@@ -69,9 +69,7 @@ class ReportService:
 
     def compute_validation(self, definition_slug: str, version_no: int) -> dict:
         with self._database.session_scope() as session:
-            version = SqlAlchemyChallengeVersionRepository(session).get(
-                definition_slug, version_no
-            )
+            version = SqlAlchemyChallengeVersionRepository(session).get(definition_slug, version_no)
             if version is None:
                 raise ReportNotAvailableError(
                     f"challenge version not found: {definition_slug!r} v{version_no}"
@@ -93,27 +91,24 @@ class ReportService:
 
     def compute_build(self, definition_slug: str, version_no: int) -> dict:
         with self._database.session_scope() as session:
-            if SqlAlchemyChallengeVersionRepository(session).get(
-                definition_slug, version_no
-            ) is None:
+            if (
+                SqlAlchemyChallengeVersionRepository(session).get(definition_slug, version_no)
+                is None
+            ):
                 raise ReportNotAvailableError(
                     f"challenge version not found: {definition_slug!r} v{version_no}"
                 )
             builds = SqlAlchemyChallengeBuildImageRepository(session)
-            image_ref = builds.latest_image_ref_for_version(
-                definition_slug, version_no
-            )
+            image_ref = builds.latest_image_ref_for_version(definition_slug, version_no)
             digest = (
-                builds.digest_for_version_image(
-                    definition_slug, version_no, image_ref
-                )
+                builds.digest_for_version_image(definition_slug, version_no, image_ref)
                 if image_ref
                 else None
             )
             stack = (
-                SqlAlchemyChallengeBuildStackImageRepository(
-                    session
-                ).stack_for_primary_image(definition_slug, version_no, image_ref)
+                SqlAlchemyChallengeBuildStackImageRepository(session).stack_for_primary_image(
+                    definition_slug, version_no, image_ref
+                )
                 if image_ref
                 else ()
             )
@@ -139,9 +134,10 @@ class ReportService:
 
     def compute_eval(self, definition_slug: str, version_no: int) -> dict:
         with self._database.session_scope() as session:
-            if SqlAlchemyChallengeVersionRepository(session).get(
-                definition_slug, version_no
-            ) is None:
+            if (
+                SqlAlchemyChallengeVersionRepository(session).get(definition_slug, version_no)
+                is None
+            ):
                 raise ReportNotAvailableError(
                     f"challenge version not found: {definition_slug!r} v{version_no}"
                 )
@@ -161,9 +157,7 @@ class ReportService:
                 "success_dropped": r.success_dropped,
                 "step_delta": r.step_delta,
                 "requested_at": r.requested_at.isoformat(),
-                "completed_at": (
-                    r.completed_at.isoformat() if r.completed_at else None
-                ),
+                "completed_at": (r.completed_at.isoformat() if r.completed_at else None),
             }
             for r in runs
         ]
@@ -177,9 +171,7 @@ class ReportService:
     def compute_competition_run(self, competition_id: str) -> dict:
         standings = ScoreboardService(self._database).standings(competition_id)
         with self._database.session_scope() as session:
-            solves = SqlAlchemySolveRepository(session).list_for_competition(
-                competition_id
-            )
+            solves = SqlAlchemySolveRepository(session).list_for_competition(competition_id)
         timeline = sorted(
             (
                 {
@@ -224,8 +216,7 @@ class ReportService:
         :class:`ReportNotAvailableError` if the subject does not exist."""
         if report_type not in VALID_REPORT_TYPES:
             raise ValueError(
-                f"report_type must be one of {sorted(VALID_REPORT_TYPES)}, "
-                f"got {report_type!r}"
+                f"report_type must be one of {sorted(VALID_REPORT_TYPES)}, got {report_type!r}"
             )
         stamp = now or self._clock()
         if report_type in _VERSION_KINDS:
@@ -256,9 +247,7 @@ class ReportService:
         self, report_type: str, definition_slug: str | None, version_no: int | None
     ) -> dict:
         if not definition_slug or not isinstance(version_no, int):
-            raise ValueError(
-                f"{report_type!r} report needs definition_slug + version_no"
-            )
+            raise ValueError(f"{report_type!r} report needs definition_slug + version_no")
         if report_type == "validation":
             return self.compute_validation(definition_slug, version_no)
         if report_type == "build":

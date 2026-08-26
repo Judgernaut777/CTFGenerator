@@ -107,9 +107,7 @@ class WebDashboardScopingTests(unittest.TestCase):
             lst = client.get("/app/competitions")
             self.assertIn(ws.COMP_A, lst.text)
             self.assertIn(ws.COMP_B, lst.text)
-            self.assertEqual(
-                client.get(f"/app/competitions/{ws.COMP_B}").status_code, 200
-            )
+            self.assertEqual(client.get(f"/app/competitions/{ws.COMP_B}").status_code, 200)
 
 
 if __name__ == "__main__":  # pragma: no cover

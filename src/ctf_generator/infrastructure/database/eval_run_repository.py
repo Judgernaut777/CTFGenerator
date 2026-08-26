@@ -47,18 +47,14 @@ class SqlAlchemyEvalRunRepository:
             )
         ).one_or_none()
         if result is None:
-            raise LookupError(
-                f"challenge version not found: {definition_slug!r} v{version_no}"
-            )
+            raise LookupError(f"challenge version not found: {definition_slug!r} v{version_no}")
         return result
 
     def add(self, eval_run: EvalRun) -> None:
         """Insert a fresh eval run. Raises :class:`LookupError` if the version is
         missing and ``IntegrityError`` on a duplicate ``eval_run_id`` or a
         duplicate ``(challenge_version_id, profile, adversarial)`` at flush."""
-        version_uuid = self._version_uuid(
-            eval_run.definition_slug, eval_run.version_no
-        )
+        version_uuid = self._version_uuid(eval_run.definition_slug, eval_run.version_no)
         row = eval_run_to_orm(eval_run, version_uuid)
         self._session.add(row)
         self._session.flush()
@@ -109,9 +105,7 @@ class SqlAlchemyEvalRunRepository:
             return None
         return eval_run_from_orm(row, definition_slug, version_no)
 
-    def list_for_version(
-        self, definition_slug: str, version_no: int
-    ) -> list[EvalRun]:
+    def list_for_version(self, definition_slug: str, version_no: int) -> list[EvalRun]:
         rows = self._session.scalars(
             select(EvalRunRow)
             .join(
@@ -128,9 +122,7 @@ class SqlAlchemyEvalRunRepository:
             )
             .order_by(EvalRunRow.requested_at, EvalRunRow.id)
         )
-        return [
-            eval_run_from_orm(row, definition_slug, version_no) for row in rows
-        ]
+        return [eval_run_from_orm(row, definition_slug, version_no) for row in rows]
 
     def list_non_terminal(self) -> list[EvalRun]:
         """Every eval run still ``pending``/``running`` (oldest first). Drives the

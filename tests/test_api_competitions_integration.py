@@ -92,9 +92,7 @@ def _client():
         command.upgrade(_alembic_config(url), "head")
         db = Database(DatabaseConfig(url=url))
         try:
-            app = create_app(
-                ApiSettings(), database=db, authenticator=_authenticator()
-            )
+            app = create_app(ApiSettings(), database=db, authenticator=_authenticator())
             yield TestClient(app)
         finally:
             db.dispose()
@@ -120,9 +118,7 @@ class CompetitionsApiIntegrationTests(unittest.TestCase):
     def test_full_lifecycle_round_trip(self) -> None:
         with _client() as client:
             # CREATE -> 201 + ETag + stamped envelope
-            r = client.post(
-                "/api/v1/competitions", headers=_auth(), json=_competition_body()
-            )
+            r = client.post("/api/v1/competitions", headers=_auth(), json=_competition_body())
             self.assertEqual(r.status_code, 201, r.text)
             self.assertEqual(r.json()["schema"], "ctfgen.competition")
             self.assertEqual(r.json()["competition_id"], "spring-ctf-2026")
@@ -166,9 +162,7 @@ class CompetitionsApiIntegrationTests(unittest.TestCase):
 
     def test_patch_without_if_match_is_428(self) -> None:
         with _client() as client:
-            client.post(
-                "/api/v1/competitions", headers=_auth(), json=_competition_body()
-            )
+            client.post("/api/v1/competitions", headers=_auth(), json=_competition_body())
             r = client.patch(
                 "/api/v1/competitions/spring-ctf-2026",
                 headers=_auth(),
@@ -187,12 +181,8 @@ class CompetitionsApiIntegrationTests(unittest.TestCase):
 
     def test_duplicate_competition_is_409(self) -> None:
         with _client() as client:
-            client.post(
-                "/api/v1/competitions", headers=_auth(), json=_competition_body()
-            )
-            r = client.post(
-                "/api/v1/competitions", headers=_auth(), json=_competition_body()
-            )
+            client.post("/api/v1/competitions", headers=_auth(), json=_competition_body())
+            r = client.post("/api/v1/competitions", headers=_auth(), json=_competition_body())
             self.assertEqual(r.status_code, 409, r.text)
             self.assertEqual(r.json()["error"]["code"], "conflict")
 
@@ -229,19 +219,13 @@ class CompetitionsApiIntegrationTests(unittest.TestCase):
             self.assertEqual(first.status_code, 201, first.text)
             replay = client.post("/api/v1/competitions", headers=headers, json=body)
             self.assertEqual(replay.status_code, 201, replay.text)
-            self.assertEqual(
-                replay.json()["competition_id"], first.json()["competition_id"]
-            )
+            self.assertEqual(replay.json()["competition_id"], first.json()["competition_id"])
             # A reused key with a DIFFERENT body -> 409 idempotency_key_reused.
             other = _competition_body()
             other["name"] = "different"
-            conflict = client.post(
-                "/api/v1/competitions", headers=headers, json=other
-            )
+            conflict = client.post("/api/v1/competitions", headers=headers, json=other)
             self.assertEqual(conflict.status_code, 409)
-            self.assertEqual(
-                conflict.json()["error"]["code"], "idempotency_key_reused"
-            )
+            self.assertEqual(conflict.json()["error"]["code"], "idempotency_key_reused")
 
 
 @unittest.skipUnless(_ENABLED, _SKIP_REASON)
@@ -251,9 +235,7 @@ class TeamsAndChallengesApiIntegrationTests(unittest.TestCase):
 
     def test_team_create_get_list_scoped_to_competition(self) -> None:
         with _client() as client:
-            client.post(
-                "/api/v1/competitions", headers=_auth(), json=_competition_body()
-            )
+            client.post("/api/v1/competitions", headers=_auth(), json=_competition_body())
             r = client.post(
                 "/api/v1/teams",
                 headers=_auth(),
@@ -263,15 +245,11 @@ class TeamsAndChallengesApiIntegrationTests(unittest.TestCase):
             self.assertEqual(r.json()["schema"], "ctfgen.team")
             self.assertTrue(r.headers["ETag"])
 
-            r = client.get(
-                "/api/v1/teams/spring-ctf-2026/Red", headers=_auth()
-            )
+            r = client.get("/api/v1/teams/spring-ctf-2026/Red", headers=_auth())
             self.assertEqual(r.status_code, 200)
             self.assertEqual(r.json()["name"], "Red")
 
-            r = client.get(
-                "/api/v1/teams?competition_id=spring-ctf-2026", headers=_auth()
-            )
+            r = client.get("/api/v1/teams?competition_id=spring-ctf-2026", headers=_auth())
             self.assertEqual(r.status_code, 200)
             self.assertEqual([t["name"] for t in r.json()["data"]], ["Red"])
 
@@ -322,27 +300,21 @@ class TeamsAndChallengesApiIntegrationTests(unittest.TestCase):
             self.assertTrue(body["spec_sha256"])
 
             # PUBLISH -> 200, state published, publish timestamp set.
-            r = client.post(
-                "/api/v1/challenge-versions/sqli-1/1/publish", headers=_auth()
-            )
+            r = client.post("/api/v1/challenge-versions/sqli-1/1/publish", headers=_auth())
             self.assertEqual(r.status_code, 200, r.text)
             self.assertEqual(r.json()["state"], "published")
             self.assertTrue(r.json()["immutable"])
             self.assertIsNotNone(r.json()["published_at"])
 
             # Re-publish -> 400 (no longer a draft; ValueError -> invalid_request).
-            r = client.post(
-                "/api/v1/challenge-versions/sqli-1/1/publish", headers=_auth()
-            )
+            r = client.post("/api/v1/challenge-versions/sqli-1/1/publish", headers=_auth())
             self.assertEqual(r.status_code, 400, r.text)
 
             # GET single includes the spec; LIST does not.
             r = client.get("/api/v1/challenge-versions/sqli-1/1", headers=_auth())
             self.assertEqual(r.status_code, 200)
             self.assertIn("spec", r.json())
-            r = client.get(
-                "/api/v1/challenge-versions?definition_slug=sqli-1", headers=_auth()
-            )
+            r = client.get("/api/v1/challenge-versions?definition_slug=sqli-1", headers=_auth())
             self.assertEqual(r.status_code, 200)
             self.assertNotIn("spec", r.json()["data"][0])
 
@@ -377,9 +349,7 @@ class TeamsAndChallengesApiIntegrationTests(unittest.TestCase):
                     "spec": {"x": 1},
                 },
             )
-            r = client.post(
-                "/api/v1/challenge-versions/d1/1/publish", headers=_auth(_PLAYER)
-            )
+            r = client.post("/api/v1/challenge-versions/d1/1/publish", headers=_auth(_PLAYER))
             self.assertEqual(r.status_code, 403)
 
 

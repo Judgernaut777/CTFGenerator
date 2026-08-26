@@ -24,9 +24,9 @@ This module sits between them for a *live* competition:
 
 from __future__ import annotations
 
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field
 from datetime import datetime
-from typing import Mapping, Sequence
 
 from . import events
 from .models import ChallengeScoringConfig, CompetitionConfig, ScoreboardSnapshot
@@ -77,7 +77,7 @@ class ChallengeCatalog:
         return {challenge_id: meta.scoring for challenge_id, meta in self._entries.items()}
 
     @classmethod
-    def from_entries(cls, entries: Mapping[str, ChallengeMeta]) -> "ChallengeCatalog":
+    def from_entries(cls, entries: Mapping[str, ChallengeMeta]) -> ChallengeCatalog:
         return cls(dict(entries))
 
 

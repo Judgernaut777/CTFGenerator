@@ -51,9 +51,7 @@ class ParseBuildCompletionTests(unittest.TestCase):
         self.assertIsNone(parse_build_completion({}))
 
     def test_non_build_result_without_image_ref_is_none(self) -> None:
-        self.assertIsNone(
-            parse_build_completion({"solved": True, "steps": 4, "blended_score": 12})
-        )
+        self.assertIsNone(parse_build_completion({"solved": True, "steps": 4, "blended_score": 12}))
 
     def test_blank_or_missing_image_ref_is_treated_as_absent(self) -> None:
         self.assertIsNone(parse_build_completion({**_BUILD_RESULT, "image_ref": "   "}))
@@ -77,9 +75,7 @@ class ParseBuildCompletionTests(unittest.TestCase):
         self.assertFalse(completion.can_record_image)
 
     def test_blank_digest_and_bundle_are_treated_as_absent(self) -> None:
-        completion = parse_build_completion(
-            {**_BUILD_RESULT, "digest": "  ", "bundle_sha256": ""}
-        )
+        completion = parse_build_completion({**_BUILD_RESULT, "digest": "  ", "bundle_sha256": ""})
         assert completion is not None
         self.assertIsNone(completion.image_digest)
         self.assertIsNone(completion.bundle_sha256)
@@ -91,10 +87,10 @@ class ParseBuildCompletionTests(unittest.TestCase):
         # ignores the payload's slug/version entirely, so their type is irrelevant.
         weird = {
             "image_ref": "ctfgen-build/x:v1-deadbeefdeadbeef",
-            "definition_slug": 123,          # wrong type -- ignored
-            "version_no": "not-an-int",       # wrong type -- ignored
+            "definition_slug": 123,  # wrong type -- ignored
+            "version_no": "not-an-int",  # wrong type -- ignored
             "bundle_sha256": {"nested": "junk"},  # wrong type -> absent
-            "digest": ["list"],               # wrong type -> absent
+            "digest": ["list"],  # wrong type -> absent
         }
         completion = parse_build_completion(weird)  # must not raise
         assert completion is not None

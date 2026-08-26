@@ -88,9 +88,7 @@ class SqlAlchemyInstanceRepository:
         definition_slug, version_no = _resolve.version_business(
             self._session, row.challenge_version_id
         )
-        worker_name = _resolve.worker_name_optional(
-            self._session, row.assigned_worker_id
-        )
+        worker_name = _resolve.worker_name_optional(self._session, row.assigned_worker_id)
         return competition_slug, team_name, definition_slug, version_no, worker_name
 
     def _to_domain(self, row: InstanceRow) -> Instance:
@@ -123,21 +121,13 @@ class SqlAlchemyInstanceRepository:
     # -- root ----------------------------------------------------------------
 
     def add(self, instance: Instance, now: datetime) -> Instance:
-        competition_uuid = _resolve.competition_uuid(
-            self._session, instance.competition_id
-        )
-        team_uuid = _resolve.team_uuid(
-            self._session, competition_uuid, instance.team_name
-        )
+        competition_uuid = _resolve.competition_uuid(self._session, instance.competition_id)
+        team_uuid = _resolve.team_uuid(self._session, competition_uuid, instance.team_name)
         version_uuid = _resolve.version_uuid(
             self._session, instance.definition_slug, instance.version_no
         )
-        worker_uuid = _resolve.worker_uuid_optional(
-            self._session, instance.assigned_worker
-        )
-        row = instance_to_orm(
-            instance, competition_uuid, team_uuid, version_uuid, worker_uuid
-        )
+        worker_uuid = _resolve.worker_uuid_optional(self._session, instance.assigned_worker)
+        row = instance_to_orm(instance, competition_uuid, team_uuid, version_uuid, worker_uuid)
         self._session.add(row)
         self._session.flush()  # duplicate instance_id -> IntegrityError here
         # Creation event: from_state is None -> the initial state.
@@ -157,9 +147,7 @@ class SqlAlchemyInstanceRepository:
             key = _as_uuid(instance_id)
         except (ValueError, AttributeError, TypeError):
             return None
-        row = self._session.scalars(
-            select(InstanceRow).where(InstanceRow.id == key)
-        ).one_or_none()
+        row = self._session.scalars(select(InstanceRow).where(InstanceRow.id == key)).one_or_none()
         return self._to_domain(row) if row is not None else None
 
     def list_reconcilable(self, limit: int = 500) -> list[Instance]:
@@ -178,8 +166,7 @@ class SqlAlchemyInstanceRepository:
         reaches every row -- consistent with the catalog list endpoints. Read-only;
         the API never mutates through this path."""
         rows = self._session.scalars(
-            select(InstanceRow)
-            .order_by(InstanceRow.created_at.asc(), InstanceRow.id.asc())
+            select(InstanceRow).order_by(InstanceRow.created_at.asc(), InstanceRow.id.asc())
         ).all()
         return [self._to_domain(row) for row in rows]
 
@@ -218,15 +205,11 @@ class SqlAlchemyInstanceRepository:
         # The guard trigger fires on flush: an illegal move raises
         # ProgrammingError and rolls the whole unit of work back.
         self._session.flush()
-        self._append_event(
-            row, from_state, to_state, reason=reason, actor=actor, now=now
-        )
+        self._append_event(row, from_state, to_state, reason=reason, actor=actor, now=now)
         self._session.flush()
         return self._to_domain(row)
 
-    def set_desired_state(
-        self, instance_id: str, desired_state: str, now: datetime
-    ) -> Instance:
+    def set_desired_state(self, instance_id: str, desired_state: str, now: datetime) -> Instance:
         row = self._locked_row(instance_id)
         row.desired_state = desired_state
         row.updated_at = to_utc(now)
@@ -237,9 +220,7 @@ class SqlAlchemyInstanceRepository:
         self, instance_id: str, assigned_worker: str | None, now: datetime
     ) -> Instance:
         row = self._locked_row(instance_id)
-        row.assigned_worker_id = _resolve.worker_uuid_optional(
-            self._session, assigned_worker
-        )
+        row.assigned_worker_id = _resolve.worker_uuid_optional(self._session, assigned_worker)
         row.updated_at = to_utc(now)
         self._session.flush()
         return self._to_domain(row)
@@ -267,9 +248,7 @@ class SqlAlchemyInstanceRepository:
         cleared or generation advanced), so two concurrent passes produce at most
         one bump + one launch."""
         row = self._locked_row(instance_id)
-        current_worker = _resolve.worker_name_optional(
-            self._session, row.assigned_worker_id
-        )
+        current_worker = _resolve.worker_name_optional(self._session, row.assigned_worker_id)
         if current_worker != expected_worker or row.generation != expected_generation:
             return None
         row.assigned_worker_id = None
@@ -316,9 +295,7 @@ class SqlAlchemyInstanceRepository:
 
     # -- endpoints -----------------------------------------------------------
 
-    def _endpoint_row(
-        self, instance_id: str, name: str
-    ) -> InstanceEndpointRow | None:
+    def _endpoint_row(self, instance_id: str, name: str) -> InstanceEndpointRow | None:
         return self._session.scalars(
             select(InstanceEndpointRow).where(
                 InstanceEndpointRow.instance_id == _as_uuid(instance_id),
@@ -365,9 +342,7 @@ class SqlAlchemyInstanceRepository:
 
     def record_runtime_resource(self, resource: RuntimeResource) -> None:
         worker_uuid = _resolve.worker_uuid(self._session, resource.worker)
-        existing = self._resource_row(
-            resource.instance_id, resource.kind, resource.external_ref
-        )
+        existing = self._resource_row(resource.instance_id, resource.kind, resource.external_ref)
         if existing is None:
             self._session.add(runtime_resource_to_orm(resource, worker_uuid))
         else:
@@ -427,9 +402,7 @@ class SqlAlchemyInstanceRepository:
 
     # -- credentials ---------------------------------------------------------
 
-    def _credential_row(
-        self, instance_id: str, name: str
-    ) -> InstanceCredentialRow | None:
+    def _credential_row(self, instance_id: str, name: str) -> InstanceCredentialRow | None:
         return self._session.scalars(
             select(InstanceCredentialRow).where(
                 InstanceCredentialRow.instance_id == _as_uuid(instance_id),
@@ -489,8 +462,6 @@ class SqlAlchemyInstanceRepository:
         rows = self._session.scalars(
             select(InstanceEventRow)
             .where(InstanceEventRow.instance_id == key)
-            .order_by(
-                InstanceEventRow.occurred_at.asc(), InstanceEventRow.created_at.asc()
-            )
+            .order_by(InstanceEventRow.occurred_at.asc(), InstanceEventRow.created_at.asc())
         ).all()
         return [instance_event_from_orm(row) for row in rows]

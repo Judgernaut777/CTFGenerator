@@ -73,7 +73,9 @@ def _paged(instances, *, limit, cursor):
     page = paginate(instances, key=_list_sort_key, limit=limit, cursor=cursor)
     items = [instance_to_list_item(i) for i in page.items]
     return list_envelope(
-        INSTANCE_LIST_SCHEMA, items, limit=clamp_limit(limit),
+        INSTANCE_LIST_SCHEMA,
+        items,
+        limit=clamp_limit(limit),
         next_cursor=page.next_cursor,
     )
 
@@ -109,24 +111,16 @@ def _detail_or_404(service, principal, instance_id: str):
         Permission.INSTANCE_READ,
         not_found=f"instance not found: {instance_id!r}",
     )
-    envelope = resource_envelope(
-        INSTANCE_SCHEMA, instance_to_response(instance, endpoints, health)
-    )
+    envelope = resource_envelope(INSTANCE_SCHEMA, instance_to_response(instance, endpoints, health))
     etag = compute_etag(instance_concurrency_payload(instance))
     return respond(200, envelope, etag=etag)
 
 
 def _action_response(request, principal, instance, *, action, scope, body_json):
-    envelope = resource_envelope(
-        INSTANCE_SCHEMA, instance_to_response(instance, [], None)
-    )
+    envelope = resource_envelope(INSTANCE_SCHEMA, instance_to_response(instance, [], None))
     etag = compute_etag(instance_concurrency_payload(instance))
-    record_audit(
-        request, principal, action=f"instance.{action}", target=instance.instance_id
-    )
-    remember(
-        request, scope, body_json, status_code=200, envelope=envelope, etag=etag
-    )
+    record_audit(request, principal, action=f"instance.{action}", target=instance.instance_id)
+    remember(request, scope, body_json, status_code=200, envelope=envelope, etag=etag)
     return respond(200, envelope, etag=etag)
 
 
@@ -138,9 +132,7 @@ def _action_response(request, principal, instance, *, action, scope, body_json):
 def list_instances(
     limit: int | None = Query(default=None, ge=1),
     cursor: str | None = Query(default=None),
-    principal: Principal = Depends(
-        require_any_competition_permission(Permission.INSTANCE_READ)
-    ),
+    principal: Principal = Depends(require_any_competition_permission(Permission.INSTANCE_READ)),
     service=Depends(get_instance_lifecycle_service),
 ):
     # Cross-competition operator view. SAFE CHOICE: a system role (admin/support)
@@ -164,9 +156,7 @@ def list_competition_instances(
     competition_id: str,
     limit: int | None = Query(default=None, ge=1),
     cursor: str | None = Query(default=None),
-    principal: Principal = Depends(
-        require_competition_permission(Permission.INSTANCE_READ)
-    ),
+    principal: Principal = Depends(require_competition_permission(Permission.INSTANCE_READ)),
     service=Depends(get_instance_lifecycle_service),
 ):
     envelope = _paged(
@@ -209,9 +199,7 @@ def request_instance(
     principal: Principal = Depends(get_principal),
     service=Depends(get_instance_lifecycle_service),
 ):
-    assert_competition_permission(
-        principal, body.competition_id, Permission.INSTANCE_OPERATE
-    )
+    assert_competition_permission(principal, body.competition_id, Permission.INSTANCE_OPERATE)
     body_json = body.model_dump(mode="json")
     scope = f"{principal.subject}:instance:request"
     replayed = replay(request, scope, body_json)
@@ -220,9 +208,7 @@ def request_instance(
 
     key = request.headers.get("Idempotency-Key")
     instance_id = (
-        str(uuid.uuid5(_INSTANCE_NS, f"{principal.subject}:{key}"))
-        if key
-        else str(uuid.uuid4())
+        str(uuid.uuid5(_INSTANCE_NS, f"{principal.subject}:{key}")) if key else str(uuid.uuid4())
     )
     now = datetime.now(UTC)
     instance = service.request_instance(
@@ -237,16 +223,10 @@ def request_instance(
         now=now,
         worker_units=body.worker_units,
     )
-    envelope = resource_envelope(
-        INSTANCE_SCHEMA, instance_to_response(instance, [], None)
-    )
+    envelope = resource_envelope(INSTANCE_SCHEMA, instance_to_response(instance, [], None))
     etag = compute_etag(instance_concurrency_payload(instance))
-    record_audit(
-        request, principal, action="instance.request", target=instance.instance_id
-    )
-    remember(
-        request, scope, body_json, status_code=201, envelope=envelope, etag=etag
-    )
+    record_audit(request, principal, action="instance.request", target=instance.instance_id)
+    remember(request, scope, body_json, status_code=201, envelope=envelope, etag=etag)
     return respond(201, envelope, etag=etag)
 
 
@@ -270,9 +250,7 @@ def stop_instance(
     if replayed is not None:
         return replayed
     instance = service.request_stop(instance_id, datetime.now(UTC))
-    return _action_response(
-        request, principal, instance, action="stop", scope=scope, body_json={}
-    )
+    return _action_response(request, principal, instance, action="stop", scope=scope, body_json={})
 
 
 @router.post(
@@ -298,9 +276,7 @@ def reset_instance(
     if replayed is not None:
         return replayed
     now = datetime.now(UTC)
-    instance = service.request_reset(
-        instance_id, now + timedelta(seconds=params.ttl_seconds), now
-    )
+    instance = service.request_reset(instance_id, now + timedelta(seconds=params.ttl_seconds), now)
     return _action_response(
         request, principal, instance, action="reset", scope=scope, body_json=body_json
     )

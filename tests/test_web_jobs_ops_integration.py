@@ -70,9 +70,7 @@ def _drive_to_dead_letter(db, job: Job) -> None:
         with db.session_scope() as s:
             SqlAlchemyJobQueue(s).start(job.job_id, lease.lease_token, now)
         with db.session_scope() as s:
-            SqlAlchemyJobQueue(s).fail(
-                job.job_id, lease.lease_token, "transient", None, True, now
-            )
+            SqlAlchemyJobQueue(s).fail(job.job_id, lease.lease_token, "transient", None, True, now)
 
 
 def _status(db, jid: str) -> str | None:
@@ -172,9 +170,7 @@ class JobsOpsWebTests(unittest.TestCase):
         with ws.web_client() as (client, db, _svc):
             ws.login(client, ws.DAVE)
             queued = _enqueue(db, _job())
-            resp = client.post(
-                f"/app/ops/jobs/{queued.job_id}/cancel", follow_redirects=False
-            )
+            resp = client.post(f"/app/ops/jobs/{queued.job_id}/cancel", follow_redirects=False)
             self.assertEqual(resp.status_code, 403, resp.text)
             self.assertEqual(_status(db, queued.job_id), "queued")
 

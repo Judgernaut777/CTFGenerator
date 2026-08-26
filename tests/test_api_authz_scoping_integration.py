@@ -130,30 +130,26 @@ def _authenticator() -> StubAuthenticator:
     return StubAuthenticator(
         {
             _ADMIN: principal_for("admin-user", {"admin"}, system_roles={"admin"}),
-            _SUPPORT: principal_for(
-                "support-user", {"support"}, system_roles={"support"}
-            ),
+            _SUPPORT: principal_for("support-user", {"support"}, system_roles={"support"}),
             # An organizer of A has organizer authority ONLY in A (its flat role is
             # still 'organizer', but the scoped check consults its membership).
-            _ORG_A: principal_for(
-                "org-a", {"organizer"}, memberships={_A: ("organizer", None)}
-            ),
-            _ORG_B: principal_for(
-                "org-b", {"organizer"}, memberships={_B: ("organizer", None)}
-            ),
+            _ORG_A: principal_for("org-a", {"organizer"}, memberships={_A: ("organizer", None)}),
+            _ORG_B: principal_for("org-b", {"organizer"}, memberships={_B: ("organizer", None)}),
             # Player of team Red in A only, and Red in B only, respectively.
             _RED_A: principal_for(
-                "red-a", {"player"}, team="Red",
+                "red-a",
+                {"player"},
+                team="Red",
                 memberships={_A: ("player", "Red")},
             ),
             _RED_B: principal_for(
-                "red-b", {"player"}, team="Red",
+                "red-b",
+                {"player"},
+                team="Red",
                 memberships={_B: ("player", "Red")},
             ),
             # Observer in B only: valid B member, read-only, no write/privileged perms.
-            _OBS_B: principal_for(
-                "obs-b", {"observer"}, memberships={_B: ("observer", None)}
-            ),
+            _OBS_B: principal_for("obs-b", {"observer"}, memberships={_B: ("observer", None)}),
             # No roles, no memberships, no system roles: authorized nowhere.
             _NOBODY: principal_for("nobody", set()),
         }
@@ -193,15 +189,21 @@ def _competition_body(cid: str, name: str) -> dict:
 def _seed_competition(client: TestClient, db: Database, cid: str, name: str) -> None:
     """Competition + Red/Blue teams + the shared challenge attached (all by the
     system admin, which is authorized in every competition)."""
-    assert client.post(
-        "/api/v1/competitions", headers=_auth(_ADMIN), json=_competition_body(cid, name)
-    ).status_code == 201
+    assert (
+        client.post(
+            "/api/v1/competitions", headers=_auth(_ADMIN), json=_competition_body(cid, name)
+        ).status_code
+        == 201
+    )
     for team in ("Red", "Blue"):
-        assert client.post(
-            "/api/v1/teams",
-            headers=_auth(_ADMIN),
-            json={"competition_id": cid, "name": team},
-        ).status_code == 201
+        assert (
+            client.post(
+                "/api/v1/teams",
+                headers=_auth(_ADMIN),
+                json={"competition_id": cid, "name": team},
+            ).status_code
+            == 201
+        )
     with db.session_scope() as session:
         SqlAlchemyChallengePublicationRepository(session).add(
             ChallengePublication(competition_id=cid, definition_slug=_SLUG, version_no=1)
@@ -209,24 +211,33 @@ def _seed_competition(client: TestClient, db: Database, cid: str, name: str) -> 
 
 
 def _seed_challenge(client: TestClient) -> None:
-    assert client.post(
-        "/api/v1/challenge-definitions",
-        headers=_auth(_ADMIN),
-        json={"family": "web", "slug": _SLUG, "title": "SQLi One"},
-    ).status_code == 201
-    assert client.post(
-        "/api/v1/challenge-versions",
-        headers=_auth(_ADMIN),
-        json={
-            "definition_slug": _SLUG,
-            "seed": "seed-1",
-            "family_version": "1.0.0",
-            "spec": {"title": "SQLi One", "flag": _FLAG},
-        },
-    ).status_code == 201
-    assert client.post(
-        f"/api/v1/challenge-versions/{_SLUG}/1/publish", headers=_auth(_ADMIN)
-    ).status_code == 200
+    assert (
+        client.post(
+            "/api/v1/challenge-definitions",
+            headers=_auth(_ADMIN),
+            json={"family": "web", "slug": _SLUG, "title": "SQLi One"},
+        ).status_code
+        == 201
+    )
+    assert (
+        client.post(
+            "/api/v1/challenge-versions",
+            headers=_auth(_ADMIN),
+            json={
+                "definition_slug": _SLUG,
+                "seed": "seed-1",
+                "family_version": "1.0.0",
+                "spec": {"title": "SQLi One", "flag": _FLAG},
+            },
+        ).status_code
+        == 201
+    )
+    assert (
+        client.post(
+            f"/api/v1/challenge-versions/{_SLUG}/1/publish", headers=_auth(_ADMIN)
+        ).status_code
+        == 200
+    )
 
 
 def _seed_both(client: TestClient, db: Database) -> None:
@@ -272,8 +283,7 @@ class CrossCompetitionDenialTests(unittest.TestCase):
             sub = client.post(
                 f"/api/v1/competitions/{_B}/submissions",
                 headers=_auth(_ADMIN),
-                json={"team": "Red", "definition_slug": _SLUG, "version_no": 1,
-                      "answer": "nope"},
+                json={"team": "Red", "definition_slug": _SLUG, "version_no": 1, "answer": "nope"},
             )
             self.assertEqual(sub.status_code, 201, sub.text)
             sub_b_id = sub.json()["submission_id"]
@@ -281,18 +291,29 @@ class CrossCompetitionDenialTests(unittest.TestCase):
             # Each is the SAME operation the organizer performs happily in A, now
             # aimed at B where it holds no membership -> 403 forbidden.
             probes = [
-                ("patch", f"/api/v1/competitions/{_B}",
-                 {"If-Match": etag_b}, {"name": "hijacked"}),
+                ("patch", f"/api/v1/competitions/{_B}", {"If-Match": etag_b}, {"name": "hijacked"}),
                 ("post", "/api/v1/teams", {}, {"competition_id": _B, "name": "Green"}),
-                ("post", f"/api/v1/competitions/{_B}/publications", {},
-                 {"definition_slug": _SLUG, "version_no": 1}),
+                (
+                    "post",
+                    f"/api/v1/competitions/{_B}/publications",
+                    {},
+                    {"definition_slug": _SLUG, "version_no": 1},
+                ),
                 ("get", f"/api/v1/competitions/{_B}/scoreboard", {}, None),
                 ("get", f"/api/v1/competitions/{_B}/scoreboard/lag", {}, None),
                 ("get", f"/api/v1/competitions/{_B}/submissions", {}, None),
                 ("get", f"/api/v1/competitions/{_B}/instances", {}, None),
-                ("post", "/api/v1/instances", {},
-                 {"competition_id": _B, "team": "Red",
-                  "definition_slug": _SLUG, "version_no": 1}),
+                (
+                    "post",
+                    "/api/v1/instances",
+                    {},
+                    {
+                        "competition_id": _B,
+                        "team": "Red",
+                        "definition_slug": _SLUG,
+                        "version_no": 1,
+                    },
+                ),
             ]
             # These are PATH-competition routes: the {competition_id} is already in
             # the caller's own request, so a 403 leaks nothing new.
@@ -308,9 +329,7 @@ class CrossCompetitionDenialTests(unittest.TestCase):
             # from the loaded row): an unauthorized caller must not learn the row
             # exists or which competition owns it, so the denial is a GENERIC 404
             # (no-existence-leak contract), NOT a 403 that names the resource.
-            byid = client.get(
-                f"/api/v1/submissions/{sub_b_id}", headers=_auth(_ORG_A)
-            )
+            byid = client.get(f"/api/v1/submissions/{sub_b_id}", headers=_auth(_ORG_A))
             self.assertEqual(byid.status_code, 404, byid.text)
             self.assertEqual(byid.json()["error"]["code"], "not_found")
             self.assertNotIn(_B, byid.text)  # owning competition_id not disclosed
@@ -356,8 +375,12 @@ class CrossTeamAndCrossCompetitionContestantTests(unittest.TestCase):
                 client.post(
                     f"/api/v1/competitions/{_A}/submissions",
                     headers=_auth(_RED_A),
-                    json={"team": "Blue", "definition_slug": _SLUG,
-                          "version_no": 1, "answer": _FLAG},
+                    json={
+                        "team": "Blue",
+                        "definition_slug": _SLUG,
+                        "version_no": 1,
+                        "answer": _FLAG,
+                    },
                 ).status_code,
                 403,
             )
@@ -373,8 +396,12 @@ class CrossTeamAndCrossCompetitionContestantTests(unittest.TestCase):
                 client.post(
                     f"/api/v1/competitions/{_A}/submissions",
                     headers=_auth(_RED_A),
-                    json={"team": "Red", "definition_slug": _SLUG,
-                          "version_no": 1, "answer": _FLAG},
+                    json={
+                        "team": "Red",
+                        "definition_slug": _SLUG,
+                        "version_no": 1,
+                        "answer": _FLAG,
+                    },
                 ).status_code,
                 201,
             )
@@ -385,8 +412,12 @@ class CrossTeamAndCrossCompetitionContestantTests(unittest.TestCase):
                 client.post(
                     f"/api/v1/competitions/{_B}/submissions",
                     headers=_auth(_RED_A),
-                    json={"team": "Red", "definition_slug": _SLUG,
-                          "version_no": 1, "answer": _FLAG},
+                    json={
+                        "team": "Red",
+                        "definition_slug": _SLUG,
+                        "version_no": 1,
+                        "answer": _FLAG,
+                    },
                 ).status_code,
                 403,
             )
@@ -407,8 +438,7 @@ class CrossTeamAndCrossCompetitionContestantTests(unittest.TestCase):
             made = client.post(
                 f"/api/v1/competitions/{_B}/submissions",
                 headers=_auth(_RED_B),
-                json={"team": "Red", "definition_slug": _SLUG,
-                      "version_no": 1, "answer": "nope"},
+                json={"team": "Red", "definition_slug": _SLUG, "version_no": 1, "answer": "nope"},
             )
             self.assertEqual(made.status_code, 201, made.text)
             b_id = made.json()["submission_id"]
@@ -462,9 +492,7 @@ class InstanceByIdScopingTests(unittest.TestCase):
             # cross-tenant denial is a GENERIC 404 -- identical to a nonexistent id --
             # NOT a 403 that names the instance/competition (no existence oracle).
             for verb in ("stop", "reset", "delete"):
-                r = client.post(
-                    f"/api/v1/instances/{iid_b}/{verb}", headers=_auth(_ORG_A)
-                )
+                r = client.post(f"/api/v1/instances/{iid_b}/{verb}", headers=_auth(_ORG_A))
                 self.assertEqual(r.status_code, 404, f"{verb}: {r.text}")
                 self.assertEqual(r.json()["error"]["code"], "not_found")
                 self.assertNotIn(_B, r.text)  # owning competition_id not disclosed
@@ -476,9 +504,7 @@ class InstanceByIdScopingTests(unittest.TestCase):
             self.assertNotIn(_B, got.text)
             # The organizer of B (rightful owner) CAN stop it.
             self.assertEqual(
-                client.post(
-                    f"/api/v1/instances/{iid_b}/stop", headers=_auth(_ORG_B)
-                ).status_code,
+                client.post(f"/api/v1/instances/{iid_b}/stop", headers=_auth(_ORG_B)).status_code,
                 200,
             )
 
@@ -539,9 +565,7 @@ class CompetitionListScopingTests(unittest.TestCase):
         with _client_and_db() as (client, db):
             _seed_both(client, db)
             self.assertEqual(
-                client.get(
-                    "/api/v1/competitions", headers=_auth(_NOBODY)
-                ).status_code,
+                client.get("/api/v1/competitions", headers=_auth(_NOBODY)).status_code,
                 403,
             )
 
@@ -578,37 +602,57 @@ class PerPermissionScopingTests(unittest.TestCase):
             etag_b = _competition_etag(client, _B)
             # (permission-under-test, method, path, extra headers, body)
             probes = [
-                ("competition:write", "patch", f"/api/v1/competitions/{_B}",
-                 {"If-Match": etag_b}, {"name": "hijacked"}),
-                ("team:write", "post", "/api/v1/teams", {},
-                 {"competition_id": _B, "name": "Green"}),
-                ("publication:write", "post",
-                 f"/api/v1/competitions/{_B}/publications", {},
-                 {"definition_slug": _SLUG, "version_no": 1}),
-                ("publication:read", "get",
-                 f"/api/v1/competitions/{_B}/publications", {}, None),
-                ("submission:read", "get",
-                 f"/api/v1/competitions/{_B}/submissions", {}, None),
-                ("submission:create", "post",
-                 f"/api/v1/competitions/{_B}/submissions", {},
-                 {"team": "Red", "definition_slug": _SLUG, "version_no": 1,
-                  "answer": "nope"}),
-                ("scoreboard:lag", "get",
-                 f"/api/v1/competitions/{_B}/scoreboard/lag", {}, None),
-                ("instance:read", "get",
-                 f"/api/v1/competitions/{_B}/instances", {}, None),
-                ("instance:operate", "post", "/api/v1/instances", {},
-                 {"competition_id": _B, "team": "Red",
-                  "definition_slug": _SLUG, "version_no": 1}),
+                (
+                    "competition:write",
+                    "patch",
+                    f"/api/v1/competitions/{_B}",
+                    {"If-Match": etag_b},
+                    {"name": "hijacked"},
+                ),
+                (
+                    "team:write",
+                    "post",
+                    "/api/v1/teams",
+                    {},
+                    {"competition_id": _B, "name": "Green"},
+                ),
+                (
+                    "publication:write",
+                    "post",
+                    f"/api/v1/competitions/{_B}/publications",
+                    {},
+                    {"definition_slug": _SLUG, "version_no": 1},
+                ),
+                ("publication:read", "get", f"/api/v1/competitions/{_B}/publications", {}, None),
+                ("submission:read", "get", f"/api/v1/competitions/{_B}/submissions", {}, None),
+                (
+                    "submission:create",
+                    "post",
+                    f"/api/v1/competitions/{_B}/submissions",
+                    {},
+                    {"team": "Red", "definition_slug": _SLUG, "version_no": 1, "answer": "nope"},
+                ),
+                ("scoreboard:lag", "get", f"/api/v1/competitions/{_B}/scoreboard/lag", {}, None),
+                ("instance:read", "get", f"/api/v1/competitions/{_B}/instances", {}, None),
+                (
+                    "instance:operate",
+                    "post",
+                    "/api/v1/instances",
+                    {},
+                    {
+                        "competition_id": _B,
+                        "team": "Red",
+                        "definition_slug": _SLUG,
+                        "version_no": 1,
+                    },
+                ),
             ]
             for perm, method, path, extra, body in probes:
                 kwargs = {"headers": {**_auth(_OBS_B), **extra}}
                 if body is not None:
                     kwargs["json"] = body
                 r = getattr(client, method)(path, **kwargs)
-                self.assertEqual(
-                    r.status_code, 403, f"{perm} via {method} {path}: {r.text}"
-                )
+                self.assertEqual(r.status_code, 403, f"{perm} via {method} {path}: {r.text}")
                 self.assertEqual(r.json()["error"]["code"], "forbidden")
 
     def test_no_membership_denied_on_previously_uncovered_scoped_routes(self) -> None:
@@ -656,18 +700,14 @@ class DeniedAttemptAuditTests(unittest.TestCase):
             )
             self.assertEqual(r.status_code, 403, r.text)
 
-            denials = [
-                e for e in sink.events[before:] if e.get("outcome") == "denied"
-            ]
+            denials = [e for e in sink.events[before:] if e.get("outcome") == "denied"]
             self.assertEqual(len(denials), 1, sink.events[before:])
             event = denials[0]
             # Right actor (resolved principal subject) + target (the request PATH).
             self.assertEqual(event["actor"], "org-a")
             self.assertEqual(event["action"], "PATCH")
             self.assertEqual(event["target"], f"/api/v1/competitions/{_B}")
-            self.assertEqual(
-                set(event), {"actor", "action", "target", "outcome", "request_id"}
-            )
+            self.assertEqual(set(event), {"actor", "action", "target", "outcome", "request_id"})
             # No secret: neither the bearer token nor the request body is recorded.
             blob = repr(event)
             self.assertNotIn(secret_marker, blob)

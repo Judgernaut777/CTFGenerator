@@ -104,7 +104,8 @@ class CapacitySmokeTests(unittest.TestCase):
         # Generous smoke bound (NOT the 500 ms REQ-NFR-005 SLO): catches a hung
         # or seconds-per-request pipeline; passes on a loaded host.
         self.assertLess(
-            p95, _SMOKE_SUBMIT_P95_MS,
+            p95,
+            _SMOKE_SUBMIT_P95_MS,
             f"submission p95={p95:.1f}ms exceeded smoke bound "
             f"{_SMOKE_SUBMIT_P95_MS}ms (NOT the 500ms SLO)",
         )
@@ -118,7 +119,8 @@ class CapacitySmokeTests(unittest.TestCase):
         # This smoke bound IS the REQ-NFR-004 target (< 3 s); at this scale the
         # read comfortably meets it, giving a genuine (if small) data point.
         self.assertLess(
-            p95, _SMOKE_SCOREBOARD_P95_MS,
+            p95,
+            _SMOKE_SCOREBOARD_P95_MS,
             f"scoreboard p95={p95:.1f}ms exceeded {_SMOKE_SCOREBOARD_P95_MS}ms",
         )
 

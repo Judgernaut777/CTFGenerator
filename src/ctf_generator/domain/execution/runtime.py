@@ -38,9 +38,7 @@ VALID_NETWORK_MODES = frozenset({"none", "isolated", "egress"})
 
 # Container runtimes the execution plane supports (rootless only; mirrors
 # ``domain.execution.models.VALID_RUNTIME_TYPES``).
-VALID_RUNTIME_TYPES = frozenset(
-    {"docker-rootless", "podman-rootless", "buildkit-rootless"}
-)
+VALID_RUNTIME_TYPES = frozenset({"docker-rootless", "podman-rootless", "buildkit-rootless"})
 
 # Phases a worker can report for an observed container.
 VALID_OBSERVED_PHASES = frozenset(
@@ -112,13 +110,10 @@ class ContainerPolicy:
         # ``{'runtime-default'}`` plus explicitly-registered names -- which slice
         # 2 may tighten to; the floor below is the minimum this VO enforces.)
         if self.seccomp_profile.strip().lower() == "unconfined":
-            raise ValueError(
-                "seccomp_profile 'unconfined' is forbidden by policy"
-            )
+            raise ValueError("seccomp_profile 'unconfined' is forbidden by policy")
         if self.apparmor_profile.strip().lower() in ("unconfined", "disable"):
             raise ValueError(
-                "apparmor_profile must not disable confinement "
-                f"(got {self.apparmor_profile!r})"
+                f"apparmor_profile must not disable confinement (got {self.apparmor_profile!r})"
             )
         # The security floor: none of these may be relaxed through this VO.
         if self.privileged:
@@ -138,9 +133,7 @@ class ContainerPolicy:
             "host_uts_namespace",
         ):
             if getattr(self, ns_flag) is not False:
-                raise ValueError(
-                    f"{ns_flag} is forbidden by policy (no host-namespace sharing)"
-                )
+                raise ValueError(f"{ns_flag} is forbidden by policy (no host-namespace sharing)")
 
 
 @dataclass(frozen=True)
@@ -354,8 +347,7 @@ class RuntimeObservation:
             _require_nonempty(self.container_id, "container_id")
         if self.phase not in VALID_OBSERVED_PHASES:
             raise ValueError(
-                f"phase must be one of {sorted(VALID_OBSERVED_PHASES)}, "
-                f"got {self.phase!r}"
+                f"phase must be one of {sorted(VALID_OBSERVED_PHASES)}, got {self.phase!r}"
             )
 
 
@@ -434,9 +426,7 @@ class RuntimeBackend(Protocol):
         Keeps runtime-query verbs inside the adapter."""
         ...
 
-    def find_stack_containers(
-        self, instance_id: str
-    ) -> tuple[tuple[str, str], ...]:
+    def find_stack_containers(self, instance_id: str) -> tuple[tuple[str, str], ...]:
         """Every one of THIS worker's containers for ``instance_id`` as
         ``(container_id, service_name)`` pairs (scoped to the worker). ``service_name``
         is the stack-service label, or ``""`` for a single-image instance's

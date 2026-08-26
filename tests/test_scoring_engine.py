@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import unittest
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 
 from ctf_generator.events import Event
 from ctf_generator.models import (
@@ -38,8 +38,8 @@ def _competition(**overrides: object) -> CompetitionConfig:
     defaults: dict[str, object] = dict(
         competition_id="comp-1",
         name="Test Comp",
-        start_time=datetime(2026, 1, 1, tzinfo=timezone.utc),
-        end_time=datetime(2026, 1, 2, tzinfo=timezone.utc),
+        start_time=datetime(2026, 1, 1, tzinfo=UTC),
+        end_time=datetime(2026, 1, 2, tzinfo=UTC),
     )
     defaults.update(overrides)
     return CompetitionConfig(**defaults)  # type: ignore[arg-type]
@@ -86,9 +86,7 @@ class DynamicDecayEngineTests(unittest.TestCase):
 
         for decay_function in ("linear", "logarithmic"):
             challenge = _challenge(decay_function=decay_function, decay=0)
-            self.assertEqual(
-                engine.challenge_value(challenge, 50, competition, now), 500.0
-            )
+            self.assertEqual(engine.challenge_value(challenge, 50, competition, now), 500.0)
 
     def test_linear_decay_at_zero_solves_is_initial_value(self) -> None:
         engine = DynamicDecayEngine()
@@ -142,9 +140,7 @@ class DynamicDecayEngineTests(unittest.TestCase):
         now = competition.start_time
 
         # ((100 - 500) / 10**2) * 10**2 + 500 == -400 + 500 == 100
-        self.assertAlmostEqual(
-            engine.challenge_value(challenge, 10, competition, now), 100.0
-        )
+        self.assertAlmostEqual(engine.challenge_value(challenge, 10, competition, now), 100.0)
 
     def test_logarithmic_decay_floors_at_minimum_for_many_solves(self) -> None:
         engine = DynamicDecayEngine()
@@ -154,9 +150,7 @@ class DynamicDecayEngineTests(unittest.TestCase):
         competition = _competition()
         now = competition.start_time
 
-        self.assertEqual(
-            engine.challenge_value(challenge, 100_000, competition, now), 100.0
-        )
+        self.assertEqual(engine.challenge_value(challenge, 100_000, competition, now), 100.0)
 
     def test_unrecognized_decay_function_behaves_like_static(self) -> None:
         engine = DynamicDecayEngine()
@@ -222,7 +216,7 @@ class TimeDecayEngineTests(unittest.TestCase):
     def test_uses_scoring_start_time_when_set(self) -> None:
         engine = TimeDecayEngine()
         challenge = _challenge(initial_value=500, minimum_value=100)
-        scoring_start = datetime(2026, 1, 1, 12, tzinfo=timezone.utc)
+        scoring_start = datetime(2026, 1, 1, 12, tzinfo=UTC)
         competition = _competition(scoring_start_time=scoring_start)
 
         # Before scoring_start_time (but after start_time): still initial.
@@ -234,7 +228,7 @@ class TimeDecayEngineTests(unittest.TestCase):
     def test_freeze_time_caps_effective_clock(self) -> None:
         engine = TimeDecayEngine()
         challenge = _challenge(initial_value=500, minimum_value=100)
-        freeze = datetime(2026, 1, 1, 12, tzinfo=timezone.utc)  # exact midpoint
+        freeze = datetime(2026, 1, 1, 12, tzinfo=UTC)  # exact midpoint
         competition = _competition(freeze_time=freeze)
 
         at_freeze = engine.challenge_value(challenge, 0, competition, freeze)
@@ -246,7 +240,7 @@ class TimeDecayEngineTests(unittest.TestCase):
 
     def test_degenerate_zero_length_window_returns_initial_value(self) -> None:
         engine = TimeDecayEngine()
-        same = datetime(2026, 1, 1, tzinfo=timezone.utc)
+        same = datetime(2026, 1, 1, tzinfo=UTC)
         challenge = _challenge(initial_value=500, minimum_value=100)
         competition = _competition(start_time=same, end_time=same)
 
@@ -352,14 +346,10 @@ class RegistryTests(unittest.TestCase):
             register_scoring_engine(ReplacementEngine())
             replaced = get_scoring_engine("custom_test_engine")
             self.assertEqual(
-                replaced.challenge_value(
-                    challenge, 0, competition, competition.start_time
-                ),
+                replaced.challenge_value(challenge, 0, competition, competition.start_time),
                 99.0,
             )
-            self.assertEqual(
-                list_scoring_engines().count("custom_test_engine"), 1
-            )
+            self.assertEqual(list_scoring_engines().count("custom_test_engine"), 1)
         finally:
             from ctf_generator import scoring_engine as scoring_engine_module
 
@@ -373,64 +363,50 @@ class ValidateCompetitionConfigTests(unittest.TestCase):
 
     def test_end_before_start_is_an_error(self) -> None:
         competition = _competition(
-            start_time=datetime(2026, 1, 2, tzinfo=timezone.utc),
-            end_time=datetime(2026, 1, 1, tzinfo=timezone.utc),
+            start_time=datetime(2026, 1, 2, tzinfo=UTC),
+            end_time=datetime(2026, 1, 1, tzinfo=UTC),
         )
         errors = validate_competition_config(competition)
         self.assertTrue(any("end_time" in e for e in errors))
 
     def test_end_equals_start_is_an_error(self) -> None:
-        same = datetime(2026, 1, 1, tzinfo=timezone.utc)
+        same = datetime(2026, 1, 1, tzinfo=UTC)
         competition = _competition(start_time=same, end_time=same)
         errors = validate_competition_config(competition)
         self.assertTrue(any("end_time" in e for e in errors))
 
     def test_scoring_start_time_outside_window_is_an_error(self) -> None:
-        competition = _competition(
-            scoring_start_time=datetime(2025, 12, 31, tzinfo=timezone.utc)
-        )
+        competition = _competition(scoring_start_time=datetime(2025, 12, 31, tzinfo=UTC))
         errors = validate_competition_config(competition)
         self.assertTrue(any("scoring_start_time" in e for e in errors))
 
     def test_scoring_start_time_after_end_is_an_error(self) -> None:
-        competition = _competition(
-            scoring_start_time=datetime(2026, 1, 3, tzinfo=timezone.utc)
-        )
+        competition = _competition(scoring_start_time=datetime(2026, 1, 3, tzinfo=UTC))
         errors = validate_competition_config(competition)
         self.assertTrue(any("scoring_start_time" in e for e in errors))
 
     def test_scoring_start_time_within_window_is_fine(self) -> None:
-        competition = _competition(
-            scoring_start_time=datetime(2026, 1, 1, 6, tzinfo=timezone.utc)
-        )
+        competition = _competition(scoring_start_time=datetime(2026, 1, 1, 6, tzinfo=UTC))
         self.assertEqual(validate_competition_config(competition), [])
 
     def test_freeze_time_outside_window_is_an_error(self) -> None:
-        competition = _competition(
-            freeze_time=datetime(2025, 12, 31, tzinfo=timezone.utc)
-        )
+        competition = _competition(freeze_time=datetime(2025, 12, 31, tzinfo=UTC))
         errors = validate_competition_config(competition)
         self.assertTrue(any("freeze_time" in e for e in errors))
 
     def test_default_scoring_minimum_exceeds_initial_is_an_error(self) -> None:
-        competition = _competition(
-            default_scoring=_challenge(initial_value=100, minimum_value=500)
-        )
+        competition = _competition(default_scoring=_challenge(initial_value=100, minimum_value=500))
         errors = validate_competition_config(competition)
         self.assertTrue(any("minimum_value" in e for e in errors))
 
     def test_default_scoring_negative_values_are_errors(self) -> None:
-        competition = _competition(
-            default_scoring=_challenge(initial_value=-1, minimum_value=-1)
-        )
+        competition = _competition(default_scoring=_challenge(initial_value=-1, minimum_value=-1))
         errors = validate_competition_config(competition)
         self.assertTrue(any("initial_value must not be negative" in e for e in errors))
         self.assertTrue(any("minimum_value must not be negative" in e for e in errors))
 
     def test_default_scoring_bad_decay_function_is_an_error(self) -> None:
-        competition = _competition(
-            default_scoring=_challenge(decay_function="exponential")
-        )
+        competition = _competition(default_scoring=_challenge(decay_function="exponential"))
         errors = validate_competition_config(competition)
         self.assertTrue(any("decay_function" in e for e in errors))
 
@@ -440,17 +416,13 @@ class ValidateCompetitionConfigTests(unittest.TestCase):
         self.assertTrue(any("decay must not be negative" in e for e in errors))
 
     def test_default_scoring_negative_bonus_points_is_an_error(self) -> None:
-        challenge = _challenge(
-            first_blood_bonus=FirstBloodBonusConfig(bonus_points=-10)
-        )
+        challenge = _challenge(first_blood_bonus=FirstBloodBonusConfig(bonus_points=-10))
         competition = _competition(default_scoring=challenge)
         errors = validate_competition_config(competition)
         self.assertTrue(any("bonus_points" in e for e in errors))
 
     def test_default_scoring_bonus_percent_out_of_range_is_an_error(self) -> None:
-        challenge = _challenge(
-            first_blood_bonus=FirstBloodBonusConfig(bonus_percent=150.0)
-        )
+        challenge = _challenge(first_blood_bonus=FirstBloodBonusConfig(bonus_percent=150.0))
         competition = _competition(default_scoring=challenge)
         errors = validate_competition_config(competition)
         self.assertTrue(any("bonus_percent" in e for e in errors))

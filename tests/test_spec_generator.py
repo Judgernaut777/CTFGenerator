@@ -160,7 +160,9 @@ class DefaultSpecForFamilyTests(unittest.TestCase):
     def test_falls_back_to_default_spec_when_no_builder(self) -> None:
         # web_business_logic_tenant_export has no default_spec_builder set.
         spec = default_spec_for_family(seed="s", title="T", difficulty="medium", family=FAMILY)
-        self.assertEqual(spec, default_spec(seed="s", title="T", difficulty="medium", family=FAMILY))
+        self.assertEqual(
+            spec, default_spec(seed="s", title="T", difficulty="medium", family=FAMILY)
+        )
 
     def test_uses_registered_builder_when_present(self) -> None:
         sentinel = ChallengeSpec(
@@ -195,14 +197,14 @@ class DefaultSpecForFamilyTests(unittest.TestCase):
             )
         )
         try:
-            spec = default_spec_for_family(
-                seed="s", title="T", difficulty="medium", family=FAMILY
-            )
+            spec = default_spec_for_family(seed="s", title="T", difficulty="medium", family=FAMILY)
         finally:
             families.register(original)
 
         self.assertIs(spec, sentinel)
-        self.assertEqual(captured, {"seed": "s", "title": "T", "difficulty": "medium", "family": FAMILY})
+        self.assertEqual(
+            captured, {"seed": "s", "title": "T", "difficulty": "medium", "family": FAMILY}
+        )
 
 
 class NewSpecFieldsRoundTripTests(unittest.TestCase):
@@ -242,9 +244,7 @@ class NewSpecFieldsRoundTripTests(unittest.TestCase):
                 enabled=True,
                 triggers=[TriggerSpec(trigger_id="t1", description="d", condition="c")],
                 responses=[
-                    ResponseSpec(
-                        response_id="r1", description="d", action="a", payload={"k": "v"}
-                    )
+                    ResponseSpec(response_id="r1", description="d", action="a", payload={"k": "v"})
                 ],
             ),
         )
@@ -350,9 +350,7 @@ class SpecCliTests(unittest.TestCase):
             spec_path = Path(temp_dir) / "spec.json"
             challenge = Path(temp_dir) / "chal"
 
-            self.assertEqual(
-                main(["spec", "-o", str(spec_path), "--seed", "cli-seed"]), 0
-            )
+            self.assertEqual(main(["spec", "-o", str(spec_path), "--seed", "cli-seed"]), 0)
             self.assertTrue(spec_path.exists())
 
             self.assertEqual(
@@ -381,7 +379,9 @@ class SpecCliTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as temp_dir:
             spec_path = Path(temp_dir) / "bad.json"
             spec_path.write_text(json.dumps({"title": "", "family": "bogus"}), encoding="utf-8")
-            code = main(["create", "-o", str(Path(temp_dir) / "chal"), "--from-spec", str(spec_path)])
+            code = main(
+                ["create", "-o", str(Path(temp_dir) / "chal"), "--from-spec", str(spec_path)]
+            )
             self.assertEqual(code, 1)
 
 

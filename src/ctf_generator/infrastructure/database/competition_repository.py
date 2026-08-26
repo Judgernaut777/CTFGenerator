@@ -55,18 +55,13 @@ class SqlAlchemyCompetitionRepository:
         the first commits, then observes the new state (so a stale ``If-Match``
         reliably yields 412 rather than a lost update)."""
         row = self._session.scalars(
-            select(Competition)
-            .where(Competition.slug == competition_id)
-            .with_for_update()
+            select(Competition).where(Competition.slug == competition_id).with_for_update()
         ).one_or_none()
         return competition_from_orm(row) if row is not None else None
 
     def list(self) -> list[CompetitionConfig]:
         """Return every competition as a domain object."""
-        return [
-            competition_from_orm(row)
-            for row in self._session.scalars(select(Competition))
-        ]
+        return [competition_from_orm(row) for row in self._session.scalars(select(Competition))]
 
     def update(self, competition: CompetitionConfig) -> None:
         """Update the mutable fields of an existing competition, keyed by
@@ -75,8 +70,6 @@ class SqlAlchemyCompetitionRepository:
             select(Competition).where(Competition.slug == competition.competition_id)
         ).one_or_none()
         if row is None:
-            raise LookupError(
-                f"competition not found: {competition.competition_id!r}"
-            )
+            raise LookupError(f"competition not found: {competition.competition_id!r}")
         competition_to_orm(competition, existing=row)
         self._session.flush()

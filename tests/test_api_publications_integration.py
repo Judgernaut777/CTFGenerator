@@ -80,7 +80,9 @@ def _authenticator() -> StubAuthenticator:
                 "org-user", {"organizer"}, memberships={_CID: ("organizer", None)}
             ),
             _PLAYER: principal_for(
-                "player-user", {"player"}, team="Red",
+                "player-user",
+                {"player"},
+                team="Red",
                 memberships={_CID: ("player", "Red")},
             ),
         }
@@ -93,9 +95,7 @@ def _client_and_db():
         command.upgrade(_alembic_config(url), "head")
         db = Database(DatabaseConfig(url=url))
         try:
-            app = create_app(
-                ApiSettings(), database=db, authenticator=_authenticator()
-            )
+            app = create_app(ApiSettings(), database=db, authenticator=_authenticator())
             yield TestClient(app), db
         finally:
             db.dispose()
@@ -106,34 +106,44 @@ def _auth(token: str = _ADMIN) -> dict[str, str]:
 
 
 def _seed(client: TestClient) -> None:
-    assert client.post(
-        "/api/v1/competitions",
-        headers=_auth(),
-        json={
-            "competition_id": _CID,
-            "name": "Spring CTF",
-            "start_time": "2026-06-01T09:00:00Z",
-            "end_time": "2026-06-03T09:00:00Z",
-        },
-    ).status_code == 201
-    assert client.post(
-        "/api/v1/challenge-definitions",
-        headers=_auth(),
-        json={"family": "web", "slug": _SLUG, "title": "SQLi"},
-    ).status_code == 201
-    assert client.post(
-        "/api/v1/challenge-versions",
-        headers=_auth(),
-        json={
-            "definition_slug": _SLUG,
-            "seed": "s",
-            "family_version": "1.0.0",
-            "spec": {"title": "SQLi"},
-        },
-    ).status_code == 201
-    assert client.post(
-        f"/api/v1/challenge-versions/{_SLUG}/1/publish", headers=_auth()
-    ).status_code == 200
+    assert (
+        client.post(
+            "/api/v1/competitions",
+            headers=_auth(),
+            json={
+                "competition_id": _CID,
+                "name": "Spring CTF",
+                "start_time": "2026-06-01T09:00:00Z",
+                "end_time": "2026-06-03T09:00:00Z",
+            },
+        ).status_code
+        == 201
+    )
+    assert (
+        client.post(
+            "/api/v1/challenge-definitions",
+            headers=_auth(),
+            json={"family": "web", "slug": _SLUG, "title": "SQLi"},
+        ).status_code
+        == 201
+    )
+    assert (
+        client.post(
+            "/api/v1/challenge-versions",
+            headers=_auth(),
+            json={
+                "definition_slug": _SLUG,
+                "seed": "s",
+                "family_version": "1.0.0",
+                "spec": {"title": "SQLi"},
+            },
+        ).status_code
+        == 201
+    )
+    assert (
+        client.post(f"/api/v1/challenge-versions/{_SLUG}/1/publish", headers=_auth()).status_code
+        == 200
+    )
 
 
 @unittest.skipUnless(_ENABLED, _SKIP_REASON)
@@ -150,13 +160,9 @@ class PublicationsApiIntegrationTests(unittest.TestCase):
             self.assertEqual(attach.json()["schema"], "ctfgen.publication")
             self.assertEqual(attach.json()["initial_value"], 400)
 
-            lst = client.get(
-                f"/api/v1/competitions/{_CID}/publications", headers=_auth(_ORGANIZER)
-            )
+            lst = client.get(f"/api/v1/competitions/{_CID}/publications", headers=_auth(_ORGANIZER))
             self.assertEqual(lst.status_code, 200, lst.text)
-            self.assertEqual(
-                [p["definition_slug"] for p in lst.json()["data"]], [_SLUG]
-            )
+            self.assertEqual([p["definition_slug"] for p in lst.json()["data"]], [_SLUG])
 
             detach = client.delete(
                 f"/api/v1/competitions/{_CID}/publications/{_SLUG}/1",
@@ -174,12 +180,14 @@ class PublicationsApiIntegrationTests(unittest.TestCase):
             body = {"definition_slug": _SLUG, "version_no": 1}
             first = client.post(
                 f"/api/v1/competitions/{_CID}/publications",
-                headers=_auth(_ORGANIZER), json=body,
+                headers=_auth(_ORGANIZER),
+                json=body,
             )
             self.assertEqual(first.status_code, 201, first.text)
             dup = client.post(
                 f"/api/v1/competitions/{_CID}/publications",
-                headers=_auth(_ORGANIZER), json=body,
+                headers=_auth(_ORGANIZER),
+                json=body,
             )
             self.assertEqual(dup.status_code, 409, dup.text)
             self.assertEqual(dup.json()["error"]["code"], "conflict")
@@ -213,9 +221,7 @@ class PublicationsApiIntegrationTests(unittest.TestCase):
                 json={"definition_slug": _SLUG, "version_no": 1},
             )
             self.assertEqual(attach.status_code, 403, attach.text)
-            lst = client.get(
-                f"/api/v1/competitions/{_CID}/publications", headers=_auth(_PLAYER)
-            )
+            lst = client.get(f"/api/v1/competitions/{_CID}/publications", headers=_auth(_PLAYER))
             self.assertEqual(lst.status_code, 403, lst.text)
             detach = client.delete(
                 f"/api/v1/competitions/{_CID}/publications/{_SLUG}/1",

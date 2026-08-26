@@ -83,9 +83,7 @@ def assert_family_ok(family: sdk.Family, *, sample_seed: str = _PROBE_SEED) -> N
     sdk.assert_family_ok(family, sample_seed=sample_seed)
 
 
-def _probe_spec(
-    family: sdk.Family, seed: str, title: str, difficulty: str
-):
+def _probe_spec(family: sdk.Family, seed: str, title: str, difficulty: str):
     """The spec the real generator renders for this family/seed, built DIRECTLY
     from the family's declared metadata (scenario, category, objectives) -- the
     same construction ``sdk.lint._sample_spec`` uses.
@@ -156,9 +154,7 @@ def assert_deterministic(
     return first
 
 
-def assert_no_private_leak(
-    family: sdk.Family, *, seed: str = _PROBE_SEED
-) -> None:
+def assert_no_private_leak(family: sdk.Family, *, seed: str = _PROBE_SEED) -> None:
     """Assert no private content leaks into ``public/``.
 
     Runs the real linter (:func:`sdk.lint_family`) and raises
@@ -270,11 +266,7 @@ def assert_rebuild_is_byte_identical(
         h1 = _tree_hashes(p1)
         h2 = _tree_hashes(p2)
     if h1 != h2:
-        divergent = sorted(
-            path
-            for path in set(h1) | set(h2)
-            if h1.get(path) != h2.get(path)
-        )
+        divergent = sorted(path for path in set(h1) | set(h2) if h1.get(path) != h2.get(path))
         raise RebuildMismatchError(
             f"family {family.name!r} did not rebuild byte-identically for seed "
             f"{seed!r}: divergent files {divergent}"

@@ -44,9 +44,7 @@ def issue_csrf_token(session_token: str, secret: bytes) -> str:
     Deterministic for a given (session, secret), so the value rendered into a form
     matches the value :func:`require_csrf` recomputes from the same session cookie.
     Never returns anything derived from a URL/query so it cannot leak via logs."""
-    return hmac.new(
-        secret, session_token.encode("utf-8"), hashlib.sha256
-    ).hexdigest()
+    return hmac.new(secret, session_token.encode("utf-8"), hashlib.sha256).hexdigest()
 
 
 def csrf_token_for_request(request: Request, settings: WebSettings) -> str | None:
@@ -101,9 +99,7 @@ def current_login_csrf_token(request: Request) -> str:
     return request.cookies.get(LOGIN_CSRF_COOKIE_NAME, "")
 
 
-def set_login_csrf_cookie(
-    response: Response, token: str, settings: WebSettings
-) -> None:
+def set_login_csrf_cookie(response: Response, token: str, settings: WebSettings) -> None:
     """Set the login-CSRF cookie (httpOnly -- the value is rendered into the form
     server-side, so JS never needs to read it; SameSite=Lax + Secure + scoped
     Path)."""

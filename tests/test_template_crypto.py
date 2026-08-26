@@ -46,7 +46,7 @@ class ModuleInterfaceTests(unittest.TestCase):
 class RenderShapeTests(unittest.TestCase):
     def test_render_emits_every_required_file_except_challenge_yaml(self) -> None:
         spec = _spec()
-        files = crypto.render(spec, random.Random(spec.seed))
+        files = crypto.render(spec, random.Random(spec.seed))  # noqa: S311 -- seeded RNG for deterministic challenge generation; not for secrets
         expected = set(crypto.REQUIRED_FILES) - {"challenge.yaml"}
         self.assertEqual(set(files), expected)
         for relative, content in files.items():
@@ -55,7 +55,7 @@ class RenderShapeTests(unittest.TestCase):
     def test_render_supports_every_declared_mode(self) -> None:
         for mode in crypto.MODES:
             spec = _spec(mode=mode)
-            files = crypto.render(spec, random.Random(spec.seed))
+            files = crypto.render(spec, random.Random(spec.seed))  # noqa: S311 -- seeded RNG for deterministic challenge generation; not for secrets
             expected = set(crypto.REQUIRED_FILES) - {"challenge.yaml"}
             self.assertEqual(set(files), expected, msg=f"mode={mode}")
 
@@ -63,21 +63,21 @@ class RenderShapeTests(unittest.TestCase):
 class DeterminismTests(unittest.TestCase):
     def test_same_spec_and_rng_seed_is_byte_identical(self) -> None:
         spec = _spec()
-        first = crypto.render(spec, random.Random("shared-seed"))
-        second = crypto.render(spec, random.Random("shared-seed"))
+        first = crypto.render(spec, random.Random("shared-seed"))  # noqa: S311 -- seeded RNG for deterministic challenge generation; not for secrets
+        second = crypto.render(spec, random.Random("shared-seed"))  # noqa: S311 -- seeded RNG for deterministic challenge generation; not for secrets
         self.assertEqual(first, second)
 
     def test_same_spec_and_rng_seed_is_byte_identical_per_mode(self) -> None:
         for mode in crypto.MODES:
             spec = _spec(mode=mode)
-            first = crypto.render(spec, random.Random("shared-seed"))
-            second = crypto.render(spec, random.Random("shared-seed"))
+            first = crypto.render(spec, random.Random("shared-seed"))  # noqa: S311 -- seeded RNG for deterministic challenge generation; not for secrets
+            second = crypto.render(spec, random.Random("shared-seed"))  # noqa: S311 -- seeded RNG for deterministic challenge generation; not for secrets
             self.assertEqual(first, second, msg=f"mode={mode}")
 
     def test_different_rng_seed_changes_output(self) -> None:
         spec = _spec()
-        first = crypto.render(spec, random.Random("seed-a"))
-        second = crypto.render(spec, random.Random("seed-b"))
+        first = crypto.render(spec, random.Random("seed-a"))  # noqa: S311 -- seeded RNG for deterministic challenge generation; not for secrets
+        second = crypto.render(spec, random.Random("seed-b"))  # noqa: S311 -- seeded RNG for deterministic challenge generation; not for secrets
         self.assertNotEqual(first, second)
 
     def test_cve_record_is_accepted_and_stays_deterministic(self) -> None:
@@ -86,8 +86,8 @@ class DeterminismTests(unittest.TestCase):
         record = SnapshotCveSource().get("CVE-2014-0160")
         self.assertIsNotNone(record)
         spec = _spec()
-        first = crypto.render(spec, random.Random("shared-seed"), cve_record=record)
-        second = crypto.render(spec, random.Random("shared-seed"), cve_record=record)
+        first = crypto.render(spec, random.Random("shared-seed"), cve_record=record)  # noqa: S311 -- seeded RNG for deterministic challenge generation; not for secrets
+        second = crypto.render(spec, random.Random("shared-seed"), cve_record=record)  # noqa: S311 -- seeded RNG for deterministic challenge generation; not for secrets
         self.assertEqual(first, second)
         self.assertIn(record.cve_id, first["public/description.md"])
 
@@ -95,7 +95,7 @@ class DeterminismTests(unittest.TestCase):
 class VariantJsonTests(unittest.TestCase):
     def test_variant_json_contains_flag_and_is_valid_json(self) -> None:
         spec = _spec()
-        files = crypto.render(spec, random.Random(spec.seed))
+        files = crypto.render(spec, random.Random(spec.seed))  # noqa: S311 -- seeded RNG for deterministic challenge generation; not for secrets
         variant = json.loads(files["private/variant.json"])
         self.assertIn("flag", variant)
         self.assertTrue(variant["flag"].startswith("ctf{"))
@@ -105,7 +105,7 @@ class VariantJsonTests(unittest.TestCase):
 
     def test_flag_is_consistent_across_files(self) -> None:
         spec = _spec()
-        files = crypto.render(spec, random.Random(spec.seed))
+        files = crypto.render(spec, random.Random(spec.seed))  # noqa: S311 -- seeded RNG for deterministic challenge generation; not for secrets
         variant = json.loads(files["private/variant.json"])
         flag = variant["flag"]
         self.assertIn(flag, files["services/api/app.py"])
@@ -117,14 +117,14 @@ class VariantJsonTests(unittest.TestCase):
 class ComposeAndServiceTests(unittest.TestCase):
     def test_compose_has_declared_markers(self) -> None:
         spec = _spec()
-        files = crypto.render(spec, random.Random(spec.seed))
+        files = crypto.render(spec, random.Random(spec.seed))  # noqa: S311 -- seeded RNG for deterministic challenge generation; not for secrets
         compose = files["docker-compose.yml"]
         for marker in crypto.COMPOSE_MARKERS:
             self.assertIn(marker, compose)
 
     def test_app_source_implements_its_declared_vuln_class(self) -> None:
         spec = _spec()
-        files = crypto.render(spec, random.Random(spec.seed))
+        files = crypto.render(spec, random.Random(spec.seed))  # noqa: S311 -- seeded RNG for deterministic challenge generation; not for secrets
         app_source = files["services/api/app.py"]
         vuln_class = json.loads(files["private/variant.json"])["vuln_class"]
         if vuln_class == "alg_none":
@@ -137,7 +137,7 @@ class ComposeAndServiceTests(unittest.TestCase):
         # The single reference solver ships BOTH techniques regardless of the
         # instance's class, so it solves any instance (and any sibling).
         spec = _spec()
-        files = crypto.render(spec, random.Random(spec.seed))
+        files = crypto.render(spec, random.Random(spec.seed))  # noqa: S311 -- seeded RNG for deterministic challenge generation; not for secrets
         solver_source = files["private/solver.py"]
         self.assertIn('"alg": "none"', solver_source)  # forge-unsigned technique
         self.assertIn("_crack_secret", solver_source)  # dictionary-attack technique
@@ -152,7 +152,7 @@ class PerInstanceVulnClassTests(unittest.TestCase):
     def _render_class(self, target: str):
         for i in range(200):
             spec = _spec(seed=f"vc-seed-{i}")
-            files = crypto.render(spec, random.Random(spec.seed))
+            files = crypto.render(spec, random.Random(spec.seed))  # noqa: S311 -- seeded RNG for deterministic challenge generation; not for secrets
             if json.loads(files["private/variant.json"])["vuln_class"] == target:
                 return files
         self.fail(f"no seed produced vuln_class={target}")
@@ -181,7 +181,7 @@ class PerInstanceVulnClassTests(unittest.TestCase):
 class CheckpointsTests(unittest.TestCase):
     def test_checkpoints_come_from_spec(self) -> None:
         spec = _spec()
-        files = crypto.render(spec, random.Random(spec.seed))
+        files = crypto.render(spec, random.Random(spec.seed))  # noqa: S311 -- seeded RNG for deterministic challenge generation; not for secrets
         checkpoints_yaml = files["private/checkpoints.yaml"]
         for name in spec.checkpoints:
             self.assertIn(name, checkpoints_yaml)

@@ -46,9 +46,7 @@ class InstanceLaunchRequest(BaseModel):
     definition_slug: str = Field(min_length=1)
     version_no: int = Field(ge=1)
     architecture: str = Field(default="x86_64", min_length=1)
-    required_capabilities: list[str] = Field(
-        default_factory=lambda: [_DEFAULT_CAPABILITY]
-    )
+    required_capabilities: list[str] = Field(default_factory=lambda: [_DEFAULT_CAPABILITY])
     ttl_seconds: int = Field(default=3600, ge=1)
     worker_units: int = Field(default=1, ge=1)
     platform_capacity: int = Field(
@@ -56,12 +54,8 @@ class InstanceLaunchRequest(BaseModel):
     )
 
     def requirements(self) -> WorkerRequirements:
-        caps = frozenset(self.required_capabilities) or frozenset(
-            {_DEFAULT_CAPABILITY}
-        )
-        return WorkerRequirements(
-            architecture=self.architecture, required_capabilities=caps
-        )
+        caps = frozenset(self.required_capabilities) or frozenset({_DEFAULT_CAPABILITY})
+        return WorkerRequirements(architecture=self.architecture, required_capabilities=caps)
 
     def pooled_items(self) -> tuple[ReservationItem, ...]:
         return (

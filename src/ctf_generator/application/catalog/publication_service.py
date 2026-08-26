@@ -52,17 +52,13 @@ class PublicationService:
                 competition_id, definition_slug, version_no
             )
 
-    def list_for_competition(
-        self, competition_id: str
-    ) -> list[ChallengePublication]:
+    def list_for_competition(self, competition_id: str) -> list[ChallengePublication]:
         with self._database.session_scope() as session:
-            return SqlAlchemyChallengePublicationRepository(
-                session
-            ).list_for_competition(competition_id)
+            return SqlAlchemyChallengePublicationRepository(session).list_for_competition(
+                competition_id
+            )
 
-    def detach(
-        self, competition_id: str, definition_slug: str, version_no: int
-    ) -> None:
+    def detach(self, competition_id: str, definition_slug: str, version_no: int) -> None:
         """Detach a version from a competition. A missing competition/version
         raises :class:`LookupError`; an attachment that does not exist also raises
         :class:`LookupError` (404) so a detach of nothing is not a silent 200."""
@@ -72,6 +68,5 @@ class PublicationService:
             )
         if not removed:
             raise LookupError(
-                f"publication not found: {competition_id!r} / "
-                f"{definition_slug!r} v{version_no}"
+                f"publication not found: {competition_id!r} / {definition_slug!r} v{version_no}"
             )

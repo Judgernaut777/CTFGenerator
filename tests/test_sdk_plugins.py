@@ -83,14 +83,10 @@ class LoadEntryPointFamiliesTests(unittest.TestCase):
         eps = [
             _FakeEntryPoint("direct", lambda: _good_family("sdk_plugin_direct_family")),
             # a zero-arg callable/factory returning a Family
-            _FakeEntryPoint(
-                "factory", lambda: (lambda: _good_family("sdk_plugin_factory_family"))
-            ),
+            _FakeEntryPoint("factory", lambda: lambda: _good_family("sdk_plugin_factory_family")),
             _FakeEntryPoint("raises", raiser),
             _FakeEntryPoint("nonfamily", lambda: {"not": "a family"}),
-            _FakeEntryPoint(
-                "badlint", lambda: _lint_failing_family("sdk_plugin_bad_lint_family")
-            ),
+            _FakeEntryPoint("badlint", lambda: _lint_failing_family("sdk_plugin_bad_lint_family")),
         ]
         with self._patch(eps):
             with self.assertLogs(plugins.logger, level="WARNING") as logctx:

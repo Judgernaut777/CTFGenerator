@@ -65,7 +65,7 @@ class ModuleContractTests(unittest.TestCase):
 
 class RenderEmitsRequiredFilesTests(unittest.TestCase):
     def test_red_mode_emits_every_required_file(self) -> None:
-        files = scada_ics.render(_spec(mode="red"), random.Random("seed-1"))
+        files = scada_ics.render(_spec(mode="red"), random.Random("seed-1"))  # noqa: S311 -- seeded RNG for deterministic challenge generation; not for secrets
         for relative in scada_ics.REQUIRED_FILES:
             if relative == "challenge.yaml":
                 continue
@@ -73,14 +73,14 @@ class RenderEmitsRequiredFilesTests(unittest.TestCase):
             self.assertTrue(files[relative].strip(), f"required file is empty: {relative}")
 
     def test_no_extra_files_outside_required_set(self) -> None:
-        files = scada_ics.render(_spec(mode="red"), random.Random("seed-1"))
+        files = scada_ics.render(_spec(mode="red"), random.Random("seed-1"))  # noqa: S311 -- seeded RNG for deterministic challenge generation; not for secrets
         allowed = set(scada_ics.REQUIRED_FILES) - {"challenge.yaml"}
         self.assertEqual(set(files), allowed)
 
     def test_each_supported_mode_emits_every_required_file(self) -> None:
         for mode in scada_ics.MODES:
             with self.subTest(mode=mode):
-                files = scada_ics.render(_spec(mode=mode), random.Random("seed-per-mode"))
+                files = scada_ics.render(_spec(mode=mode), random.Random("seed-per-mode"))  # noqa: S311 -- seeded RNG for deterministic challenge generation; not for secrets
                 for relative in scada_ics.REQUIRED_FILES:
                     if relative == "challenge.yaml":
                         continue
@@ -90,35 +90,35 @@ class RenderEmitsRequiredFilesTests(unittest.TestCase):
 class DeterminismTests(unittest.TestCase):
     def test_red_mode_is_deterministic(self) -> None:
         spec = _spec(mode="red")
-        first = scada_ics.render(spec, random.Random("fixed-seed"))
-        second = scada_ics.render(spec, random.Random("fixed-seed"))
+        first = scada_ics.render(spec, random.Random("fixed-seed"))  # noqa: S311 -- seeded RNG for deterministic challenge generation; not for secrets
+        second = scada_ics.render(spec, random.Random("fixed-seed"))  # noqa: S311 -- seeded RNG for deterministic challenge generation; not for secrets
         self.assertEqual(first, second)
 
     def test_each_mode_is_deterministic(self) -> None:
         for mode in scada_ics.MODES:
             with self.subTest(mode=mode):
                 spec = _spec(mode=mode)
-                first = scada_ics.render(spec, random.Random("fixed-seed-2"))
-                second = scada_ics.render(spec, random.Random("fixed-seed-2"))
+                first = scada_ics.render(spec, random.Random("fixed-seed-2"))  # noqa: S311 -- seeded RNG for deterministic challenge generation; not for secrets
+                second = scada_ics.render(spec, random.Random("fixed-seed-2"))  # noqa: S311 -- seeded RNG for deterministic challenge generation; not for secrets
                 self.assertEqual(first, second)
 
     def test_different_rng_state_changes_output(self) -> None:
         spec = _spec(mode="red")
-        a = scada_ics.render(spec, random.Random("seed-a"))
-        b = scada_ics.render(spec, random.Random("seed-b"))
+        a = scada_ics.render(spec, random.Random("seed-a"))  # noqa: S311 -- seeded RNG for deterministic challenge generation; not for secrets
+        b = scada_ics.render(spec, random.Random("seed-b"))  # noqa: S311 -- seeded RNG for deterministic challenge generation; not for secrets
         self.assertNotEqual(a, b)
 
     def test_cve_record_is_accepted_and_deterministic(self) -> None:
         spec = _spec(mode="red")
-        first = scada_ics.render(spec, random.Random("cve-seed"), cve_record=_CVE_RECORD)
-        second = scada_ics.render(spec, random.Random("cve-seed"), cve_record=_CVE_RECORD)
+        first = scada_ics.render(spec, random.Random("cve-seed"), cve_record=_CVE_RECORD)  # noqa: S311 -- seeded RNG for deterministic challenge generation; not for secrets
+        second = scada_ics.render(spec, random.Random("cve-seed"), cve_record=_CVE_RECORD)  # noqa: S311 -- seeded RNG for deterministic challenge generation; not for secrets
         self.assertEqual(first, second)
         self.assertIn(_CVE_RECORD.cve_id, first["public/description.md"])
 
 
 class VariantJsonTests(unittest.TestCase):
     def test_variant_json_contains_flag(self) -> None:
-        files = scada_ics.render(_spec(mode="red"), random.Random("flag-seed"))
+        files = scada_ics.render(_spec(mode="red"), random.Random("flag-seed"))  # noqa: S311 -- seeded RNG for deterministic challenge generation; not for secrets
         variant = json.loads(files["private/variant.json"])
         self.assertIn("flag", variant)
         self.assertTrue(variant["flag"])
@@ -126,7 +126,7 @@ class VariantJsonTests(unittest.TestCase):
         self.assertTrue(variant["flag"].endswith("}"))
 
     def test_variant_json_includes_routes_and_creds_and_ids(self) -> None:
-        files = scada_ics.render(_spec(mode="purple"), random.Random("flag-seed-2"))
+        files = scada_ics.render(_spec(mode="purple"), random.Random("flag-seed-2"))  # noqa: S311 -- seeded RNG for deterministic challenge generation; not for secrets
         variant = json.loads(files["private/variant.json"])
         self.assertIn("routes", variant)
         self.assertIn("creds", variant)
@@ -137,10 +137,10 @@ class VariantJsonTests(unittest.TestCase):
     def test_flag_varies_by_seed(self) -> None:
         spec = _spec(mode="red")
         flag_a = json.loads(
-            scada_ics.render(spec, random.Random("seed-a"))["private/variant.json"]
+            scada_ics.render(spec, random.Random("seed-a"))["private/variant.json"]  # noqa: S311 -- seeded RNG for deterministic challenge generation; not for secrets
         )["flag"]
         flag_b = json.loads(
-            scada_ics.render(spec, random.Random("seed-b"))["private/variant.json"]
+            scada_ics.render(spec, random.Random("seed-b"))["private/variant.json"]  # noqa: S311 -- seeded RNG for deterministic challenge generation; not for secrets
         )["flag"]
         self.assertNotEqual(flag_a, flag_b)
 
@@ -150,20 +150,20 @@ class EmbeddedSourceValidityTests(unittest.TestCase):
 
     def test_all_emitted_python_files_compile(self) -> None:
         for mode in scada_ics.MODES:
-            files = scada_ics.render(_spec(mode=mode), random.Random("compile-check"))
+            files = scada_ics.render(_spec(mode=mode), random.Random("compile-check"))  # noqa: S311 -- seeded RNG for deterministic challenge generation; not for secrets
             for relative, content in files.items():
                 if relative.endswith(".py"):
                     with self.subTest(mode=mode, path=relative):
                         compile(content, relative, "exec")
 
     def test_docker_compose_has_expected_service_markers(self) -> None:
-        files = scada_ics.render(_spec(mode="red"), random.Random("compose-check"))
+        files = scada_ics.render(_spec(mode="red"), random.Random("compose-check"))  # noqa: S311 -- seeded RNG for deterministic challenge generation; not for secrets
         compose = files["docker-compose.yml"]
         for marker in scada_ics.COMPOSE_MARKERS:
             self.assertIn(marker, compose)
 
     def test_register_write_log_is_valid_jsonl(self) -> None:
-        files = scada_ics.render(_spec(mode="blue"), random.Random("log-check"))
+        files = scada_ics.render(_spec(mode="blue"), random.Random("log-check"))  # noqa: S311 -- seeded RNG for deterministic challenge generation; not for secrets
         log_text = files["public/evidence/register_write_log.jsonl"]
         lines = [line for line in log_text.splitlines() if line.strip()]
         self.assertGreater(len(lines), 0)
@@ -180,7 +180,7 @@ class PerModeDifferentiationTests(unittest.TestCase):
     def test_each_mode_renders_and_emits_every_required_file(self) -> None:
         for mode in scada_ics.MODES:
             with self.subTest(mode=mode):
-                files = scada_ics.render(_spec(mode=mode), random.Random("per-mode-render"))
+                files = scada_ics.render(_spec(mode=mode), random.Random("per-mode-render"))  # noqa: S311 -- seeded RNG for deterministic challenge generation; not for secrets
                 for relative in scada_ics.REQUIRED_FILES:
                     if relative == "challenge.yaml":
                         continue
@@ -191,14 +191,14 @@ class PerModeDifferentiationTests(unittest.TestCase):
         for mode in scada_ics.MODES:
             with self.subTest(mode=mode):
                 spec = _spec(mode=mode)
-                first = scada_ics.render(spec, random.Random("per-mode-determinism"))
-                second = scada_ics.render(spec, random.Random("per-mode-determinism"))
+                first = scada_ics.render(spec, random.Random("per-mode-determinism"))  # noqa: S311 -- seeded RNG for deterministic challenge generation; not for secrets
+                second = scada_ics.render(spec, random.Random("per-mode-determinism"))  # noqa: S311 -- seeded RNG for deterministic challenge generation; not for secrets
                 self.assertEqual(first, second)
 
     def test_red_mode_output_is_unchanged_by_mode_differentiation(self) -> None:
         """Locks in that today's red-mode bytes (already validated in real
         Docker) are not regressed by blue/purple-specific content additions."""
-        files = scada_ics.render(_spec(mode="red"), random.Random("red-lock"))
+        files = scada_ics.render(_spec(mode="red"), random.Random("red-lock"))  # noqa: S311 -- seeded RNG for deterministic challenge generation; not for secrets
         solution = files["private/solution.md"]
         self.assertIn("## Live exploit path (red / purple)", solution)
         self.assertIn("## Log analysis path (blue / purple)", solution)
@@ -211,24 +211,24 @@ class PerModeDifferentiationTests(unittest.TestCase):
         self.assertIn('default="live"', solver)
 
     def test_blue_description_differs_from_red_and_is_defensive_framing(self) -> None:
-        red = scada_ics.render(_spec(mode="red"), random.Random("mode-diff"))
-        blue = scada_ics.render(_spec(mode="blue"), random.Random("mode-diff"))
+        red = scada_ics.render(_spec(mode="red"), random.Random("mode-diff"))  # noqa: S311 -- seeded RNG for deterministic challenge generation; not for secrets
+        blue = scada_ics.render(_spec(mode="blue"), random.Random("mode-diff"))  # noqa: S311 -- seeded RNG for deterministic challenge generation; not for secrets
         self.assertNotEqual(red["public/description.md"], blue["public/description.md"])
         blue_desc = blue["public/description.md"]
         self.assertIn("## Deliverable", blue_desc)
         self.assertIn("no live exploitation", blue_desc.lower())
 
     def test_purple_description_differs_from_red_and_covers_both_paths(self) -> None:
-        red = scada_ics.render(_spec(mode="red"), random.Random("mode-diff"))
-        purple = scada_ics.render(_spec(mode="purple"), random.Random("mode-diff"))
+        red = scada_ics.render(_spec(mode="red"), random.Random("mode-diff"))  # noqa: S311 -- seeded RNG for deterministic challenge generation; not for secrets
+        purple = scada_ics.render(_spec(mode="purple"), random.Random("mode-diff"))  # noqa: S311 -- seeded RNG for deterministic challenge generation; not for secrets
         self.assertNotEqual(red["public/description.md"], purple["public/description.md"])
         purple_desc = purple["public/description.md"]
         self.assertIn("## Deliverable", purple_desc)
         self.assertIn("either path", purple_desc.lower())
 
     def test_blue_private_deliverable_differs_from_red_and_has_no_offensive_solver(self) -> None:
-        red = scada_ics.render(_spec(mode="red"), random.Random("mode-diff-2"))
-        blue = scada_ics.render(_spec(mode="blue"), random.Random("mode-diff-2"))
+        red = scada_ics.render(_spec(mode="red"), random.Random("mode-diff-2"))  # noqa: S311 -- seeded RNG for deterministic challenge generation; not for secrets
+        blue = scada_ics.render(_spec(mode="blue"), random.Random("mode-diff-2"))  # noqa: S311 -- seeded RNG for deterministic challenge generation; not for secrets
         self.assertNotEqual(red["private/solution.md"], blue["private/solution.md"])
         self.assertNotEqual(red["private/solver.py"], blue["private/solver.py"])
 
@@ -244,8 +244,8 @@ class PerModeDifferentiationTests(unittest.TestCase):
         compile(blue_solver, "private/solver.py", "exec")
 
     def test_purple_private_deliverable_differs_from_red_and_has_both_paths(self) -> None:
-        red = scada_ics.render(_spec(mode="red"), random.Random("mode-diff-3"))
-        purple = scada_ics.render(_spec(mode="purple"), random.Random("mode-diff-3"))
+        red = scada_ics.render(_spec(mode="red"), random.Random("mode-diff-3"))  # noqa: S311 -- seeded RNG for deterministic challenge generation; not for secrets
+        purple = scada_ics.render(_spec(mode="purple"), random.Random("mode-diff-3"))  # noqa: S311 -- seeded RNG for deterministic challenge generation; not for secrets
         self.assertNotEqual(red["private/solution.md"], purple["private/solution.md"])
 
         purple_solution = purple["private/solution.md"]
@@ -263,10 +263,10 @@ class PerModeDifferentiationTests(unittest.TestCase):
         """The blue-only solver is a real, runnable deliverable: given the
         rendered evidence log it must recover the exact flag, offline, with
         no live PLC/network access."""
-        files = scada_ics.render(_spec(mode="blue"), random.Random("blue-solver-check"))
+        files = scada_ics.render(_spec(mode="blue"), random.Random("blue-solver-check"))  # noqa: S311 -- seeded RNG for deterministic challenge generation; not for secrets
         variant = json.loads(files["private/variant.json"])
         namespace: dict[str, object] = {"__name__": "blue_solver_under_test"}
-        exec(compile(files["private/solver.py"], "private/solver.py", "exec"), namespace)
+        exec(compile(files["private/solver.py"], "private/solver.py", "exec"), namespace)  # noqa: S102 -- executes the challenge-generated solver to verify solvability
 
         import tempfile
         from pathlib import Path

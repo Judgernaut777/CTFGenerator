@@ -63,7 +63,10 @@ def _seed_flagged(db, *, slug: str = "sqli", title: str = "SQL Injection") -> tu
     """Publish a challenge carrying the KNOWN flag (+ a planted private field) into
     COMP_A and return ``(slug, version_no)``."""
     s, ver = ws.seed_published_version(
-        db, slug, title, family="web",
+        db,
+        slug,
+        title,
+        family="web",
         spec={"title": title, "flag": _FLAG, "solution": _PRIVATE},
     )
     ws.attach_publication(db, ws.COMP_A, s, ver)
@@ -288,7 +291,10 @@ class ContestantSubmitWebTests(unittest.TestCase):
             # A DIFFERENT challenge that only BLUE submits, so its identity is
             # distinguishable in EVE's Red-only history if a tenancy bug leaked it.
             other_slug, other_ver = ws.seed_published_version(
-                db, "xxe", "XML External Entity", family="web",
+                db,
+                "xxe",
+                "XML External Entity",
+                family="web",
                 spec={"title": "XML External Entity", "flag": _FLAG},
             )
             ws.attach_publication(db, ws.COMP_A, other_slug, other_ver)
@@ -331,7 +337,10 @@ class ContestantSubmitWebTests(unittest.TestCase):
         with ws.web_client() as (client, db, _svc):
             # Published but the spec carries NO flag -> FlagUnavailableError.
             slug, ver = ws.seed_published_version(
-                db, "broken", "Broken Challenge", family="web",
+                db,
+                "broken",
+                "Broken Challenge",
+                family="web",
                 spec={"title": "Broken Challenge"},
             )
             ws.attach_publication(db, ws.COMP_A, slug, ver)

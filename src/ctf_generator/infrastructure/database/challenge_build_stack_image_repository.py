@@ -56,9 +56,7 @@ class SqlAlchemyChallengeBuildStackImageRepository:
         version). Idempotent: a repeat of the same ``(version, service, image_ref)``
         collapses via ON CONFLICT DO NOTHING (image_ref is deterministic), so
         re-driving a completed build records nothing new."""
-        version_uuid = _resolve.version_uuid(
-            self._session, definition_slug, version_no
-        )
+        version_uuid = _resolve.version_uuid(self._session, definition_slug, version_no)
         stmt = (
             pg_insert(StackImageRow)
             .values(
@@ -72,9 +70,7 @@ class SqlAlchemyChallengeBuildStackImageRepository:
                 is_primary=is_primary,
                 created_at=now,
             )
-            .on_conflict_do_nothing(
-                constraint="uq_challenge_build_stack_images_ver_svc_img"
-            )
+            .on_conflict_do_nothing(constraint="uq_challenge_build_stack_images_ver_svc_img")
         )
         self._session.execute(stmt)
 

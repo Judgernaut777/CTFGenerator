@@ -188,9 +188,7 @@ def _seed_parents(db) -> None:
         SqlAlchemyChallengeVersionRepository(s).publish("sql", 1, _NOW)
     with db.session_scope() as s:
         reg = SqlAlchemyWorkerRegistry(s)
-        reg.add(
-            Worker("w1", "docker-rootless", ("x86_64",), ("launch_instance",), 4, "1")
-        )
+        reg.add(Worker("w1", "docker-rootless", ("x86_64",), ("launch_instance",), 4, "1"))
         reg.approve("w1")
         reg.heartbeat("w1", _NOW)
     with db.session_scope() as s:
@@ -316,12 +314,8 @@ class ReservationIntegrationTests(unittest.TestCase):
             self.assertNotIn(iid2, scheduling.release_expired(_NOW))
             # Expire releases the hold and enqueues the expire job.
             # Drive to a state expire is legal from (queued->starting->healthy).
-            lifecycle.apply_transition(
-                iid2, "starting", reason="launch", actor="worker", now=_NOW
-            )
-            lifecycle.apply_transition(
-                iid2, "healthy", reason="up", actor="worker", now=_NOW
-            )
+            lifecycle.apply_transition(iid2, "starting", reason="launch", actor="worker", now=_NOW)
+            lifecycle.apply_transition(iid2, "healthy", reason="up", actor="worker", now=_NOW)
             expired = lifecycle.expire(iid2, _NOW)
             self.assertEqual(expired.state, "expired")
             self.assertEqual(scheduling.get_reservation(iid2).state, "released")
@@ -334,9 +328,7 @@ class ReservationIntegrationTests(unittest.TestCase):
             iid = _seed_instance(db, state="active")
             with db.session_scope() as s:
                 before = len(SqlAlchemyInstanceRepository(s).list_events(iid))
-            got = lifecycle.apply_transition(
-                iid, "active", reason="noop", actor="system", now=_NOW
-            )
+            got = lifecycle.apply_transition(iid, "active", reason="noop", actor="system", now=_NOW)
             self.assertEqual(got.state, "active")
             with db.session_scope() as s:
                 after = len(SqlAlchemyInstanceRepository(s).list_events(iid))
@@ -467,9 +459,7 @@ class ReconcilerDriftCaseTests(unittest.TestCase):
             _seed_parents(db)
             observed = _FakeObserved()
             liveness = _FakeLiveness(dispatchable=set())  # w1 is NOT dispatchable
-            _sch, jobs, _life, rec = _components(
-                db, observed=observed, liveness=liveness
-            )
+            _sch, jobs, _life, rec = _components(db, observed=observed, liveness=liveness)
             iid = _seed_instance(db, state="active", desired="active", assigned="w1")
             actions = rec.reconcile_once(_NOW)
             with db.session_scope() as s:
@@ -537,9 +527,7 @@ class ReconcilerDriftCaseTests(unittest.TestCase):
             _seed_instance(db, state="requested", instance_id=iid, assigned="w1")
             past = _NOW - timedelta(hours=1)
             lifecycle.apply_transition(iid, "queued", reason="q", actor="system", now=past)
-            lifecycle.apply_transition(
-                iid, "starting", reason="s", actor="system", now=past
-            )
+            lifecycle.apply_transition(iid, "starting", reason="s", actor="system", now=past)
             observed.set(HealthObservation(iid, "healthy", True, "w1", 1, _NOW))
             actions = rec.reconcile_once(_NOW, stuck_after_seconds=300)
             with db.session_scope() as s:
@@ -593,9 +581,7 @@ class ReconcilerDriftCaseTests(unittest.TestCase):
             self.assertEqual(res[0].state, "releasing")
             # Second pass: no new releasing action (resource already releasing).
             actions2 = rec.reconcile_once(_NOW)
-            self.assertFalse(
-                any(a.action == "mark_releasing" for a in actions2)
-            )
+            self.assertFalse(any(a.action == "mark_releasing" for a in actions2))
 
     def test_case9_stopped_still_exposed(self) -> None:
         with _migrated_database() as db:
@@ -605,12 +591,8 @@ class ReconcilerDriftCaseTests(unittest.TestCase):
             iid = _seed_instance(db, state="stopped", desired="stopped")
             with db.session_scope() as s:
                 repo = SqlAlchemyInstanceRepository(s)
-                repo.record_endpoint(
-                    InstanceEndpoint(iid, "web", "h", 80, "http", "http://h")
-                )
-                repo.record_runtime_resource(
-                    RuntimeResource(iid, "container", "cid-9", "w1")
-                )
+                repo.record_endpoint(InstanceEndpoint(iid, "web", "h", 80, "http", "http://h"))
+                repo.record_runtime_resource(RuntimeResource(iid, "container", "cid-9", "w1"))
             observed.set(HealthObservation(iid, "absent", False, "w1", 1, _NOW))
             actions = rec.reconcile_once(_NOW)
             self.assertTrue(any(a.action == "delete_endpoint" for a in actions))
@@ -618,9 +600,7 @@ class ReconcilerDriftCaseTests(unittest.TestCase):
             with db.session_scope() as s:
                 repo = SqlAlchemyInstanceRepository(s)
                 self.assertEqual(repo.list_endpoints(iid), [])
-                self.assertEqual(
-                    repo.list_runtime_resources(iid)[0].state, "releasing"
-                )
+                self.assertEqual(repo.list_runtime_resources(iid)[0].state, "releasing")
             # Second pass: nothing exposed -> no cleanup action for this instance.
             actions2 = rec.reconcile_once(_NOW)
             self.assertFalse(
@@ -639,9 +619,7 @@ class ReconcilerDriftCaseTests(unittest.TestCase):
             actions = rec.reconcile_once(_NOW)
             self.assertTrue(any(a.case == "10-orphan-endpoint" for a in actions))
             with db.session_scope() as s:
-                self.assertEqual(
-                    SqlAlchemyInstanceRepository(s).list_endpoints(iid), []
-                )
+                self.assertEqual(SqlAlchemyInstanceRepository(s).list_endpoints(iid), [])
 
     def test_converged_instance_is_a_noop(self) -> None:
         with _migrated_database() as db:
@@ -672,9 +650,7 @@ class ReconcilerFixTests(unittest.TestCase):
             observed = _FakeObserved()
             # w1 heartbeat-stale (not dispatchable) but NOT adverse.
             liveness = _FakeLiveness(dispatchable=set(), adverse=set())
-            _sch, _jobs, _life, rec = _components(
-                db, observed=observed, liveness=liveness
-            )
+            _sch, _jobs, _life, rec = _components(db, observed=observed, liveness=liveness)
             iid = _seed_instance(db, state="active", desired="active", assigned="w1")
             observed.set(HealthObservation(iid, "healthy", True, "w1", 1, _NOW))
             actions = rec.reconcile_once(_NOW)
@@ -693,9 +669,7 @@ class ReconcilerFixTests(unittest.TestCase):
             observed = _FakeObserved()
             # w1 dispatchable but ADVERSE (draining/quarantined/untrusted).
             liveness = _FakeLiveness(dispatchable={"w1"}, adverse={"w1"})
-            _sch, jobs, _life, rec = _components(
-                db, observed=observed, liveness=liveness
-            )
+            _sch, jobs, _life, rec = _components(db, observed=observed, liveness=liveness)
             iid = _seed_instance(db, state="active", desired="active", assigned="w1")
             observed.set(HealthObservation(iid, "healthy", True, "w1", 1, _NOW))
             actions = rec.reconcile_once(_NOW)
@@ -713,9 +687,7 @@ class ReconcilerFixTests(unittest.TestCase):
             _seed_parents(db)
             observed = _FakeObserved()
             liveness = _FakeLiveness(dispatchable=set())  # w1 down
-            _sch, _jobs, _life, rec = _components(
-                db, observed=observed, liveness=liveness
-            )
+            _sch, _jobs, _life, rec = _components(db, observed=observed, liveness=liveness)
             iid = _seed_instance(db, state="active", desired="active", assigned="w1")
             # Pass 1 wins the atomic re-check: clears assignment, bumps to gen 2.
             rec.reconcile_once(_NOW)
@@ -728,9 +700,7 @@ class ReconcilerFixTests(unittest.TestCase):
             self.assertIsNone(rec._fence_stale_worker(iid, "w1", 1, _NOW))
             self.assertIsNone(rec._fence_missing_container(iid, 1, _NOW))
             with db.session_scope() as s:
-                self.assertEqual(
-                    SqlAlchemyInstanceRepository(s).get(iid).generation, 2
-                )
+                self.assertEqual(SqlAlchemyInstanceRepository(s).get(iid).generation, 2)
 
     # -- H3 + capacity leak: reconciler stop RELEASES the reservation --------
 
@@ -772,9 +742,7 @@ class ReconcilerFixTests(unittest.TestCase):
             observed.set(HealthObservation(iid, "absent", False, "w1", 1, _NOW))
             rec.reconcile_once(_NOW)
             with db.session_scope() as s:
-                self.assertEqual(
-                    SqlAlchemyInstanceRepository(s).get(iid).state, "stopped"
-                )
+                self.assertEqual(SqlAlchemyInstanceRepository(s).get(iid).state, "stopped")
 
     # -- M1 + M5: deleted path, archive only when resources are released -----
 
@@ -786,12 +754,8 @@ class ReconcilerFixTests(unittest.TestCase):
             iid = _seed_instance(db, state="active", desired="deleted", assigned="w1")
             with db.session_scope() as s:
                 repo = SqlAlchemyInstanceRepository(s)
-                repo.record_endpoint(
-                    InstanceEndpoint(iid, "web", "h", 80, "http", "http://h")
-                )
-                repo.record_runtime_resource(
-                    RuntimeResource(iid, "container", "cid", "w1")
-                )
+                repo.record_endpoint(InstanceEndpoint(iid, "web", "h", 80, "http", "http://h"))
+                repo.record_runtime_resource(RuntimeResource(iid, "container", "cid", "w1"))
             # Pass 1: container present -> BOTH stop and delete jobs enqueued.
             observed.set(HealthObservation(iid, "active", True, "w1", 1, _NOW))
             rec.reconcile_once(_NOW)
@@ -811,9 +775,7 @@ class ReconcilerFixTests(unittest.TestCase):
             # Pass 3: still 'releasing' -> still not archived.
             rec.reconcile_once(_NOW)
             with db.session_scope() as s:
-                self.assertEqual(
-                    SqlAlchemyInstanceRepository(s).get(iid).state, "stopped"
-                )
+                self.assertEqual(SqlAlchemyInstanceRepository(s).get(iid).state, "stopped")
             # Worker confirms release -> archival becomes possible.
             with db.session_scope() as s:
                 SqlAlchemyInstanceRepository(s).set_resource_state(
@@ -821,9 +783,7 @@ class ReconcilerFixTests(unittest.TestCase):
                 )
             rec.reconcile_once(_NOW)
             with db.session_scope() as s:
-                self.assertEqual(
-                    SqlAlchemyInstanceRepository(s).get(iid).state, "archived"
-                )
+                self.assertEqual(SqlAlchemyInstanceRepository(s).get(iid).state, "archived")
 
     # -- L2: a stuck 'ready' instance advances toward healthy ----------------
 
@@ -836,23 +796,17 @@ class ReconcilerFixTests(unittest.TestCase):
             _seed_instance(db, state="requested", instance_id=iid, assigned="w1")
             past = _NOW - timedelta(hours=1)
             for state in ("queued", "building", "ready"):
-                lifecycle.apply_transition(
-                    iid, state, reason="x", actor="system", now=past
-                )
+                lifecycle.apply_transition(iid, state, reason="x", actor="system", now=past)
             observed.set(HealthObservation(iid, "healthy", True, "w1", 1, _NOW))
             # 'ready' used to stall; now it advances one rung (ready -> starting).
             rec.reconcile_once(_NOW, stuck_after_seconds=300)
             with db.session_scope() as s:
-                self.assertEqual(
-                    SqlAlchemyInstanceRepository(s).get(iid).state, "starting"
-                )
+                self.assertEqual(SqlAlchemyInstanceRepository(s).get(iid).state, "starting")
             later = _NOW + timedelta(hours=1)
             observed.set(HealthObservation(iid, "healthy", True, "w1", 1, later))
             rec.reconcile_once(later, stuck_after_seconds=300)
             with db.session_scope() as s:
-                self.assertEqual(
-                    SqlAlchemyInstanceRepository(s).get(iid).state, "healthy"
-                )
+                self.assertEqual(SqlAlchemyInstanceRepository(s).get(iid).state, "healthy")
 
     # -- MEDIUM: a 'releasing' (dead-lettered-delete) resource is re-driven ---
 
@@ -869,9 +823,7 @@ class ReconcilerFixTests(unittest.TestCase):
             iid = _seed_instance(db, state="stopped", desired="deleted", assigned="w1")
             with db.session_scope() as s:
                 repo = SqlAlchemyInstanceRepository(s)
-                repo.record_runtime_resource(
-                    RuntimeResource(iid, "container", "cid", "w1")
-                )
+                repo.record_runtime_resource(RuntimeResource(iid, "container", "cid", "w1"))
                 # A prior pass marked it releasing, but that delete job never
                 # completed (dead-lettered / reaped away) -> resource stranded.
                 repo.set_resource_state(iid, "container", "cid", "releasing", _NOW)
@@ -879,17 +831,13 @@ class ReconcilerFixTests(unittest.TestCase):
             actions = rec.reconcile_once(_NOW)
             # Delete is re-enqueued for the 'releasing' resource (no live delete
             # job blocked the key -> a fresh live job is minted).
-            delete = [
-                a for a in actions if a.action == "delete" and a.instance_id == iid
-            ]
+            delete = [a for a in actions if a.action == "delete" and a.instance_id == iid]
             self.assertTrue(delete)
             self.assertTrue(delete[0].job_created)
             self.assertIsNotNone(jobs.get_by_idempotency_key(_key(iid, 1, "delete")))
             # NOT archived while the resource is still unreleased.
             with db.session_scope() as s:
-                self.assertEqual(
-                    SqlAlchemyInstanceRepository(s).get(iid).state, "stopped"
-                )
+                self.assertEqual(SqlAlchemyInstanceRepository(s).get(iid).state, "stopped")
             # Worker confirms release -> the instance finally archives.
             with db.session_scope() as s:
                 SqlAlchemyInstanceRepository(s).set_resource_state(
@@ -897,9 +845,7 @@ class ReconcilerFixTests(unittest.TestCase):
                 )
             rec.reconcile_once(_NOW)
             with db.session_scope() as s:
-                self.assertEqual(
-                    SqlAlchemyInstanceRepository(s).get(iid).state, "archived"
-                )
+                self.assertEqual(SqlAlchemyInstanceRepository(s).get(iid).state, "archived")
 
     # -- LOW: one instance's failure must not abort the whole batch pass ------
 
@@ -923,9 +869,7 @@ class ReconcilerFixTests(unittest.TestCase):
             actions = rec.reconcile_once(_NOW)
             # The failing instance is isolated (recorded as an error action) and
             # the healthy instance still gets its corrective this pass.
-            self.assertTrue(
-                any(a.case == "error" and a.instance_id == bad for a in actions)
-            )
+            self.assertTrue(any(a.case == "error" and a.instance_id == bad for a in actions))
             self.assertIsNotNone(jobs.get_by_idempotency_key(_key(good, 1, "stop")))
 
     # -- LOW: request_delete on an archived instance is a clean no-op ---------

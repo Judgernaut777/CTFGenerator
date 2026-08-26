@@ -62,13 +62,13 @@ def list_builds(
     principal: Principal = Depends(require_permission(Permission.BUILD_READ)),
     service=Depends(get_build_service),
 ):
-    builds = sorted(
-        service.list_for_version(slug, version_no), key=_build_sort_key
-    )
+    builds = sorted(service.list_for_version(slug, version_no), key=_build_sort_key)
     page = paginate(builds, key=_build_sort_key, limit=limit, cursor=cursor)
     items = [build_to_list_item(b) for b in page.items]
     envelope = list_envelope(
-        BUILD_LIST_SCHEMA, items, limit=clamp_limit(limit),
+        BUILD_LIST_SCHEMA,
+        items,
+        limit=clamp_limit(limit),
         next_cursor=page.next_cursor,
     )
     return respond(200, envelope)
@@ -125,7 +125,5 @@ def trigger_build(
         action="build.trigger",
         target=f"{slug}/v{body.version_no}",
     )
-    remember(
-        request, scope, body_json, status_code=202, envelope=envelope, etag=None
-    )
+    remember(request, scope, body_json, status_code=202, envelope=envelope, etag=None)
     return respond(202, envelope)

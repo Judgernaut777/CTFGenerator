@@ -60,9 +60,7 @@ class SqlAlchemyScoreProjectionQueue:
         ).all()
         return [slug for (slug,) in rows]
 
-    def claim_pending(
-        self, limit: int, competition_id: str | None = None
-    ) -> list[ProjectionTask]:
+    def claim_pending(self, limit: int, competition_id: str | None = None) -> list[ProjectionTask]:
         """Lock (FOR UPDATE SKIP LOCKED, outbox rows only) and return pending
         rows in seq order. Locks die with the transaction, so a crashed
         projector's claims simply reappear."""
@@ -90,9 +88,7 @@ class SqlAlchemyScoreProjectionQueue:
         that folded their events into the projection."""
         if not seqs:
             return
-        self._session.execute(
-            sa.delete(OutboxRow).where(OutboxRow.seq.in_(list(seqs)))
-        )
+        self._session.execute(sa.delete(OutboxRow).where(OutboxRow.seq.in_(list(seqs))))
         self._session.flush()
 
     def fail(self, seqs: Sequence[int], error: str) -> int:
@@ -112,9 +108,7 @@ class SqlAlchemyScoreProjectionQueue:
         self._session.flush()
         return int(result.rowcount or 0)
 
-    def mark_transient(
-        self, seqs: Sequence[int], error: str, max_attempts: int
-    ) -> int:
+    def mark_transient(self, seqs: Sequence[int], error: str, max_attempts: int) -> int:
         """Record a *transient* (non-deterministic) failure: bump the attempts
         counter and leave the rows ``pending`` so they are re-claimable, only
         diverting to ``failed`` once ``attempts`` reaches ``max_attempts`` (a
@@ -211,9 +205,7 @@ class SqlAlchemyScoreboardProjectionRepository:
         self._session = session
 
     def upsert(self, projection: ScoreboardProjectionRecord) -> None:
-        comp_uuid = _resolve.competition_uuid(
-            self._session, projection.competition_id
-        )
+        comp_uuid = _resolve.competition_uuid(self._session, projection.competition_id)
         stmt = pg_insert(ScoreboardProjectionRow).values(
             competition_id=comp_uuid,
             as_of_seq=projection.as_of_seq,

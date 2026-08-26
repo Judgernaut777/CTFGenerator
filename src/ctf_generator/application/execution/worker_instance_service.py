@@ -88,9 +88,7 @@ class WorkerInstanceService:
 
     # -- gate ------------------------------------------------------------------
 
-    def _authenticate(
-        self, token: str, now: datetime, *, scope: str
-    ) -> AuthenticatedWorker:
+    def _authenticate(self, token: str, now: datetime, *, scope: str) -> AuthenticatedWorker:
         """Authenticate + require ``scope``. Returns the authenticated worker; the
         credential is the SOLE source of the worker identity."""
         auth = self._enrollment.authenticate(token, now)
@@ -99,9 +97,7 @@ class WorkerInstanceService:
         require_scope(auth, scope)
         return auth
 
-    def _authorize_owner(
-        self, token: str, instance_id: str, now: datetime, *, scope: str
-    ) -> str:
+    def _authorize_owner(self, token: str, instance_id: str, now: datetime, *, scope: str) -> str:
         """Authenticate + require ``scope`` + verify the credential's worker owns
         ``instance_id``. Returns the authenticated worker name (the ONLY name a
         report may be stamped with)."""
@@ -124,21 +120,15 @@ class WorkerInstanceService:
     def report_health(self, token: str, observation: HealthObservation, now: datetime) -> None:
         """Append a health observation for an OWNED instance. ``observation.worker``
         must be the authenticated worker (a worker cannot report as another)."""
-        worker = self._authorize_owner(
-            token, observation.instance_id, now, scope=REPORT_SCOPE
-        )
+        worker = self._authorize_owner(token, observation.instance_id, now, scope=REPORT_SCOPE)
         if observation.worker != worker:
             raise InstanceOwnershipError(
                 "health observation.worker does not match the authenticated worker"
             )
         self._lifecycle.record_observation(observation)
 
-    def report_runtime_resource(
-        self, token: str, resource: RuntimeResource, now: datetime
-    ) -> None:
-        worker = self._authorize_owner(
-            token, resource.instance_id, now, scope=REPORT_SCOPE
-        )
+    def report_runtime_resource(self, token: str, resource: RuntimeResource, now: datetime) -> None:
+        worker = self._authorize_owner(token, resource.instance_id, now, scope=REPORT_SCOPE)
         if resource.worker != worker:
             raise InstanceOwnershipError(
                 "runtime resource.worker does not match the authenticated worker"
@@ -146,9 +136,7 @@ class WorkerInstanceService:
         self._lifecycle.record_runtime_resource(resource)
 
     def report_endpoint(self, token: str, endpoint: InstanceEndpoint, now: datetime) -> None:
-        self._authorize_owner(
-            token, endpoint.instance_id, now, scope=REPORT_SCOPE
-        )
+        self._authorize_owner(token, endpoint.instance_id, now, scope=REPORT_SCOPE)
         self._lifecycle.record_endpoint(endpoint)
 
     # -- observed-lifecycle transition (instances:transition) ------------------
@@ -169,9 +157,7 @@ class WorkerInstanceService:
 
     # -- worker instance read + re-placement (networked launch contract) --------
 
-    def get_owned_instance(
-        self, token: str, instance_id: str, now: datetime
-    ) -> Instance:
+    def get_owned_instance(self, token: str, instance_id: str, now: datetime) -> Instance:
         """Return an instance the authenticated worker may act on.
 
         The in-process ``get_instance`` was ungated; over the network this MUST
@@ -191,9 +177,7 @@ class WorkerInstanceService:
             )
         return instance
 
-    def expected_image_digest(
-        self, token: str, instance_id: str, now: datetime
-    ) -> str | None:
+    def expected_image_digest(self, token: str, instance_id: str, now: datetime) -> str | None:
         """The recorded build digest the authenticated worker should pin its
         launch of ``instance_id`` to, or ``None`` when the instance has no
         ``image_ref`` or no digest is recorded (pinning is then skipped, exactly
@@ -208,9 +192,7 @@ class WorkerInstanceService:
             instance.definition_slug, instance.version_no, instance.image_ref
         )
 
-    def launch_stack_services(
-        self, token: str, instance_id: str, now: datetime
-    ):
+    def launch_stack_services(self, token: str, instance_id: str, now: datetime):
         """The multi-service stack the authenticated worker should launch for
         ``instance_id`` (its per-service images + digests + depends_on/expose), or
         an empty tuple for a single-image instance. Ownership-gated like
@@ -223,9 +205,7 @@ class WorkerInstanceService:
             instance.definition_slug, instance.version_no, instance.image_ref
         )
 
-    def replace_instance(
-        self, token: str, instance_id: str, now: datetime
-    ) -> Instance:
+    def replace_instance(self, token: str, instance_id: str, now: datetime) -> Instance:
         """Re-place + re-reserve an instance whose ``assigned_worker`` is ``None``
         (the slice-2 launch contract), scope- and ownership-guarded.
 
@@ -254,9 +234,7 @@ class WorkerInstanceService:
         _reservation, worker_name = self._scheduling.select_and_reserve(
             requirements=requirements,
             reservation_id=instance_id,
-            pooled_items=(
-                ReservationItem("platform", PLATFORM_SCOPE_KEY, "active_instances", 1),
-            ),
+            pooled_items=(ReservationItem("platform", PLATFORM_SCOPE_KEY, "active_instances", 1),),
             expires_at=expires_at,
             now=now,
         )

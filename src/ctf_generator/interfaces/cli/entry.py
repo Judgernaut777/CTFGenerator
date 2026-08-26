@@ -75,8 +75,7 @@ def _run_platform(args: list[str]) -> int:
         # httpx (the [cli] extra) is not installed. Fail cleanly -- never a
         # traceback -- and tell the user exactly how to enable the area.
         print(
-            f"the '{args[0]}' commands require the CLI extra: "
-            "pip install 'ctf-generator[cli]'",
+            f"the '{args[0]}' commands require the CLI extra: pip install 'ctf-generator[cli]'",
             file=sys.stderr,
         )
         return 1

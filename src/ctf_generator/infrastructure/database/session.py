@@ -39,9 +39,7 @@ class Database:
             # override cannot silently break that assumption.
             isolation_level="READ COMMITTED",
         )
-        self._session_factory = sessionmaker(
-            bind=self._engine, expire_on_commit=False, future=True
-        )
+        self._session_factory = sessionmaker(bind=self._engine, expire_on_commit=False, future=True)
 
     @property
     def engine(self) -> Engine:

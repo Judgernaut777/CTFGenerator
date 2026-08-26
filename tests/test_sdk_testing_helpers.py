@@ -139,9 +139,7 @@ class BuildFamilyInTests(_RegistryIsolated):
 
 class AssertRebuildByteIdenticalTests(_RegistryIsolated):
     def test_passes_for_a_builtin(self) -> None:
-        testing.assert_rebuild_is_byte_identical(
-            families.get(_BUILTIN), seed="probe-rebuild"
-        )
+        testing.assert_rebuild_is_byte_identical(families.get(_BUILTIN), seed="probe-rebuild")
 
     def test_raises_for_a_nondeterministic_family(self) -> None:
         fam = _family("probe_helper_rebuild_nondet", _render_nondeterministic)

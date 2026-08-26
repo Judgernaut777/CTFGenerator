@@ -84,9 +84,7 @@ class AuditSinkNonFatalHostTests(unittest.TestCase):
         # A DbAuditSink pointed at an unreachable database. record() must catch the
         # connection error and return normally -- never raise.
         broken = Database(
-            DatabaseConfig(
-                url="postgresql+psycopg://nobody:nobody@127.0.0.1:1/nonexistent"
-            )
+            DatabaseConfig(url="postgresql+psycopg://nobody:nobody@127.0.0.1:1/nonexistent")
         )
         sink = DbAuditSink(broken)
         try:
@@ -107,9 +105,7 @@ class AuditSinkNonFatalHostTests(unittest.TestCase):
         # An event whose outcome is not in the closed vocabulary makes the domain
         # aggregate raise inside record(); the guard swallows it (nothing persisted,
         # nothing raised).
-        broken = Database(
-            DatabaseConfig(url="postgresql+psycopg://x:x@127.0.0.1:1/none")
-        )
+        broken = Database(DatabaseConfig(url="postgresql+psycopg://x:x@127.0.0.1:1/none"))
         try:
             DbAuditSink(broken).record(
                 {
@@ -208,9 +204,7 @@ class DbAuditSinkTests(unittest.TestCase):
     def test_db_write_failure_in_composite_leaves_log_sink_intact(self) -> None:
         # A DbAuditSink whose write fails (unreachable DB) inside a composite must
         # not stop the healthy log sink and must not raise.
-        broken = Database(
-            DatabaseConfig(url="postgresql+psycopg://x:x@127.0.0.1:1/none")
-        )
+        broken = Database(DatabaseConfig(url="postgresql+psycopg://x:x@127.0.0.1:1/none"))
         log_spy = _RecordingSink()
         composite = CompositeAuditSink(DbAuditSink(broken), log_spy)
         try:

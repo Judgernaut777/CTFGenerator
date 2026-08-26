@@ -137,7 +137,10 @@ class JobLeaseTests(unittest.TestCase):
 class JobTransitionTests(unittest.TestCase):
     def test_enqueue_transition_from_none(self) -> None:
         t = JobTransition(
-            job_id="j1", from_status=None, to_status="queued", attempt=0,
+            job_id="j1",
+            from_status=None,
+            to_status="queued",
+            attempt=0,
             occurred_at=_NOW,
         )
         self.assertIsNone(t.from_status)
@@ -145,27 +148,40 @@ class JobTransitionTests(unittest.TestCase):
     def test_rejects_unknown_statuses(self) -> None:
         with self.assertRaises(ValueError):
             JobTransition(
-                job_id="j1", from_status="bogus", to_status="queued", attempt=0,
+                job_id="j1",
+                from_status="bogus",
+                to_status="queued",
+                attempt=0,
                 occurred_at=_NOW,
             )
         with self.assertRaises(ValueError):
             JobTransition(
-                job_id="j1", from_status=None, to_status="bogus", attempt=0,
+                job_id="j1",
+                from_status=None,
+                to_status="bogus",
+                attempt=0,
                 occurred_at=_NOW,
             )
 
     def test_rejects_negative_attempt(self) -> None:
         with self.assertRaises(ValueError):
             JobTransition(
-                job_id="j1", from_status=None, to_status="queued", attempt=-1,
+                job_id="j1",
+                from_status=None,
+                to_status="queued",
+                attempt=-1,
                 occurred_at=_NOW,
             )
 
     def test_rejects_unknown_error_class(self) -> None:
         with self.assertRaises(ValueError):
             JobTransition(
-                job_id="j1", from_status="running", to_status="failed", attempt=1,
-                occurred_at=_NOW, error_class="oops",
+                job_id="j1",
+                from_status="running",
+                to_status="failed",
+                attempt=1,
+                occurred_at=_NOW,
+                error_class="oops",
             )
 
 
@@ -177,9 +193,7 @@ class TransitionMatrixTests(unittest.TestCase):
 
     def test_targets_are_valid_statuses(self) -> None:
         for source, targets in LEGAL_JOB_TRANSITIONS.items():
-            self.assertLessEqual(
-                targets, VALID_JOB_STATUSES, f"bad targets for {source}"
-            )
+            self.assertLessEqual(targets, VALID_JOB_STATUSES, f"bad targets for {source}")
 
     def test_no_self_transitions(self) -> None:
         # Self "transitions" are field updates, not state moves.

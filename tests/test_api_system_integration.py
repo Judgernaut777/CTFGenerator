@@ -118,9 +118,7 @@ class SystemReadinessUpTests(unittest.TestCase):
         url = base.set(database=name).render_as_string(hide_password=False)
         try:
             cfg = AlembicConfig(os.path.join(_REPO_ROOT, "alembic.ini"))
-            cfg.set_main_option(
-                "script_location", os.path.join(_REPO_ROOT, "alembic")
-            )
+            cfg.set_main_option("script_location", os.path.join(_REPO_ROOT, "alembic"))
             cfg.set_main_option("sqlalchemy.url", str(url))
             command.upgrade(cfg, "head")
             db = Database(DatabaseConfig(url=url))

@@ -230,8 +230,7 @@ ROLE_PERMISSIONS: dict[str, frozenset[Permission]] = {
     ),
     "captain": _CONTESTANT,
     "player": _CONTESTANT,
-    "judge": _CATALOG_READ
-    | frozenset({Permission.SUBMISSION_READ, Permission.SCOREBOARD_READ}),
+    "judge": _CATALOG_READ | frozenset({Permission.SUBMISSION_READ, Permission.SCOREBOARD_READ}),
     "observer": _CATALOG_READ | frozenset({Permission.SCOREBOARD_READ}),
     # Support is the ops-staff role: read-only instance/build visibility plus the
     # job-queue observability + control surface (dead-letter, cancel, retry).
@@ -336,9 +335,7 @@ def principal_for(
     )
 
 
-def competition_effective_roles(
-    principal: Principal, competition_id: str
-) -> frozenset[str]:
+def competition_effective_roles(principal: Principal, competition_id: str) -> frozenset[str]:
     """The caller's EFFECTIVE role set for one competition: its deployment-global
     ``system_roles`` ∪ the single role of its membership in that competition (if
     any). This -- NOT the flat ``Principal.roles`` -- is what a COMPETITION-scoped
@@ -351,9 +348,7 @@ def competition_effective_roles(
     return frozenset(roles)
 
 
-def competition_permissions(
-    principal: Principal, competition_id: str
-) -> frozenset[Permission]:
+def competition_permissions(principal: Principal, competition_id: str) -> frozenset[Permission]:
     """The permissions the caller effectively holds IN one competition."""
     return resolve_permissions(competition_effective_roles(principal, competition_id))
 
@@ -370,8 +365,7 @@ def assert_competition_permission(
         raise AuthorizationError("no competition context for authorization")
     if permission not in competition_permissions(principal, competition_id):
         raise AuthorizationError(
-            f"principal lacks {permission.value!r} in competition "
-            f"{competition_id!r}"
+            f"principal lacks {permission.value!r} in competition {competition_id!r}"
         )
 
 
@@ -403,9 +397,7 @@ def assert_competition_permission_or_404(
         raise LookupError(not_found) from None
 
 
-def authorized_competitions(
-    principal: Principal, permission: Permission
-) -> frozenset[str] | None:
+def authorized_competitions(principal: Principal, permission: Permission) -> frozenset[str] | None:
     """The competitions in which the caller holds ``permission``.
 
     Returns ``None`` when a system role grants it deployment-wide (an unrestricted
@@ -437,9 +429,7 @@ class SubmissionAccess:
     team: str | None
 
 
-def submission_team_scope(
-    principal: Principal, competition_id: str
-) -> SubmissionAccess:
+def submission_team_scope(principal: Principal, competition_id: str) -> SubmissionAccess:
     """Resolve a principal's submission tenancy scope WITHIN one competition.
 
     The team is derived from the caller's per-competition membership
@@ -454,9 +444,7 @@ def submission_team_scope(
       membership in THIS competition.
     * A team-scoped caller not placed on a team in this competition (no membership,
       or a membership with no team) is denied entirely (fail closed)."""
-    if competition_effective_roles(principal, competition_id) & (
-        TENANCY_UNRESTRICTED_ROLES
-    ):
+    if competition_effective_roles(principal, competition_id) & (TENANCY_UNRESTRICTED_ROLES):
         return SubmissionAccess(unrestricted=True, team=None)
     membership = principal.memberships.get(competition_id)
     team = membership[1] if membership is not None else None
@@ -529,9 +517,7 @@ def require_permission(permission: Permission):
 
     def _dependency(principal: Principal = Depends(get_principal)) -> Principal:
         if not principal.has(permission):
-            raise AuthorizationError(
-                f"principal lacks required permission {permission.value!r}"
-            )
+            raise AuthorizationError(f"principal lacks required permission {permission.value!r}")
         return principal
 
     return _dependency
@@ -545,9 +531,7 @@ def require_competition_permission(permission: Permission):
     its membership -- not its flat role union -- is what the check consults. A
     system role (``admin`` / ``support``) is granted in every competition."""
 
-    def _dependency(
-        request: Request, principal: Principal = Depends(get_principal)
-    ) -> Principal:
+    def _dependency(request: Request, principal: Principal = Depends(get_principal)) -> Principal:
         competition_id = request.path_params.get("competition_id")
         assert_competition_permission(principal, competition_id, permission)
         return principal
@@ -566,9 +550,7 @@ def require_any_competition_permission(permission: Permission):
     def _dependency(principal: Principal = Depends(get_principal)) -> Principal:
         allowed = authorized_competitions(principal, permission)
         if allowed is not None and not allowed:
-            raise AuthorizationError(
-                f"principal lacks {permission.value!r} in any competition"
-            )
+            raise AuthorizationError(f"principal lacks {permission.value!r} in any competition")
         return principal
 
     return _dependency
@@ -701,9 +683,7 @@ def require_version_report_permission(
     reaches here."""
     permission = _VERSION_REPORT_PERMISSION[report_type]
     if not principal.has(permission):
-        raise AuthorizationError(
-            f"principal lacks required permission {permission.value!r}"
-        )
+        raise AuthorizationError(f"principal lacks required permission {permission.value!r}")
     return principal
 
 

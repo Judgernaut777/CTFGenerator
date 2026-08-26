@@ -75,9 +75,7 @@ class InstanceLifecycleService:
         *,
         scheduling: SchedulingService,
         jobs: JobService,
-        repository_factory: Callable[
-            [Session], InstanceRepository
-        ] = SqlAlchemyInstanceRepository,
+        repository_factory: Callable[[Session], InstanceRepository] = SqlAlchemyInstanceRepository,
         build_image_repository_factory: Callable[
             [Session], SqlAlchemyChallengeBuildImageRepository
         ] = SqlAlchemyChallengeBuildImageRepository,
@@ -186,12 +184,9 @@ class InstanceLifecycleService:
                     existing.definition_slug,
                     existing.version_no,
                 )
-                if identity != (
-                    competition_id, team_name, definition_slug, version_no
-                ):
+                if identity != (competition_id, team_name, definition_slug, version_no):
                     raise IdempotencyConflictError(
-                        f"instance {instance_id!r} already exists with a different "
-                        "identity"
+                        f"instance {instance_id!r} already exists with a different identity"
                     )
                 if existing.state != "requested":
                     raise IdempotencyConflictError(
@@ -241,9 +236,7 @@ class InstanceLifecycleService:
         )
         return placed
 
-    def image_digest_for(
-        self, definition_slug: str, version_no: int, image_ref: str
-    ) -> str | None:
+    def image_digest_for(self, definition_slug: str, version_no: int, image_ref: str) -> str | None:
         """The recorded build digest for a specific ``(version, image_ref)``, or
         ``None`` when none is recorded. A pure DB read of the
         ``challenge_build_images`` registry (ADR-001; no Docker, no challenge
@@ -294,9 +287,7 @@ class InstanceLifecycleService:
                 return current
             if not is_legal_instance_transition(current.state, to_state):
                 raise IllegalInstanceTransitionError(current.state, to_state)
-            updated = repo.transition(
-                instance_id, to_state, reason=reason, actor=actor, now=now
-            )
+            updated = repo.transition(instance_id, to_state, reason=reason, actor=actor, now=now)
         if to_state in _RELEASE_STATES:
             self._scheduling.release(instance_id, now)
         return updated
@@ -308,9 +299,7 @@ class InstanceLifecycleService:
         (idempotent). The observed transition to ``stopped`` is driven by the
         worker's report + the reconciler."""
         with self._database.session_scope() as session:
-            instance = self._repo(session).set_desired_state(
-                instance_id, "stopped", now
-            )
+            instance = self._repo(session).set_desired_state(instance_id, "stopped", now)
         self._jobs.enqueue_idempotent(
             build_corrective_job(instance, instance.generation, "stop", now), now
         )
@@ -414,9 +403,7 @@ class InstanceLifecycleService:
         )
         return current
 
-    def renew_lease(
-        self, instance_id: str, new_expires_at: datetime, now: datetime
-    ) -> Instance:
+    def renew_lease(self, instance_id: str, new_expires_at: datetime, now: datetime) -> Instance:
         """Extend a live instance's capacity hold (so the leaked-hold sweep never
         reclaims it) and record the new TTL on the instance."""
         self._scheduling.renew(instance_id, new_expires_at, now)
@@ -427,9 +414,7 @@ class InstanceLifecycleService:
 
     # -- worker-reported facts -----------------------------------------------
 
-    def record_observation(
-        self, observation: HealthObservation
-    ) -> HealthObservation:
+    def record_observation(self, observation: HealthObservation) -> HealthObservation:
         """Append a worker health observation (append-only). Generation-gating is
         applied by the reconciler, not here."""
         with self._database.session_scope() as session:
@@ -462,9 +447,7 @@ class InstanceLifecycleService:
         with self._database.session_scope() as session:
             return self._repo(session).get(instance_id)
 
-    def list_instances(
-        self, *, competition_id: str | None = None
-    ) -> list[Instance]:
+    def list_instances(self, *, competition_id: str | None = None) -> list[Instance]:
         """Operator list of instances, optionally scoped to one competition. Pure
         read; returns the FULL ordered result set (no cap) so the router's
         opaque-cursor pagination reaches every row -- consistent with the catalog
@@ -489,9 +472,7 @@ class InstanceLifecycleService:
             if instance is None:
                 return None
             endpoints = [
-                endpoint
-                for endpoint in repo.list_endpoints(instance_id)
-                if not endpoint.internal
+                endpoint for endpoint in repo.list_endpoints(instance_id) if not endpoint.internal
             ]
             health = repo.latest_observation(instance_id)
             return instance, endpoints, health

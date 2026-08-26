@@ -64,7 +64,9 @@ def list_evaluations(
     page = paginate(runs, key=_sort_key, limit=limit, cursor=cursor)
     items = [eval_run_to_list_item(r) for r in page.items]
     envelope = list_envelope(
-        EVAL_RUN_LIST_SCHEMA, items, limit=clamp_limit(limit),
+        EVAL_RUN_LIST_SCHEMA,
+        items,
+        limit=clamp_limit(limit),
         next_cursor=page.next_cursor,
     )
     return respond(200, envelope)
@@ -125,11 +127,14 @@ def request_evaluation(
         request,
         principal,
         action="eval.request",
-        target=f"{slug}/v{version_no}/{profile}"
-        + (":adversarial" if adversarial else ""),
+        target=f"{slug}/v{version_no}/{profile}" + (":adversarial" if adversarial else ""),
     )
     remember(
-        request, scope, body_json, status_code=status_code, envelope=envelope,
+        request,
+        scope,
+        body_json,
+        status_code=status_code,
+        envelope=envelope,
         etag=None,
     )
     return respond(status_code, envelope)

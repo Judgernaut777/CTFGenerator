@@ -154,9 +154,7 @@ class WorkerRegistryTests(unittest.TestCase):
                 registry.add(_worker())
                 registry.approve("worker-1")
             with db.session_scope() as s:
-                SqlAlchemyWorkerRegistry(s).update_profile(
-                    _worker(capacity=8, version="0.8.0")
-                )
+                SqlAlchemyWorkerRegistry(s).update_profile(_worker(capacity=8, version="0.8.0"))
             with db.session_scope() as s:
                 got = SqlAlchemyWorkerRegistry(s).get("worker-1")
         self.assertEqual(got.capacity, 8)
@@ -175,9 +173,7 @@ class WorkerRegistryTests(unittest.TestCase):
                     SqlAlchemyWorkerRegistry(s).approve("worker-1")
             # quarantine / clear (reversible overlay).
             with db.session_scope() as s:
-                SqlAlchemyWorkerRegistry(s).quarantine(
-                    "worker-1", _NOW, "suspicious build output"
-                )
+                SqlAlchemyWorkerRegistry(s).quarantine("worker-1", _NOW, "suspicious build output")
             with db.session_scope() as s:
                 got = SqlAlchemyWorkerRegistry(s).get("worker-1")
                 self.assertEqual(got.quarantine_reason, "suspicious build output")
@@ -223,8 +219,7 @@ class WorkerRegistryTests(unittest.TestCase):
                     with engine.begin() as conn:
                         conn.execute(
                             sa.text(
-                                "UPDATE workers SET quarantined_at = now() "
-                                "WHERE name = 'worker-1'"
+                                "UPDATE workers SET quarantined_at = now() WHERE name = 'worker-1'"
                             )
                         )
             finally:
@@ -284,9 +279,7 @@ class WorkerCredentialRepositoryTests(unittest.TestCase):
                         {"id": uuid.uuid4(), "old": cred.credential_id},
                     )
             with db.session_scope() as s:
-                active = SqlAlchemyWorkerCredentialRepository(s).get_active_for_worker(
-                    "worker-1"
-                )
+                active = SqlAlchemyWorkerCredentialRepository(s).get_active_for_worker("worker-1")
         self.assertIsNotNone(active)  # the old credential is still live
         self.assertEqual(active.credential_id, cred.credential_id)
 
@@ -301,9 +294,7 @@ class WorkerCredentialRepositoryTests(unittest.TestCase):
                 repo.revoke(first.credential_id, _NOW)
                 repo.add(_credential())
             with db.session_scope() as s:
-                history = SqlAlchemyWorkerCredentialRepository(s).list_for_worker(
-                    "worker-1"
-                )
+                history = SqlAlchemyWorkerCredentialRepository(s).list_for_worker("worker-1")
         self.assertEqual(len(history), 2)
 
     def test_double_revoke_raises_lookuperror(self) -> None:
@@ -313,14 +304,10 @@ class WorkerCredentialRepositoryTests(unittest.TestCase):
             with db.session_scope() as s:
                 SqlAlchemyWorkerCredentialRepository(s).add(cred)
             with db.session_scope() as s:
-                SqlAlchemyWorkerCredentialRepository(s).revoke(
-                    cred.credential_id, _NOW
-                )
+                SqlAlchemyWorkerCredentialRepository(s).revoke(cred.credential_id, _NOW)
             with self.assertRaises(LookupError):
                 with db.session_scope() as s:
-                    SqlAlchemyWorkerCredentialRepository(s).revoke(
-                        cred.credential_id, _NOW
-                    )
+                    SqlAlchemyWorkerCredentialRepository(s).revoke(cred.credential_id, _NOW)
 
     def test_freeze_trigger_blocks_every_other_update_and_delete(self) -> None:
         with _migrated_database() as (db, url):
@@ -344,18 +331,14 @@ class WorkerCredentialRepositoryTests(unittest.TestCase):
                 # Un-revoking (revoked_at back to NULL) is also frozen.
                 with engine.begin() as conn:
                     conn.execute(
-                        sa.text(
-                            "UPDATE worker_credentials SET revoked_at = now() "
-                            "WHERE id = :id"
-                        ),
+                        sa.text("UPDATE worker_credentials SET revoked_at = now() WHERE id = :id"),
                         {"id": cred.credential_id},
                     )
                 with self.assertRaises(ProgrammingError):
                     with engine.begin() as conn:
                         conn.execute(
                             sa.text(
-                                "UPDATE worker_credentials SET revoked_at = NULL "
-                                "WHERE id = :id"
+                                "UPDATE worker_credentials SET revoked_at = NULL WHERE id = :id"
                             ),
                             {"id": cred.credential_id},
                         )
@@ -392,9 +375,7 @@ class WorkerEnrollmentServiceTests(unittest.TestCase):
             registered = service.register_worker(_worker())
             self.assertEqual(registered.trust_state, "pending")
             with db.session_scope() as s:
-                creds = SqlAlchemyWorkerCredentialRepository(s).list_for_worker(
-                    "worker-1"
-                )
+                creds = SqlAlchemyWorkerCredentialRepository(s).list_for_worker("worker-1")
         self.assertEqual(creds, [])
 
     def test_approve_issues_first_credential_and_authenticates(self) -> None:
@@ -438,17 +419,11 @@ class WorkerEnrollmentServiceTests(unittest.TestCase):
         with _migrated_database() as (db, _url):
             service = WorkerEnrollmentService(db)
             service.register_worker(_worker())
-            issued = service.approve_worker(
-                "worker-1", _NOW, ttl=timedelta(hours=1)
-            )
+            issued = service.approve_worker("worker-1", _NOW, ttl=timedelta(hours=1))
             # now is caller-passed, so expiry needs no sleeping and no
             # dependence on the container's clock.
-            self.assertIsNotNone(
-                service.authenticate(issued.token(), _NOW + timedelta(minutes=59))
-            )
-            self.assertIsNone(
-                service.authenticate(issued.token(), _NOW + timedelta(hours=2))
-            )
+            self.assertIsNotNone(service.authenticate(issued.token(), _NOW + timedelta(minutes=59)))
+            self.assertIsNone(service.authenticate(issued.token(), _NOW + timedelta(hours=2)))
 
     def test_quarantined_worker_fails_authentication(self) -> None:
         with _migrated_database() as (db, _url):
@@ -456,9 +431,7 @@ class WorkerEnrollmentServiceTests(unittest.TestCase):
             service.register_worker(_worker())
             issued = service.approve_worker("worker-1", _NOW)
             with db.session_scope() as s:
-                SqlAlchemyWorkerRegistry(s).quarantine(
-                    "worker-1", _NOW, "incident-42"
-                )
+                SqlAlchemyWorkerRegistry(s).quarantine("worker-1", _NOW, "incident-42")
             at = _NOW + timedelta(hours=1)
             self.assertIsNone(service.authenticate(issued.token(), at))
             with db.session_scope() as s:
@@ -496,9 +469,7 @@ class WorkerEnrollmentServiceTests(unittest.TestCase):
             with self.assertRaises(LookupError):
                 service.rotate_credential("worker-1", _NOW)
             with db.session_scope() as s:
-                creds = SqlAlchemyWorkerCredentialRepository(s).list_for_worker(
-                    "worker-1"
-                )
+                creds = SqlAlchemyWorkerCredentialRepository(s).list_for_worker("worker-1")
         self.assertEqual(creds, [])
 
     def test_rotate_on_revoked_worker_raises_and_issues_no_credential(
@@ -512,18 +483,14 @@ class WorkerEnrollmentServiceTests(unittest.TestCase):
             with self.assertRaises(LookupError):
                 service.rotate_credential("worker-1", _NOW + timedelta(minutes=2))
             with db.session_scope() as s:
-                active = SqlAlchemyWorkerCredentialRepository(
-                    s
-                ).get_active_for_worker("worker-1")
+                active = SqlAlchemyWorkerCredentialRepository(s).get_active_for_worker("worker-1")
         self.assertIsNone(active)  # the revoke killed the only credential
 
     def test_scope_limited_credential_is_gated_by_require_scope(self) -> None:
         with _migrated_database() as (db, _url):
             service = WorkerEnrollmentService(db)
             service.register_worker(_worker())
-            issued = service.approve_worker(
-                "worker-1", _NOW, scopes=("jobs:claim",)
-            )
+            issued = service.approve_worker("worker-1", _NOW, scopes=("jobs:claim",))
             auth = service.authenticate(issued.token(), _NOW + timedelta(hours=1))
         self.assertIsNotNone(auth)
         require_scope(auth, "jobs:claim")  # granted -> no raise
@@ -555,8 +522,7 @@ class WorkerRevokedTerminalTriggerTests(unittest.TestCase):
                 with engine.begin() as conn:
                     conn.execute(
                         sa.text(
-                            "UPDATE workers SET last_heartbeat_at = now() "
-                            "WHERE name = 'worker-1'"
+                            "UPDATE workers SET last_heartbeat_at = now() WHERE name = 'worker-1'"
                         )
                     )
             finally:

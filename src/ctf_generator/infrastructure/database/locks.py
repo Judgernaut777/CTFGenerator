@@ -65,9 +65,7 @@ def acquire_submission_lock(
     ``definition_slug`` / ``version_no`` are folded into the key as-is (business
     identifiers, already unique)."""
     competition_uuid = _resolve.competition_uuid(session, competition_slug)
-    key = _KEY_SEP.join(
-        (str(competition_uuid), team_name, definition_slug, str(version_no))
-    )
+    key = _KEY_SEP.join((str(competition_uuid), team_name, definition_slug, str(version_no)))
     session.execute(
         sa.text("SELECT pg_advisory_xact_lock(hashtextextended(:key, 0))"),
         {"key": key},

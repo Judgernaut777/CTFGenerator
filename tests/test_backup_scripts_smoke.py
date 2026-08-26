@@ -34,18 +34,14 @@ def _read(path: str) -> str:
 def _code_lines(text: str) -> str:
     """Non-comment lines only (so prose in header comments does not trip a
     literal-substring check)."""
-    return "\n".join(
-        line for line in text.splitlines() if not line.lstrip().startswith("#")
-    )
+    return "\n".join(line for line in text.splitlines() if not line.lstrip().startswith("#"))
 
 
 def _run(argv, env_extra=None):
     env = {**os.environ}
     if env_extra is not None:
         env.update(env_extra)
-    return subprocess.run(
-        argv, env=env, capture_output=True, text=True, timeout=60
-    )
+    return subprocess.run(argv, env=env, capture_output=True, text=True, timeout=60)
 
 
 @unittest.skipUnless(_HAVE_BASH, _BASH_REASON)
@@ -103,8 +99,11 @@ class DsnParserTests(unittest.TestCase):
         self.assertEqual(result.returncode, 0, result.stderr)
         host, port, user, password, db = result.stdout.splitlines()[:5]
         return {
-            "host": host, "port": port, "user": user,
-            "password": password, "database": db,
+            "host": host,
+            "port": port,
+            "user": user,
+            "password": password,
+            "database": db,
         }
 
     def test_parses_driver_qualified_dsn(self) -> None:
@@ -137,7 +136,10 @@ class BackupGuardTests(unittest.TestCase):
         env["CTFGEN_ARTIFACT_ROOT"] = tempfile.gettempdir()
         result = subprocess.run(
             ["bash", _BACKUP, tempfile.mkdtemp()],
-            env=env, capture_output=True, text=True, timeout=60,
+            env=env,
+            capture_output=True,
+            text=True,
+            timeout=60,
         )
         self.assertNotEqual(result.returncode, 0)
         self.assertIn("CTFGEN_DATABASE_URL", result.stdout + result.stderr)
@@ -193,7 +195,10 @@ class RestoreGuardTests(unittest.TestCase):
         try:
             result = subprocess.run(
                 ["bash", _RESTORE, src, _DSN],
-                env=env, capture_output=True, text=True, timeout=60,
+                env=env,
+                capture_output=True,
+                text=True,
+                timeout=60,
             )
             self.assertNotEqual(result.returncode, 0)
             self.assertIn("CTFGEN_ARTIFACT_ROOT", result.stdout + result.stderr)

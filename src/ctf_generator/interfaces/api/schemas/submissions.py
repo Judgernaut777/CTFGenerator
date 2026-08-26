@@ -25,9 +25,7 @@ class SubmissionCreateRequest(BaseModel):
     version_no: int = Field(ge=1)
     # The candidate flag: inbound only, never stored/echoed. ``repr=False`` keeps
     # it out of the model's repr so it cannot leak into a log line or traceback.
-    answer: str = Field(
-        min_length=1, max_length=_MAX_ANSWER_LENGTH, repr=False
-    )
+    answer: str = Field(min_length=1, max_length=_MAX_ANSWER_LENGTH, repr=False)
     instance_seed: str | None = None
 
     @field_validator("answer")

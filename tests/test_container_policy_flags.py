@@ -36,9 +36,7 @@ def _probe(**overrides) -> DockerHostProbe:
 
 class FlagTranslationTests(unittest.TestCase):
     def test_every_hardening_field_maps_to_a_flag(self) -> None:
-        policy = ContainerPolicy(
-            memory_mb=128, cpu_millis=1500, pids_limit=64, tmpfs_mb=32
-        )
+        policy = ContainerPolicy(memory_mb=128, cpu_millis=1500, pids_limit=64, tmpfs_mb=32)
         flags = policy_to_run_flags(policy, _probe(), non_root_uid=65534)
         joined = " ".join(flags)
         # Non-root user
@@ -90,9 +88,7 @@ class FlagTranslationTests(unittest.TestCase):
             )
 
     def test_named_custom_seccomp_profile_refused_without_registry(self) -> None:
-        policy = ContainerPolicy(
-            memory_mb=64, cpu_millis=250, seccomp_profile="my-strict-profile"
-        )
+        policy = ContainerPolicy(memory_mb=64, cpu_millis=250, seccomp_profile="my-strict-profile")
         with self.assertRaises(UnsupportedRuntimeError):
             policy_to_run_flags(policy, _probe())
 
@@ -105,9 +101,7 @@ class FlagTranslationTests(unittest.TestCase):
         self.assertNotIn("apparmor", " ".join(flags))
 
     def test_named_apparmor_profile_without_apparmor_is_refused(self) -> None:
-        policy = ContainerPolicy(
-            memory_mb=64, cpu_millis=250, apparmor_profile="ctfgen-strict"
-        )
+        policy = ContainerPolicy(memory_mb=64, cpu_millis=250, apparmor_profile="ctfgen-strict")
         with self.assertRaises(UnsupportedRuntimeError):
             policy_to_run_flags(policy, _probe(apparmor_available=False))
 

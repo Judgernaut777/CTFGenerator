@@ -76,6 +76,7 @@ def _integrity_constraint_name(exc: IntegrityError) -> str | None:
     diag = getattr(getattr(exc, "orig", None), "diag", None)
     return getattr(diag, "constraint_name", None)
 
+
 # Default liveness window: a worker whose last heartbeat is older than this is
 # not dispatch-eligible (the M7 "heartbeat fresh" conjunct, now enforced).
 DEFAULT_HEARTBEAT_MAX_AGE_SECONDS = 60
@@ -241,9 +242,7 @@ class SchedulingService:
         """Re-hold a released reservation against its original placement, in one
         transaction that re-locks the header ``FOR UPDATE``."""
         with self._database.session_scope() as session:
-            return self._ledger_factory(session).reactivate(
-                reservation_id, expires_at, now
-            )
+            return self._ledger_factory(session).reactivate(reservation_id, expires_at, now)
 
     def reactivate(
         self, reservation_id: str, expires_at: datetime, now: datetime
@@ -256,9 +255,7 @@ class SchedulingService:
         original placement can no longer re-admit the hold."""
         return self._reactivate(reservation_id, expires_at, now)
 
-    def renew(
-        self, reservation_id: str, new_expires_at: datetime, now: datetime
-    ) -> None:
+    def renew(self, reservation_id: str, new_expires_at: datetime, now: datetime) -> None:
         """Extend a held reservation's TTL so ``release_expired`` does not sweep
         a still-running instance. ``LookupError`` if missing/released."""
         with self._database.session_scope() as session:

@@ -51,9 +51,7 @@ def _update(args: argparse.Namespace) -> int:
 
         raise CliError("nothing to update: pass --title")
     with open_client(args) as client:
-        _body, etag = client.request(
-            "GET", f"/challenge-definitions/{args.slug}", return_etag=True
-        )
+        _body, etag = client.request("GET", f"/challenge-definitions/{args.slug}", return_etag=True)
         updated = client.request(
             "PATCH",
             f"/challenge-definitions/{args.slug}",

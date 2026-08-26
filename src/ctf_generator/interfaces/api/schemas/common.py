@@ -30,9 +30,7 @@ class ErrorEnvelope(BaseModel):
 
     model_config = ConfigDict(populate_by_name=True)
 
-    schema_id: str = Field(
-        default=ERROR_SCHEMA, alias="schema", serialization_alias="schema"
-    )
+    schema_id: str = Field(default=ERROR_SCHEMA, alias="schema", serialization_alias="schema")
     schema_version: str = Field(default="1.0")
     error: ErrorBody
 

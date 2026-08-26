@@ -6,7 +6,8 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 from .generator import create_challenge
-from .replay_validator import ReplayReport, cross_replay as run_cross_replay
+from .replay_validator import ReplayReport
+from .replay_validator import cross_replay as run_cross_replay
 from .runtime_validator import CommandRunner, RuntimeValidationReport, validate_runtime
 from .validator import validate_challenge
 
@@ -132,4 +133,3 @@ def _merge_replay_report(
 ) -> None:
     report.errors.extend([f"{replay_name}: {error}" for error in replay_report.errors])
     report.logs.extend([f"[{replay_name}]\n{log}" for log in replay_report.logs])
-

@@ -55,7 +55,7 @@ class _FakeRuntimeBackend:
 class _FakeClient:
     bundle: BuildBundle
     claim_lease: JobLease | None
-    token: str = "ctfw1.cred.secret"
+    token: str = "ctfw1.cred.secret"  # noqa: S105 -- fake bearer token in test double, not a real credential
     completed: list = field(default_factory=list)
     failed: list = field(default_factory=list)
 
@@ -99,9 +99,10 @@ class BuildChallengeWorkerIntegrationTests(unittest.TestCase):
 
     def tearDown(self) -> None:
         for ref in self._image_refs:
-            subprocess.run(
-                ["docker", "image", "rm", "--force", ref],
-                capture_output=True, text=True,
+            subprocess.run(  # noqa: S603, S607 -- docker CLI cleanup of images this test built
+                ["docker", "image", "rm", "--force", ref],  # noqa: S607 -- docker resolved via PATH by design
+                capture_output=True,
+                text=True,
             )
 
     def test_build_challenge_job_builds_a_real_image(self) -> None:
@@ -125,7 +126,7 @@ class BuildChallengeWorkerIntegrationTests(unittest.TestCase):
             required_capabilities=("build_challenge",),
             payload=payload,
         )
-        lease = JobLease(job=job, lease_token="lease-it-1", lease_expires_at=_NOW)
+        lease = JobLease(job=job, lease_token="lease-it-1", lease_expires_at=_NOW)  # noqa: S106 -- synthetic lease token for test double
         client = _FakeClient(bundle=bundle, claim_lease=lease)
         worker = Worker(
             WorkerConfig(worker_name="w-it", lease_seconds=60),
@@ -146,9 +147,10 @@ class BuildChallengeWorkerIntegrationTests(unittest.TestCase):
         self.assertTrue(result["digest"].startswith("sha256:"), result["digest"])
 
         # The image REALLY exists on the host.
-        rc = subprocess.run(
-            ["docker", "image", "inspect", image_ref],
-            capture_output=True, text=True,
+        rc = subprocess.run(  # noqa: S603, S607 -- docker CLI inspection of image this test built
+            ["docker", "image", "inspect", image_ref],  # noqa: S607 -- docker resolved via PATH by design
+            capture_output=True,
+            text=True,
         ).returncode
         self.assertEqual(rc, 0)
 

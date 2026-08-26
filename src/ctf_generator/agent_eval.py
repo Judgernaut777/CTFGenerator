@@ -48,14 +48,23 @@ import subprocess
 import time
 import urllib.error
 import urllib.request
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Callable, Protocol
+from typing import Protocol
 
 from .models import ScenarioSpec
-from .runtime_validator import CommandRunner, RuntimeValidationReport, _record, _run, _wait_for_health
+from .runtime_validator import (
+    CommandRunner,
+    RuntimeValidationReport,
+    _record,
+    _run,
+    _wait_for_health,
+)
 from .scenario import (
     Agent as ScenarioAgent,
+)
+from .scenario import (
     EnvironmentController,
     EventSource,
     NullEnvironmentController,
@@ -110,9 +119,15 @@ class UrllibHTTPClient:
         if json_body is not None:
             data = json.dumps(json_body).encode("utf-8")
             req_headers.setdefault("Content-Type", "application/json")
-        request = urllib.request.Request(url, data=data, headers=req_headers, method=method)
+        # Scheme is validated against an http/https allowlist below before opening.
+        request = urllib.request.Request(url, data=data, headers=req_headers, method=method)  # noqa: S310 -- scheme allowlisted before urlopen
+        # Only http(s) schemes reach the network layer; anything else
+        # (file:, ftp:, custom handlers) is rejected before opening.
+        if request.type not in ("http", "https"):
+            raise ValueError(f"unsupported URL scheme: {url!r}")
         try:
-            with urllib.request.urlopen(request, timeout=timeout) as response:
+            # Scheme allowlisted to http/https above.
+            with urllib.request.urlopen(request, timeout=timeout) as response:  # nosec B310 -- scheme allowlisted above  # noqa: S310
                 body = response.read().decode("utf-8", errors="replace")
                 return HTTPResponse(
                     status=response.status, body=body, headers=dict(response.headers)
@@ -348,7 +363,9 @@ def _read_public_context(public_dir: Path) -> str:
 def _build_initial_user_message(context_text: str) -> str:
     if context_text.strip():
         return f"Public challenge files:\n\n{context_text}\n\nBegin your investigation."
-    return "No public description or hints were found. Begin your investigation from the app root '/'."
+    return (
+        "No public description or hints were found. Begin your investigation from the app root '/'."
+    )
 
 
 @dataclass
@@ -415,7 +432,9 @@ class LlmSolverAgent:
 
     # -- provider-specific single-turn request/parse -----------------------
 
-    def _step_anthropic(self, client, system: str, messages: list[dict]) -> tuple[str, list[_ToolCall]]:
+    def _step_anthropic(
+        self, client, system: str, messages: list[dict]
+    ) -> tuple[str, list[_ToolCall]]:
         response = client.messages.create(
             model=self.model,
             max_tokens=1024,
@@ -441,7 +460,9 @@ class LlmSolverAgent:
         messages.append({"role": "assistant", "content": content})
         return "".join(text_parts), tool_calls
 
-    def _append_result_anthropic(self, messages: list[dict], call: _ToolCall, response: HTTPResponse) -> None:
+    def _append_result_anthropic(
+        self, messages: list[dict], call: _ToolCall, response: HTTPResponse
+    ) -> None:
         messages.append(
             {
                 "role": "user",
@@ -455,7 +476,9 @@ class LlmSolverAgent:
             }
         )
 
-    def _step_openai(self, client, system: str, messages: list[dict]) -> tuple[str, list[_ToolCall]]:
+    def _step_openai(
+        self, client, system: str, messages: list[dict]
+    ) -> tuple[str, list[_ToolCall]]:
         response = client.chat.completions.create(
             model=self.model,
             messages=[{"role": "system", "content": system}] + messages,
@@ -467,10 +490,10 @@ class LlmSolverAgent:
         # crashing with an opaque "NoneType is not subscriptable".
         choices = getattr(response, "choices", None)
         if not choices:
-            detail = getattr(response, "error", None) or getattr(response, "model_extra", None) or ""
-            raise RuntimeError(
-                f"LLM provider returned no choices for model {self.model}: {detail}"
+            detail = (
+                getattr(response, "error", None) or getattr(response, "model_extra", None) or ""
             )
+            raise RuntimeError(f"LLM provider returned no choices for model {self.model}: {detail}")
         message = choices[0].message
         text = getattr(message, "content", None) or ""
         raw_tool_calls = list(getattr(message, "tool_calls", None) or [])
@@ -483,11 +506,17 @@ class LlmSolverAgent:
                 arguments = json.loads(raw_arguments) if raw_arguments else {}
             except (TypeError, ValueError):
                 arguments = {}
-            tool_calls.append(_ToolCall(id=getattr(raw, "id", "") or "", name=name or "", arguments=arguments))
-        messages.append({"role": "assistant", "content": text, "tool_calls": raw_tool_calls or None})
+            tool_calls.append(
+                _ToolCall(id=getattr(raw, "id", "") or "", name=name or "", arguments=arguments)
+            )
+        messages.append(
+            {"role": "assistant", "content": text, "tool_calls": raw_tool_calls or None}
+        )
         return text, tool_calls
 
-    def _append_result_openai(self, messages: list[dict], call: _ToolCall, response: HTTPResponse) -> None:
+    def _append_result_openai(
+        self, messages: list[dict], call: _ToolCall, response: HTTPResponse
+    ) -> None:
         messages.append(
             {
                 "role": "tool",
@@ -520,7 +549,10 @@ class LlmSolverAgent:
         client = self._client or self._make_client()
         system = _render_llm_system_prompt(base_url.rstrip("/"))
         messages: list[dict] = [
-            {"role": "user", "content": _build_initial_user_message(_read_public_context(public_dir))}
+            {
+                "role": "user",
+                "content": _build_initial_user_message(_read_public_context(public_dir)),
+            }
         ]
 
         log: list[str] = []
@@ -688,7 +720,7 @@ def run_agent_eval(
     eval_profile = EVAL_PROFILES[profile]
     resolved_agent = agent or eval_profile.agent_factory()
     resolved_http = http or _default_http()
-    resolved_rng = rng if rng is not None else random.Random(0)
+    resolved_rng = rng if rng is not None else random.Random(0)  # noqa: S311 -- fixed-seed RNG for reproducible eval runs; determinism required, not for secrets
     resolved_runner = runner or _run
 
     report = AgentEvalReport(profile=profile)
@@ -706,13 +738,17 @@ def run_agent_eval(
             _record(
                 shim,
                 resolved_runner(
-                    ["docker", "compose", "-p", project_name, "build"], challenge_path, timeout_seconds
+                    ["docker", "compose", "-p", project_name, "build"],
+                    challenge_path,
+                    timeout_seconds,
                 ),
             )
             _record(
                 shim,
                 resolved_runner(
-                    ["docker", "compose", "-p", project_name, "up", "-d"], challenge_path, timeout_seconds
+                    ["docker", "compose", "-p", project_name, "up", "-d"],
+                    challenge_path,
+                    timeout_seconds,
                 ),
             )
             started = True
@@ -742,7 +778,15 @@ def run_agent_eval(
                 _record(
                     shim,
                     resolved_runner(
-                        ["docker", "compose", "-p", project_name, "down", "--volumes", "--remove-orphans"],
+                        [
+                            "docker",
+                            "compose",
+                            "-p",
+                            project_name,
+                            "down",
+                            "--volumes",
+                            "--remove-orphans",
+                        ],
                         challenge_path,
                         timeout_seconds,
                     ),
@@ -777,7 +821,10 @@ class _ScenarioDefendedHTTPClient:
         self._tick = 0
         self._broken_at: dict[str, int] = {}
         for record in scenario_report.responses_applied:
-            if record.action in ("rotate_credential", "patch_route", "quarantine_host") and record.target:
+            if (
+                record.action in ("rotate_credential", "patch_route", "quarantine_host")
+                and record.target
+            ):
                 self._broken_at.setdefault(record.target, record.tick)
 
     def request(
@@ -799,7 +846,9 @@ class _ScenarioDefendedHTTPClient:
                 return HTTPResponse(
                     status=403, body=f"defense active: {target} rotated/patched", headers={}
                 )
-        return self._inner.request(method, url, json_body=json_body, headers=headers, timeout=timeout)
+        return self._inner.request(
+            method, url, json_body=json_body, headers=headers, timeout=timeout
+        )
 
 
 def run_adversarial_delta(

@@ -309,7 +309,8 @@ class MCPImportFirewallTests(unittest.TestCase):
             text=True,
         )
         self.assertEqual(
-            proc.returncode, 0,
+            proc.returncode,
+            0,
             f"mcp_server transitively imports a forbidden module: {proc.stderr}",
         )
 
@@ -355,7 +356,8 @@ class MCPImportFirewallTests(unittest.TestCase):
             text=True,
         )
         self.assertEqual(
-            proc.returncode, 0,
+            proc.returncode,
+            0,
             f"calling MCP tools pulled a forbidden module (or errored): {proc.stderr}",
         )
 
@@ -369,9 +371,7 @@ class ModeAndCveRefsTests(unittest.TestCase):
         self.assertNotIn("cve_refs", result["spec"])
 
     def test_build_spec_valid_mode_accepted(self) -> None:
-        result = mcp_server.build_spec(
-            family=FAMILY, difficulty="medium", seed="s4", mode="red"
-        )
+        result = mcp_server.build_spec(family=FAMILY, difficulty="medium", seed="s4", mode="red")
         self.assertTrue(result["ok"], result)
 
     def test_build_spec_invalid_mode_rejected(self) -> None:
@@ -514,9 +514,7 @@ class ScenarioTimelineSummaryTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as temp_dir:
             timeline_dir = Path(temp_dir) / "private"
             timeline_dir.mkdir()
-            (timeline_dir / "scenario_timeline.json").write_text(
-                "not json", encoding="utf-8"
-            )
+            (timeline_dir / "scenario_timeline.json").write_text("not json", encoding="utf-8")
             result = mcp_server.scenario_timeline_summary(temp_dir)
             self.assertFalse(result["ok"])
 

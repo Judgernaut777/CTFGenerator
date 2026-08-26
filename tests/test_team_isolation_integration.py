@@ -54,16 +54,20 @@ _SKIP = "docker CLI/daemon not available"
 # test_docker_backend_integration.DockerBackendIntegrationTests
 # .test_isolated_launch_refuses_without_firewall_and_leaks_nothing; here we skip
 # with a clear reason rather than error.
-_FW = _DOCKER and DockerRuntimeBackend(
-    require_rootless=False, acknowledged_gaps=_ACKED, worker_name="isotest"
-).firewall_available()
+_FW = (
+    _DOCKER
+    and DockerRuntimeBackend(
+        require_rootless=False, acknowledged_gaps=_ACKED, worker_name="isotest"
+    ).firewall_available()
+)
 
 
 def _reach(container_id: str, ip: str, port: int, *, wait: int = 3) -> bool:
     """True iff ``container_id`` can open a TCP connection to ``ip:port``."""
     rc = subprocess.run(
         ["docker", "exec", container_id, "nc", "-w", str(wait), "-z", ip, str(port)],
-        capture_output=True, text=True,
+        capture_output=True,
+        text=True,
     ).returncode
     return rc == 0
 
@@ -81,7 +85,9 @@ def _host_can_reach(ip: str, port: int, *, timeout: float = 3.0) -> bool:
 
 
 @unittest.skipUnless(_DOCKER, _SKIP)
-@unittest.skipUnless(_FW, "host-block firewall unavailable; isolated launch refuses (see backend suite)")
+@unittest.skipUnless(
+    _FW, "host-block firewall unavailable; isolated launch refuses (see backend suite)"
+)
 class TeamIsolationIntegrationTests(unittest.TestCase):
     def setUp(self) -> None:
         self._backend = DockerRuntimeBackend(
@@ -100,15 +106,24 @@ class TeamIsolationIntegrationTests(unittest.TestCase):
                 pass
             ps = subprocess.run(
                 ["docker", "ps", "-aq", "--filter", f"label=ctfgen.instance={iid}"],
-                capture_output=True, text=True,
+                capture_output=True,
+                text=True,
             ).stdout.strip()
             self.assertEqual(ps, "", f"leftover container for {iid}")
             # destroy() removes the per-instance network too; enforce it here so a
             # leaked network (and its host-block) cannot pass unnoticed.
             nets = subprocess.run(
-                ["docker", "network", "ls", "--filter",
-                 f"label=ctfgen.instance={iid}", "--format", "{{.Name}}"],
-                capture_output=True, text=True,
+                [
+                    "docker",
+                    "network",
+                    "ls",
+                    "--filter",
+                    f"label=ctfgen.instance={iid}",
+                    "--format",
+                    "{{.Name}}",
+                ],
+                capture_output=True,
+                text=True,
             ).stdout.strip()
             self.assertEqual(nets, "", f"leftover network for {iid}")
 
@@ -117,24 +132,39 @@ class TeamIsolationIntegrationTests(unittest.TestCase):
         iid = f"iso-{uuid.uuid4().hex[:12]}"
         self._instance_ids.append(iid)
         req = ContainerRequest(
-            instance_id=iid, team_key=iid, image_ref=_BENIGN_IMAGE,
+            instance_id=iid,
+            team_key=iid,
+            image_ref=_BENIGN_IMAGE,
             policy=ContainerPolicy(memory_mb=64, cpu_millis=250, network_mode="isolated"),
         )
         result = self._backend.launch(req, command=command)
         cid = result.observation.container_id
         net = self._backend._network_name(iid)  # noqa: SLF001 - test introspection
         ip = subprocess.run(
-            ["docker", "inspect", "--format",
-             f"{{{{(index .NetworkSettings.Networks \"{net}\").IPAddress}}}}", cid],
-            capture_output=True, text=True,
+            [
+                "docker",
+                "inspect",
+                "--format",
+                f'{{{{(index .NetworkSettings.Networks "{net}").IPAddress}}}}',
+                cid,
+            ],
+            capture_output=True,
+            text=True,
         ).stdout.strip()
         return iid, cid, ip, net
 
     def _gateway(self, net: str) -> str:
         return subprocess.run(
-            ["docker", "network", "inspect", "--format",
-             "{{range .IPAM.Config}}{{.Gateway}}{{end}}", net],
-            capture_output=True, text=True,
+            [
+                "docker",
+                "network",
+                "inspect",
+                "--format",
+                "{{range .IPAM.Config}}{{.Gateway}}{{end}}",
+                net,
+            ],
+            capture_output=True,
+            text=True,
         ).stdout.strip()
 
     def _host_block_lines(self, binary: str, subnet: str) -> list[str]:
@@ -144,14 +174,21 @@ class TeamIsolationIntegrationTests(unittest.TestCase):
         lines: list[str] = []
         for chain in ("INPUT", "DOCKER-USER"):
             out = subprocess.run(
-                ["docker", "run", "--rm", "--net=host", "--cap-add=NET_ADMIN",
-                 self._backend._firewall_image, binary, "-S", chain],  # noqa: SLF001
-                capture_output=True, text=True,
+                [
+                    "docker",
+                    "run",
+                    "--rm",
+                    "--net=host",
+                    "--cap-add=NET_ADMIN",
+                    self._backend._firewall_image,
+                    binary,
+                    "-S",
+                    chain,
+                ],  # noqa: SLF001
+                capture_output=True,
+                text=True,
             ).stdout
-            lines += [
-                ln for ln in out.splitlines()
-                if "ctfgen-hostblock" in ln and subnet in ln
-            ]
+            lines += [ln for ln in out.splitlines() if "ctfgen-hostblock" in ln and subnet in ln]
         return lines
 
     def _probe_from_network(self, net: str, ip: str, port: int) -> bool:
@@ -160,9 +197,24 @@ class TeamIsolationIntegrationTests(unittest.TestCase):
         name = f"probe-{uuid.uuid4().hex[:10]}"
         self._probe_names.append(name)
         rc = subprocess.run(
-            ["docker", "run", "--rm", "--name", name, "--network", net,
-             _BENIGN_IMAGE, "nc", "-w", "3", "-z", ip, str(port)],
-            capture_output=True, text=True,
+            [
+                "docker",
+                "run",
+                "--rm",
+                "--name",
+                name,
+                "--network",
+                net,
+                _BENIGN_IMAGE,
+                "nc",
+                "-w",
+                "3",
+                "-z",
+                ip,
+                str(port),
+            ],
+            capture_output=True,
+            text=True,
         ).returncode
         return rc == 0
 
@@ -206,9 +258,9 @@ class TeamIsolationIntegrationTests(unittest.TestCase):
         peer = f"probe-{uuid.uuid4().hex[:10]}"
         self._probe_names.append(peer)
         run = subprocess.run(
-            ["docker", "run", "-d", "--name", peer, "--network", net,
-             _BENIGN_IMAGE, *_SLEEP],
-            capture_output=True, text=True,
+            ["docker", "run", "-d", "--name", peer, "--network", net, _BENIGN_IMAGE, *_SLEEP],
+            capture_output=True,
+            text=True,
         )
         self.assertEqual(run.returncode, 0, run.stderr)
         self.assertTrue(
@@ -316,9 +368,7 @@ class TeamIsolationIntegrationTests(unittest.TestCase):
         # Remove the network OUT-OF-BAND: force-remove the container (the only
         # endpoint) then the network directly, bypassing the backend teardown.
         subprocess.run(["docker", "rm", "-f", cid], capture_output=True)
-        rm = subprocess.run(
-            ["docker", "network", "rm", net], capture_output=True, text=True
-        )
+        rm = subprocess.run(["docker", "network", "rm", net], capture_output=True, text=True)
         self.assertEqual(rm.returncode, 0, rm.stderr)
         # The rule is now STRANDED (network + subnet gone) -- the leak we close.
         self.assertTrue(
@@ -328,7 +378,8 @@ class TeamIsolationIntegrationTests(unittest.TestCase):
         # The comment-marker orphan sweep in reap_managed reclaims it.
         self._backend.reap_managed()
         self.assertEqual(
-            self._host_block_lines(binary, subnet), [],
+            self._host_block_lines(binary, subnet),
+            [],
             "orphan ctfgen host-block rule leaked after reap_managed",
         )
 
@@ -337,7 +388,9 @@ class TeamIsolationIntegrationTests(unittest.TestCase):
     def test_egress_mode_is_refused(self) -> None:
         iid = f"iso-{uuid.uuid4().hex[:12]}"
         req = ContainerRequest(
-            instance_id=iid, team_key=iid, image_ref=_BENIGN_IMAGE,
+            instance_id=iid,
+            team_key=iid,
+            image_ref=_BENIGN_IMAGE,
             policy=ContainerPolicy(memory_mb=64, cpu_millis=250, network_mode="egress"),
         )
         with self.assertRaises(UnsupportedRuntimeError):
@@ -345,7 +398,8 @@ class TeamIsolationIntegrationTests(unittest.TestCase):
         # Refused BEFORE creating anything.
         ps = subprocess.run(
             ["docker", "ps", "-aq", "--filter", f"label=ctfgen.instance={iid}"],
-            capture_output=True, text=True,
+            capture_output=True,
+            text=True,
         ).stdout.strip()
         self.assertEqual(ps, "", "egress refusal must not create a container")
 

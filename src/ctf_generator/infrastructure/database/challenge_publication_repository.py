@@ -60,9 +60,7 @@ class SqlAlchemyChallengePublicationRepository:
             )
         ).one_or_none()
         if result is None:
-            raise LookupError(
-                f"challenge version not found: {definition_slug!r} v{version_no}"
-            )
+            raise LookupError(f"challenge version not found: {definition_slug!r} v{version_no}")
         return result.id, result.state
 
     def add(self, publication: ChallengePublication) -> None:
@@ -75,9 +73,7 @@ class SqlAlchemyChallengePublicationRepository:
             publication.definition_slug, publication.version_no
         )
         if state != "published":
-            raise ValueError(
-                f"only a published version may be attached (state={state!r})"
-            )
+            raise ValueError(f"only a published version may be attached (state={state!r})")
         row = challenge_publication_to_orm(publication, competition_uuid, version_uuid)
         self._session.add(row)
         self._session.flush()
@@ -104,13 +100,9 @@ class SqlAlchemyChallengePublicationRepository:
         ).one_or_none()
         if row is None:
             return None
-        return challenge_publication_from_orm(
-            row, competition_id, definition_slug, version_no
-        )
+        return challenge_publication_from_orm(row, competition_id, definition_slug, version_no)
 
-    def list_for_competition(
-        self, competition_id: str
-    ) -> list[ChallengePublication]:
+    def list_for_competition(self, competition_id: str) -> list[ChallengePublication]:
         rows = self._session.execute(
             select(
                 CompetitionChallengeRow,
@@ -129,24 +121,18 @@ class SqlAlchemyChallengePublicationRepository:
             .where(Competition.slug == competition_id)
         ).all()
         return [
-            challenge_publication_from_orm(
-                pub_row, competition_id, definition_slug, version_no
-            )
+            challenge_publication_from_orm(pub_row, competition_id, definition_slug, version_no)
             for pub_row, definition_slug, version_no in rows
         ]
 
-    def remove(
-        self, competition_id: str, definition_slug: str, version_no: int
-    ) -> bool:
+    def remove(self, competition_id: str, definition_slug: str, version_no: int) -> bool:
         """Detach a published version from a competition, keyed by the business
         triple. Returns ``True`` when a row was removed, ``False`` when the
         attachment did not exist (so the caller can raise a 404). Fails loud
         (:class:`LookupError`) only when the competition or version themselves are
         unknown."""
         competition_uuid = self._competition_uuid(competition_id)
-        version_uuid, _state = self._version_uuid_and_state(
-            definition_slug, version_no
-        )
+        version_uuid, _state = self._version_uuid_and_state(definition_slug, version_no)
         row = self._session.scalars(
             select(CompetitionChallengeRow).where(
                 CompetitionChallengeRow.competition_id == competition_uuid,
@@ -178,7 +164,5 @@ class SqlAlchemyChallengePublicationRepository:
                 f"publication not found: {publication.competition_id!r} / "
                 f"{publication.definition_slug!r} v{publication.version_no}"
             )
-        challenge_publication_to_orm(
-            publication, competition_uuid, version_uuid, existing=row
-        )
+        challenge_publication_to_orm(publication, competition_uuid, version_uuid, existing=row)
         self._session.flush()

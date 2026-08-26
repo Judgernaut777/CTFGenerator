@@ -46,4 +46,3 @@ def _scalar(value: object) -> str:
     text = str(value)
     escaped = text.replace("\\", "\\\\").replace('"', '\\"')
     return f'"{escaped}"'
-

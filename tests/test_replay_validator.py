@@ -58,7 +58,12 @@ class CrossReplayTests(unittest.TestCase):
         solver_command, solver_cwd = calls[3]
         self.assertEqual(
             solver_command,
-            [sys.executable, str(solver / "private" / "solver.py"), "--base-url", "http://127.0.0.1:9000"],
+            [
+                sys.executable,
+                str(solver / "private" / "solver.py"),
+                "--base-url",
+                "http://127.0.0.1:9000",
+            ],
         )
         self.assertEqual(solver_cwd, solver)
         # Cleanup tears the target down.

@@ -38,14 +38,10 @@ from .settings import WebSettings
 _logger = logging.getLogger("ctfgen.web")
 
 
-def _error_page(
-    request: Request, status_code: int, title: str, message: str
-) -> Response:
+def _error_page(request: Request, status_code: int, title: str, message: str) -> Response:
     """Render the generic HTML error page (leaking nothing). Falls back to a bare
     text response if the renderer is somehow unavailable."""
-    renderer: TemplateRenderer | None = getattr(
-        request.app.state, "web_renderer", None
-    )
+    renderer: TemplateRenderer | None = getattr(request.app.state, "web_renderer", None)
     if renderer is None:  # pragma: no cover - misconfiguration guard
         return Response(message, status_code=status_code, media_type="text/plain")
     return renderer.render(
@@ -69,19 +65,25 @@ def _register_handlers(app: FastAPI) -> None:
 
     async def _csrf_failed(request: Request, exc: WebCsrfError) -> Response:
         return _error_page(
-            request, 403, "Request blocked",
+            request,
+            403,
+            "Request blocked",
             "This request could not be verified. Please reload the page and try again.",
         )
 
     async def _forbidden(request: Request, exc: Exception) -> Response:
         return _error_page(
-            request, 403, "Forbidden",
+            request,
+            403,
+            "Forbidden",
             "You do not have access to this resource.",
         )
 
     async def _not_found(request: Request, exc: LookupError) -> Response:
         return _error_page(
-            request, 404, "Not found",
+            request,
+            404,
+            "Not found",
             str(exc) or "The requested resource was not found.",
         )
 
@@ -89,7 +91,9 @@ def _register_handlers(app: FastAPI) -> None:
         # Log with no body leak; the page carries a generic message only.
         _logger.exception("unhandled web exception path=%s", request.url.path)
         return _error_page(
-            request, 500, "Something went wrong",
+            request,
+            500,
+            "Something went wrong",
             "An internal error occurred. Please try again later.",
         )
 

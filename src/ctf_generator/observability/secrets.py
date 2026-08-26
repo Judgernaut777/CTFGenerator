@@ -109,9 +109,7 @@ LOG_SECRET_PATTERNS: tuple[re.Pattern[str], ...] = (
 )
 
 
-def redact_text(
-    text: str, patterns: tuple[re.Pattern[str], ...] = LOG_SECRET_PATTERNS
-) -> str:
+def redact_text(text: str, patterns: tuple[re.Pattern[str], ...] = LOG_SECRET_PATTERNS) -> str:
     """Return ``text`` with every secret-shaped span replaced by ``[redacted]``.
 
     Never raises: a non-``str`` input is coerced with ``str()`` and a pattern

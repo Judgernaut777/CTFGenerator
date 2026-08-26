@@ -71,9 +71,7 @@ REQUIRED_FILES: tuple[str, ...] = (
 # manifest instead of injecting --base-url. Empty args => invoke the generated
 # solver/healthcheck with their own (per-instance-correct) --host/--port
 # defaults.
-_RUNTIME_MANIFEST = json.dumps(
-    {"health": {"args": []}, "solve": {"args": []}}, indent=2
-) + "\n"
+_RUNTIME_MANIFEST = json.dumps({"health": {"args": []}, "solve": {"args": []}}, indent=2) + "\n"
 
 
 # --- Variant -----------------------------------------------------------------
@@ -136,7 +134,7 @@ def _variant(rng: random.Random) -> Variant:
     )
 
 
-def _cve_context(spec: ChallengeSpec, cve_record: "CveRecord | None") -> str:
+def _cve_context(spec: ChallengeSpec, cve_record: CveRecord | None) -> str:
     if cve_record is not None:
         cwe = ", ".join(cve_record.cwe_ids) or "CWE-122"
         return (
@@ -160,12 +158,11 @@ def _cve_context(spec: ChallengeSpec, cve_record: "CveRecord | None") -> str:
 def render(
     spec: ChallengeSpec,
     rng: random.Random,
-    cve_record: "CveRecord | None" = None,
+    cve_record: CveRecord | None = None,
 ) -> dict[str, str]:
     if spec.mode not in MODES:
         raise ValueError(
-            f"binary_heap_exploit does not support mode {spec.mode!r}; "
-            f"supported modes: {MODES!r}"
+            f"binary_heap_exploit does not support mode {spec.mode!r}; supported modes: {MODES!r}"
         )
 
     v = _variant(rng)
@@ -577,26 +574,29 @@ if __name__ == "__main__":
 
 
 def _variant_json(spec: ChallengeSpec, v: Variant) -> str:
-    return json.dumps(
-        {
-            "meta": spec.meta_mapping(),
-            "family": FAMILY_NAME,
-            "routes": {
-                "host": "vuln",
-                "port": v.port,
+    return (
+        json.dumps(
+            {
+                "meta": spec.meta_mapping(),
+                "family": FAMILY_NAME,
+                "routes": {
+                    "host": "vuln",
+                    "port": v.port,
+                },
+                "tokens": {
+                    "service_name": v.service_name,
+                    "banner": v.banner,
+                    "name_buf_size": v.name_buf_size,
+                    "admin_field": v.admin_field,
+                    "set_word": v.set_word,
+                    "dump_word": v.dump_word,
+                    "overflow_len": v.overflow_len,
+                    "filler_byte": v.filler_byte,
+                },
+                "flag": v.flag,
             },
-            "tokens": {
-                "service_name": v.service_name,
-                "banner": v.banner,
-                "name_buf_size": v.name_buf_size,
-                "admin_field": v.admin_field,
-                "set_word": v.set_word,
-                "dump_word": v.dump_word,
-                "overflow_len": v.overflow_len,
-                "filler_byte": v.filler_byte,
-            },
-            "flag": v.flag,
-        },
-        indent=2,
-        sort_keys=True,
-    ) + "\n"
+            indent=2,
+            sort_keys=True,
+        )
+        + "\n"
+    )

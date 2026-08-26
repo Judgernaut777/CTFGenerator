@@ -172,9 +172,7 @@ def _serve(app, port: int):
     life of the block, so the worker's HTTP calls are REAL loopback TCP round trips
     (not an in-process ASGI shortcut). ``lifespan="off"`` -- the app needs no
     startup/shutdown hooks; its DB collaborator is injected."""
-    config = uvicorn.Config(
-        app, host="127.0.0.1", port=port, log_level="warning", lifespan="off"
-    )
+    config = uvicorn.Config(app, host="127.0.0.1", port=port, log_level="warning", lifespan="off")
     server = uvicorn.Server(config)
     thread = threading.Thread(target=server.run, name="gateway-uvicorn", daemon=True)
     thread.start()
@@ -228,9 +226,7 @@ class NetworkedJoinedE2ETests(unittest.TestCase):
     def setUp(self) -> None:
         self._instance_ids: list[str] = []
         self._built_images: list[str] = []
-        self._backend = DockerRuntimeBackend(
-            require_rootless=False, acknowledged_gaps=_ACKED
-        )
+        self._backend = DockerRuntimeBackend(require_rootless=False, acknowledged_gaps=_ACKED)
 
     def tearDown(self) -> None:
         for iid in self._instance_ids:
@@ -241,7 +237,8 @@ class NetworkedJoinedE2ETests(unittest.TestCase):
         for ref in self._built_images:
             subprocess.run(
                 ["docker", "image", "rm", "--force", ref],
-                capture_output=True, text=True,
+                capture_output=True,
+                text=True,
             )
 
     def _seed(self, db, spec_dict: dict, spec_sha256: str, now: datetime) -> None:
@@ -251,7 +248,8 @@ class NetworkedJoinedE2ETests(unittest.TestCase):
         with db.session_scope() as s:
             SqlAlchemyCompetitionRepository(s).add(
                 CompetitionConfig(
-                    competition_id=_CID, name="Cup",
+                    competition_id=_CID,
+                    name="Cup",
                     start_time=now - timedelta(hours=1),
                     end_time=now + timedelta(hours=47),
                 )
@@ -262,27 +260,37 @@ class NetworkedJoinedE2ETests(unittest.TestCase):
             )
             SqlAlchemyChallengeVersionRepository(s).add(
                 ChallengeVersion(
-                    definition_slug=_SLUG, version_no=1, state="draft",
-                    family_version=fam_ver, seed=_SEED,
-                    spec_sha256=spec_sha256, spec=spec_dict, spec_version="1.0",
+                    definition_slug=_SLUG,
+                    version_no=1,
+                    state="draft",
+                    family_version=fam_ver,
+                    seed=_SEED,
+                    spec_sha256=spec_sha256,
+                    spec=spec_dict,
+                    spec_version="1.0",
                 )
             )
         with db.session_scope() as s:
             SqlAlchemyChallengeVersionRepository(s).publish(_SLUG, 1, now)
         with db.session_scope() as s:
             SqlAlchemyChallengePublicationRepository(s).add(
-                ChallengePublication(
-                    competition_id=_CID, definition_slug=_SLUG, version_no=1
-                )
+                ChallengePublication(competition_id=_CID, definition_slug=_SLUG, version_no=1)
             )
         with db.session_scope() as s:
             reg = SqlAlchemyWorkerRegistry(s)
             reg.add(
                 WorkerIdentity(
-                    "w1", "docker-rootless", ("aarch64", "x86_64"),
-                    ("build_challenge", "launch_instance", "stop_instance",
-                     "delete_runtime_resources"),
-                    4, "1",
+                    "w1",
+                    "docker-rootless",
+                    ("aarch64", "x86_64"),
+                    (
+                        "build_challenge",
+                        "launch_instance",
+                        "stop_instance",
+                        "delete_runtime_resources",
+                    ),
+                    4,
+                    "1",
                 )
             )
             reg.heartbeat("w1", now)
@@ -312,35 +320,34 @@ class NetworkedJoinedE2ETests(unittest.TestCase):
             port = _free_port()
             stack = ExitStack()
             self.addCleanup(stack.close)
-            stack.enter_context(
-                _serve(create_worker_app(ApiSettings(), database=db), port)
-            )
+            stack.enter_context(_serve(create_worker_app(ApiSettings(), database=db), port))
             client = stack.enter_context(
                 httpx.Client(base_url=f"http://127.0.0.1:{port}", timeout=30.0)
             )
             http = HttpControlPlaneClient(token=token, client=client)
             worker = Worker(
                 WorkerConfig(worker_name="w1", lease_seconds=300),
-                http, self._backend, command=("sleep", "3600"),
+                http,
+                self._backend,
+                command=("sleep", "3600"),
                 build_backend=self._backend,
             )
 
             # -- 1. BUILD over HTTP ---------------------------------------------
-            build_job, created = BuildService(db, jobs=jobs).trigger_build(
-                _SLUG, 1, now
-            )
+            build_job, created = BuildService(db, jobs=jobs).trigger_build(_SLUG, 1, now)
             self.assertTrue(created)
             self.assertTrue(worker.run_once(), "worker did not claim the build job")
             with db.session_scope() as s:
-                built_ref = SqlAlchemyChallengeBuildImageRepository(
-                    s
-                ).latest_image_ref_for_version(_SLUG, 1)
+                built_ref = SqlAlchemyChallengeBuildImageRepository(s).latest_image_ref_for_version(
+                    _SLUG, 1
+                )
             self.assertIsNotNone(built_ref, "no built image recorded after build job")
             self._built_images.append(built_ref)
             self.assertEqual(
                 subprocess.run(
                     ["docker", "image", "inspect", built_ref],
-                    capture_output=True, text=True,
+                    capture_output=True,
+                    text=True,
                 ).returncode,
                 0,
                 "built image missing on host",
@@ -350,8 +357,11 @@ class NetworkedJoinedE2ETests(unittest.TestCase):
             iid = str(uuid.uuid4())
             self._instance_ids.append(iid)
             lifecycle.request_instance(
-                instance_id=iid, competition_id=_CID, team_name="Red",
-                definition_slug=_SLUG, version_no=1,
+                instance_id=iid,
+                competition_id=_CID,
+                team_name="Red",
+                definition_slug=_SLUG,
+                version_no=1,
                 requirements=WorkerRequirements(
                     architecture=self._backend.probe().architecture,
                     required_capabilities=frozenset({"launch_instance"}),
@@ -359,7 +369,8 @@ class NetworkedJoinedE2ETests(unittest.TestCase):
                 pooled_items=(
                     ReservationItem("platform", PLATFORM_SCOPE_KEY, "active_instances", 1),
                 ),
-                expires_at=now + timedelta(hours=2), now=now,
+                expires_at=now + timedelta(hours=2),
+                now=now,
             )
             self.assertEqual(lifecycle.get(iid).image_ref, built_ref)
 
@@ -368,12 +379,14 @@ class NetworkedJoinedE2ETests(unittest.TestCase):
             self.assertEqual(lifecycle.get(iid).state, "healthy")
             running = subprocess.run(
                 ["docker", "ps", "-q", "--filter", f"label=ctfgen.instance={iid}"],
-                capture_output=True, text=True,
+                capture_output=True,
+                text=True,
             ).stdout.split()
             self.assertEqual(len(running), 1, "expected exactly one running container")
             image_of = subprocess.run(
                 ["docker", "inspect", "-f", "{{.Config.Image}}", running[0]],
-                capture_output=True, text=True,
+                capture_output=True,
+                text=True,
             ).stdout.strip()
             self.assertEqual(image_of, built_ref, "container not from the built image")
 
@@ -381,9 +394,12 @@ class NetworkedJoinedE2ETests(unittest.TestCase):
             outcome = SubmissionProcessingService(db).process_submission(
                 SubmissionRequest(
                     submission_id=str(uuid.uuid4()),
-                    competition_id=_CID, team_name="Red",
-                    definition_slug=_SLUG, version_no=1,
-                    submitted_at=now, candidate_flag=flag,
+                    competition_id=_CID,
+                    team_name="Red",
+                    definition_slug=_SLUG,
+                    version_no=1,
+                    submitted_at=now,
+                    candidate_flag=flag,
                 )
             )
             self.assertTrue(outcome.accepted)

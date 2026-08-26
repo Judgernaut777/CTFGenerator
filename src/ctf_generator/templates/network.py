@@ -139,7 +139,7 @@ class Variant:
 def render(
     spec: ChallengeSpec,
     rng: random.Random,
-    cve_record: "CveRecord | None" = None,
+    cve_record: CveRecord | None = None,
 ) -> dict[str, str]:
     variant = _variant(rng)
 
@@ -191,7 +191,9 @@ def _variant(rng: random.Random) -> Variant:
         internal_token = rng.choice(_WEAK_TOKENS)
     else:
         internal_token = _token_hex(rng, 8)
-    asset_tag = f"core-{rng.choice(['ledger', 'billing', 'inventory', 'ops'])}-{rng.randrange(10, 99)}"
+    asset_tag = (
+        f"core-{rng.choice(['ledger', 'billing', 'inventory', 'ops'])}-{rng.randrange(10, 99)}"
+    )
     ops_note_id = f"note-{rng.randrange(100, 999)}"
     flag = f"ctf{{lateral_pivot_{_token_hex(rng, 6)}}}"
     return Variant(
@@ -511,23 +513,23 @@ def _internal_advice_body(v: Variant) -> str:
     return (
         '{"auth_token": None, '
         '"auth_note": "X-Internal-Token is a rotated secret; note the internal '
-        'service also honors relayed requests carrying X-Relay-Context set to '
+        "service also honors relayed requests carrying X-Relay-Context set to "
         'the asset tag"}'
     )
 
 
 def _internal_flag_auth_check(v: Variant) -> str:
     if v.vuln_class == "relay_trust":
-        return '''    supplied = request.headers.get("X-Internal-Token", "")
+        return """    supplied = request.headers.get("X-Internal-Token", "")
     context = request.headers.get("X-Relay-Context", "")
     # Broken auth-delegation: the internal service trusts the edge relay's
     # asset trust-context header as if it were proof of authorization, so a
     # forged X-Relay-Context bypasses the token entirely.
     if supplied != INTERNAL_TOKEN and context != ASSET_TAG:
-        return jsonify({"error": "missing or invalid X-Internal-Token"}), 403'''
-    return '''    supplied = request.headers.get("X-Internal-Token", "")
+        return jsonify({"error": "missing or invalid X-Internal-Token"}), 403"""
+    return """    supplied = request.headers.get("X-Internal-Token", "")
     if supplied != INTERNAL_TOKEN:
-        return jsonify({"error": "missing or invalid X-Internal-Token"}), 403'''
+        return jsonify({"error": "missing or invalid X-Internal-Token"}), 403"""
 
 
 def _internal_app(v: Variant) -> str:
@@ -578,7 +580,7 @@ if __name__ == "__main__":
 # --- public/description.md --------------------------------------------------------
 
 
-def _description(spec: ChallengeSpec, v: Variant, cve_record: "CveRecord | None") -> str:
+def _description(spec: ChallengeSpec, v: Variant, cve_record: CveRecord | None) -> str:
     cve_line = ""
     if cve_record is not None:
         cve_line = (
@@ -754,7 +756,7 @@ pivot through the edge host is the constant.{purple_deliverable}"""
 
 def _solver(v: Variant) -> str:
     weak_tokens = json.dumps(list(_WEAK_TOKENS))
-    return f'''from __future__ import annotations
+    return f"""from __future__ import annotations
 
 import argparse
 import json
@@ -850,40 +852,43 @@ def main():
 
 if __name__ == "__main__":
     sys.exit(main())
-'''
+"""
 
 
 # --- private/variant.json -----------------------------------------------------------
 
 
 def _variant_json(spec: ChallengeSpec, v: Variant) -> str:
-    return json.dumps(
-        {
-            "meta": spec.meta_mapping(),
-            "family": FAMILY_NAME,
-            "mode": spec.mode,
-            "vuln_class": v.vuln_class,
-            "flag": v.flag,
-            "routes": {
-                "login": f"/api/{v.login_route}",
-                "ops_notes": f"/api/{v.ops_route}",
-                "diag_hosts": f"/api/{v.diag_route}",
-                "relay": f"/api/{v.relay_route}",
+    return (
+        json.dumps(
+            {
+                "meta": spec.meta_mapping(),
+                "family": FAMILY_NAME,
+                "mode": spec.mode,
+                "vuln_class": v.vuln_class,
+                "flag": v.flag,
+                "routes": {
+                    "login": f"/api/{v.login_route}",
+                    "ops_notes": f"/api/{v.ops_route}",
+                    "diag_hosts": f"/api/{v.diag_route}",
+                    "relay": f"/api/{v.relay_route}",
+                },
+                "creds": {
+                    "edge_user": v.edge_user,
+                    "edge_password": v.edge_password,
+                    "internal_token": v.internal_token,
+                },
+                "network": {
+                    "internal_host": "internal",
+                    "internal_port": v.internal_port,
+                    "asset_tag": v.asset_tag,
+                },
             },
-            "creds": {
-                "edge_user": v.edge_user,
-                "edge_password": v.edge_password,
-                "internal_token": v.internal_token,
-            },
-            "network": {
-                "internal_host": "internal",
-                "internal_port": v.internal_port,
-                "asset_tag": v.asset_tag,
-            },
-        },
-        indent=2,
-        sort_keys=True,
-    ) + "\n"
+            indent=2,
+            sort_keys=True,
+        )
+        + "\n"
+    )
 
 
 # --- private/detection_notes.md ------------------------------------------------------
@@ -935,7 +940,7 @@ checkpoints are scored, but the same log signature applies: watch for
 
 
 def _healthcheck() -> str:
-    return '''from __future__ import annotations
+    return """from __future__ import annotations
 
 import argparse
 import json
@@ -955,7 +960,7 @@ def main():
 
 if __name__ == "__main__":
     sys.exit(main())
-'''
+"""
 
 
 # --- tests/validate_variant.py -------------------------------------------------------

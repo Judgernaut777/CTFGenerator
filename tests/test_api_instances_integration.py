@@ -103,7 +103,9 @@ def _authenticator() -> StubAuthenticator:
                 "org-user", {"organizer"}, memberships={_CID: ("organizer", None)}
             ),
             _PLAYER: principal_for(
-                "player-user", {"player"}, team="Red",
+                "player-user",
+                {"player"},
+                team="Red",
                 memberships={_CID: ("player", "Red")},
             ),
         }
@@ -116,9 +118,7 @@ def _client_and_db():
         command.upgrade(_alembic_config(url), "head")
         db = Database(DatabaseConfig(url=url))
         try:
-            app = create_app(
-                ApiSettings(), database=db, authenticator=_authenticator()
-            )
+            app = create_app(ApiSettings(), database=db, authenticator=_authenticator())
             yield TestClient(app), db
         finally:
             db.dispose()
@@ -129,37 +129,49 @@ def _auth(token: str = _ADMIN) -> dict[str, str]:
 
 
 def _seed_parents(client: TestClient) -> None:
-    assert client.post(
-        "/api/v1/competitions",
-        headers=_auth(),
-        json={
-            "competition_id": _CID,
-            "name": "Spring CTF",
-            "start_time": "2026-06-01T09:00:00Z",
-            "end_time": "2026-06-03T09:00:00Z",
-        },
-    ).status_code == 201
-    assert client.post(
-        "/api/v1/teams", headers=_auth(), json={"competition_id": _CID, "name": "Red"}
-    ).status_code == 201
-    assert client.post(
-        "/api/v1/challenge-definitions",
-        headers=_auth(),
-        json={"family": "web", "slug": "sqli", "title": "SQLi"},
-    ).status_code == 201
-    assert client.post(
-        "/api/v1/challenge-versions",
-        headers=_auth(),
-        json={
-            "definition_slug": "sqli",
-            "seed": "s",
-            "family_version": "1.0.0",
-            "spec": {"title": "SQLi", "flag": "CTF{x}"},
-        },
-    ).status_code == 201
-    assert client.post(
-        "/api/v1/challenge-versions/sqli/1/publish", headers=_auth()
-    ).status_code == 200
+    assert (
+        client.post(
+            "/api/v1/competitions",
+            headers=_auth(),
+            json={
+                "competition_id": _CID,
+                "name": "Spring CTF",
+                "start_time": "2026-06-01T09:00:00Z",
+                "end_time": "2026-06-03T09:00:00Z",
+            },
+        ).status_code
+        == 201
+    )
+    assert (
+        client.post(
+            "/api/v1/teams", headers=_auth(), json={"competition_id": _CID, "name": "Red"}
+        ).status_code
+        == 201
+    )
+    assert (
+        client.post(
+            "/api/v1/challenge-definitions",
+            headers=_auth(),
+            json={"family": "web", "slug": "sqli", "title": "SQLi"},
+        ).status_code
+        == 201
+    )
+    assert (
+        client.post(
+            "/api/v1/challenge-versions",
+            headers=_auth(),
+            json={
+                "definition_slug": "sqli",
+                "seed": "s",
+                "family_version": "1.0.0",
+                "spec": {"title": "SQLi", "flag": "CTF{x}"},
+            },
+        ).status_code
+        == 201
+    )
+    assert (
+        client.post("/api/v1/challenge-versions/sqli/1/publish", headers=_auth()).status_code == 200
+    )
 
 
 def _seed_instance_with_secrets(db: Database) -> str:
@@ -190,27 +202,40 @@ def _seed_instance_with_secrets(db: Database) -> str:
         # Plant the secrets that must never surface.
         repo.record_credential(
             InstanceCredential(
-                instance_id=iid, name="ssh", secret_ref=_CRED_SECRET,
+                instance_id=iid,
+                name="ssh",
+                secret_ref=_CRED_SECRET,
                 scopes=("shell",),
             )
         )
         repo.record_runtime_resource(
             RuntimeResource(
-                instance_id=iid, kind="container", external_ref=_RESOURCE_HANDLE,
+                instance_id=iid,
+                kind="container",
+                external_ref=_RESOURCE_HANDLE,
                 worker="w1",
             )
         )
         repo.record_endpoint(
             InstanceEndpoint(
-                instance_id=iid, name="admin", host="10.0.0.5", port=9000,
-                protocol="https", url=f"https://10.0.0.5:9000/?token={_INTERNAL_TOKEN}",
+                instance_id=iid,
+                name="admin",
+                host="10.0.0.5",
+                port=9000,
+                protocol="https",
+                url=f"https://10.0.0.5:9000/?token={_INTERNAL_TOKEN}",
                 internal=True,
             )
         )
         repo.record_endpoint(
             InstanceEndpoint(
-                instance_id=iid, name="web", host="ctf.example.com", port=443,
-                protocol="https", url=_PUBLIC_URL, internal=False,
+                instance_id=iid,
+                name="web",
+                host="ctf.example.com",
+                port=443,
+                protocol="https",
+                url=_PUBLIC_URL,
+                internal=False,
             )
         )
     return iid
@@ -250,9 +275,7 @@ def _enable_placeable_worker(db: Database) -> None:
 
     with db.session_scope() as s:
         reg = SqlAlchemyWorkerRegistry(s)
-        reg.add(
-            Worker("w1", "docker-rootless", ("x86_64",), ("launch_instance",), 4, "1")
-        )
+        reg.add(Worker("w1", "docker-rootless", ("x86_64",), ("launch_instance",), 4, "1"))
         reg.approve("w1")
     with db.session_scope() as s:
         SqlAlchemyWorkerRegistry(s).heartbeat("w1", datetime.now(UTC))
@@ -290,9 +313,7 @@ class InstancesApiIntegrationTests(unittest.TestCase):
             ids = [row["instance_id"] for row in lst.json()["data"]]
             self.assertIn(iid, ids)
 
-            scoped = client.get(
-                f"/api/v1/competitions/{_CID}/instances", headers=_auth(_ORGANIZER)
-            )
+            scoped = client.get(f"/api/v1/competitions/{_CID}/instances", headers=_auth(_ORGANIZER))
             self.assertEqual(scoped.status_code, 200, scoped.text)
             self.assertIn(iid, [r["instance_id"] for r in scoped.json()["data"]])
 
@@ -309,9 +330,7 @@ class InstancesApiIntegrationTests(unittest.TestCase):
     def test_missing_instance_is_404(self) -> None:
         with _client_and_db() as (client, db):
             _seed_parents(client)
-            r = client.get(
-                f"/api/v1/instances/{uuid.uuid4()}", headers=_auth(_ORGANIZER)
-            )
+            r = client.get(f"/api/v1/instances/{uuid.uuid4()}", headers=_auth(_ORGANIZER))
             self.assertEqual(r.status_code, 404, r.text)
             self.assertEqual(r.json()["error"]["code"], "not_found")
 
@@ -319,9 +338,7 @@ class InstancesApiIntegrationTests(unittest.TestCase):
         with _client_and_db() as (client, db):
             _seed_parents(client)
             iid = _seed_instance_with_secrets(db)
-            r = client.post(
-                f"/api/v1/instances/{iid}/stop", headers=_auth(_ORGANIZER)
-            )
+            r = client.post(f"/api/v1/instances/{iid}/stop", headers=_auth(_ORGANIZER))
             self.assertEqual(r.status_code, 200, r.text)
             self.assertEqual(r.json()["desired_state"], "stopped")
             self.assertEqual(r.json()["instance_id"], iid)
@@ -365,8 +382,10 @@ class InstancesApiIntegrationTests(unittest.TestCase):
                 "/api/v1/instances",
                 headers=_auth(_PLAYER),
                 json={
-                    "competition_id": _CID, "team": "Red",
-                    "definition_slug": "sqli", "version_no": 1,
+                    "competition_id": _CID,
+                    "team": "Red",
+                    "definition_slug": "sqli",
+                    "version_no": 1,
                 },
             )
             self.assertEqual(r.status_code, 403, r.text)
@@ -401,9 +420,7 @@ class InstancesApiIntegrationTests(unittest.TestCase):
                 params = {"limit": 2}
                 if cursor is not None:
                     params["cursor"] = cursor
-                r = client.get(
-                    "/api/v1/instances", headers=_auth(_ORGANIZER), params=params
-                )
+                r = client.get("/api/v1/instances", headers=_auth(_ORGANIZER), params=params)
                 self.assertEqual(r.status_code, 200, r.text)
                 body = r.json()
                 self.assertLessEqual(len(body["data"]), 2)
@@ -425,8 +442,11 @@ class InstancesApiIntegrationTests(unittest.TestCase):
             _seed_parents(client)
             headers = {**_auth(_ORGANIZER), "Idempotency-Key": "launch-key-abc"}
             payload = {
-                "competition_id": _CID, "team": "Red",
-                "definition_slug": "sqli", "version_no": 1, "ttl_seconds": 3600,
+                "competition_id": _CID,
+                "team": "Red",
+                "definition_slug": "sqli",
+                "version_no": 1,
+                "ttl_seconds": 3600,
             }
 
             first = client.post("/api/v1/instances", headers=headers, json=payload)
@@ -436,9 +456,7 @@ class InstancesApiIntegrationTests(unittest.TestCase):
             # The instance id is derived from the principal-scoped key, so the row
             # persists in 'requested'. Find it and assert exactly one.
             with db.session_scope() as s:
-                rows = list(
-                    s.execute(sa.text("SELECT id, state FROM instances")).all()
-                )
+                rows = list(s.execute(sa.text("SELECT id, state FROM instances")).all())
             self.assertEqual(len(rows), 1, rows)
             iid = str(rows[0][0])
             self.assertEqual(rows[0][1], "requested")
@@ -465,8 +483,12 @@ class InstancesApiIntegrationTests(unittest.TestCase):
                 reg = SqlAlchemyWorkerRegistry(s)
                 reg.add(
                     Worker(
-                        "w1", "docker-rootless", ("x86_64",),
-                        ("launch_instance",), 4, "1",
+                        "w1",
+                        "docker-rootless",
+                        ("x86_64",),
+                        ("launch_instance",),
+                        4,
+                        "1",
                     )
                 )
                 reg.approve("w1")
@@ -479,6 +501,7 @@ class InstancesApiIntegrationTests(unittest.TestCase):
             from ctf_generator.infrastructure.database.quota_repository import (
                 SqlAlchemyQuotaPolicyRepository,
             )
+
             with db.session_scope() as s:
                 SqlAlchemyQuotaPolicyRepository(s).upsert_limit(
                     ResourceQuota("platform", PLATFORM_SCOPE_KEY, "active_instances", 100)
@@ -487,8 +510,10 @@ class InstancesApiIntegrationTests(unittest.TestCase):
                 "/api/v1/instances",
                 headers=_auth(_ORGANIZER),
                 json={
-                    "competition_id": _CID, "team": "Red",
-                    "definition_slug": "sqli", "version_no": 1,
+                    "competition_id": _CID,
+                    "team": "Red",
+                    "definition_slug": "sqli",
+                    "version_no": 1,
                     "ttl_seconds": 3600,
                 },
             )

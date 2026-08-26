@@ -88,8 +88,7 @@ class ObservedStateSource(Protocol):
     The reconciler applies generation-gating itself, so this returns the raw
     latest observation (or ``None`` when the worker has never reported)."""
 
-    def latest_observation(self, instance_id: str) -> HealthObservation | None:
-        ...
+    def latest_observation(self, instance_id: str) -> HealthObservation | None: ...
 
 
 class WorkerLivenessSource(Protocol):
@@ -104,11 +103,9 @@ class WorkerLivenessSource(Protocol):
       fault is a stale heartbeat is NOT adverse, so a heartbeat blip never tears
       a healthy instance down."""
 
-    def is_dispatchable(self, worker_name: str, now: datetime) -> bool:
-        ...
+    def is_dispatchable(self, worker_name: str, now: datetime) -> bool: ...
 
-    def is_adverse(self, worker_name: str, now: datetime) -> bool:
-        ...
+    def is_adverse(self, worker_name: str, now: datetime) -> bool: ...
 
 
 class InstanceReconciler:
@@ -123,9 +120,7 @@ class InstanceReconciler:
         worker_liveness: WorkerLivenessSource,
         jobs: JobService,
         scheduling: SchedulingService,
-        repository_factory: Callable[
-            [Session], InstanceRepository
-        ] = SqlAlchemyInstanceRepository,
+        repository_factory: Callable[[Session], InstanceRepository] = SqlAlchemyInstanceRepository,
     ) -> None:
         self._database = database
         self._observed = observed_source
@@ -153,9 +148,7 @@ class InstanceReconciler:
             # batch. Record a structured, secret-free per-instance error and move
             # on so every other instance still converges this pass.
             try:
-                actions.extend(
-                    self._reconcile_instance(instance, now, stuck_after_seconds)
-                )
+                actions.extend(self._reconcile_instance(instance, now, stuck_after_seconds))
             except Exception as exc:  # noqa: BLE001 - isolate, never abort the batch
                 actions.append(
                     ReconcileAction(
@@ -170,9 +163,7 @@ class InstanceReconciler:
 
     # -- helpers -------------------------------------------------------------
 
-    def _effective_observation(
-        self, instance: Instance
-    ) -> HealthObservation | None:
+    def _effective_observation(self, instance: Instance) -> HealthObservation | None:
         """The latest observation, generation-gated: an observation carrying a
         different generation than the instance is stale and ignored."""
         obs = self._observed.latest_observation(instance.instance_id)
@@ -223,9 +214,7 @@ class InstanceReconciler:
                 return None, []
             if current.state == to_state:
                 return current, []
-            updated = repo.transition(
-                instance_id, to_state, reason=reason, actor="system", now=now
-            )
+            updated = repo.transition(instance_id, to_state, reason=reason, actor="system", now=now)
         actions = [
             ReconcileAction(
                 instance_id=instance_id,
@@ -326,13 +315,9 @@ class InstanceReconciler:
                 stuck_after_seconds,
             )
         if instance.desired_state == "stopped":
-            return self._reconcile_stopped(
-                instance, observed_present, observed_absent, now
-            )
+            return self._reconcile_stopped(instance, observed_present, observed_absent, now)
         # desired_state == "deleted"
-        return self._reconcile_deleted(
-            instance, observed_present, observed_absent, now
-        )
+        return self._reconcile_deleted(instance, observed_present, observed_absent, now)
 
     def _reconcile_active(
         self,
@@ -394,9 +379,7 @@ class InstanceReconciler:
         # are already ignored by the generation-gate.
         resources, _endpoints = self._load_facts(instance.instance_id)
         stale_resources = [
-            r
-            for r in resources
-            if r.state == "active" and r.generation < instance.generation
+            r for r in resources if r.state == "active" and r.generation < instance.generation
         ]
         if stale_resources:
             actions.extend(
@@ -542,17 +525,13 @@ class InstanceReconciler:
         # (2) UNEXPECTED CONTAINER: still running though desired stopped -> stop.
         if observed_present:
             actions.append(
-                self._enqueue(
-                    instance, instance.generation, "stop", now, case="2-unexpected"
-                )
+                self._enqueue(instance, instance.generation, "stop", now, case="2-unexpected")
             )
 
         # Drive toward stopped (from ANY live state, not just the running ones)
         # once the container is gone; reaching stopped releases the hold.
         if observed_absent:
-            instance, acts = self._drain_to_stopped(
-                instance, now, case="2-unexpected"
-            )
+            instance, acts = self._drain_to_stopped(instance, now, case="2-unexpected")
             actions.extend(acts)
 
         # (9) STOPPED STILL EXPOSED: endpoints/active resources linger -> clean.
@@ -573,14 +552,10 @@ class InstanceReconciler:
         # deletion.
         if observed_present:
             actions.append(
-                self._enqueue(
-                    instance, instance.generation, "stop", now, case="2-unexpected"
-                )
+                self._enqueue(instance, instance.generation, "stop", now, case="2-unexpected")
             )
             actions.append(
-                self._enqueue(
-                    instance, instance.generation, "delete", now, case="2-unexpected"
-                )
+                self._enqueue(instance, instance.generation, "delete", now, case="2-unexpected")
             )
             return actions
 
@@ -624,26 +599,16 @@ class InstanceReconciler:
         a re-run is a no-op."""
         resources, endpoints = self._load_facts(instance.instance_id)
         actions: list[ReconcileAction] = []
-        actions.extend(
-            self._delete_endpoints(instance.instance_id, endpoints, now, case=case)
-        )
+        actions.extend(self._delete_endpoints(instance.instance_id, endpoints, now, case=case))
         active_resources = [r for r in resources if r.state == "active"]
         # Anything not yet 'released' still needs a delete driven; 'releasing'
         # resources are included so a dead-lettered delete gets retried.
-        unreleased_resources = [
-            r for r in resources if r.state in ("active", "releasing")
-        ]
+        unreleased_resources = [r for r in resources if r.state in ("active", "releasing")]
         if unreleased_resources:
-            actions.append(
-                self._enqueue(
-                    instance, instance.generation, "delete", now, case=case
-                )
-            )
+            actions.append(self._enqueue(instance, instance.generation, "delete", now, case=case))
         if active_resources:
             actions.extend(
-                self._mark_releasing(
-                    instance.instance_id, active_resources, now, case=case
-                )
+                self._mark_releasing(instance.instance_id, active_resources, now, case=case)
             )
         return actions
 
@@ -675,9 +640,7 @@ class InstanceReconciler:
                 )
                 seen_instances.add(res.instance_id)
             actions.extend(
-                self._mark_releasing(
-                    res.instance_id, [res], now, case="5-leaked-resource"
-                )
+                self._mark_releasing(res.instance_id, [res], now, case="5-leaked-resource")
             )
 
         # (10) ORPHANED ENDPOINT: an endpoint whose owning instance is terminal.
@@ -711,9 +674,7 @@ class RepositoryObservedStateSource:
     def __init__(
         self,
         database: Database,
-        repository_factory: Callable[
-            [Session], InstanceRepository
-        ] = SqlAlchemyInstanceRepository,
+        repository_factory: Callable[[Session], InstanceRepository] = SqlAlchemyInstanceRepository,
     ) -> None:
         self._database = database
         self._repo = repository_factory
@@ -733,9 +694,7 @@ class RepositoryWorkerLivenessSource:
         database: Database,
         *,
         max_age_seconds: int = 60,
-        registry_factory: Callable[
-            [Session], WorkerRegistry
-        ] = SqlAlchemyWorkerRegistry,
+        registry_factory: Callable[[Session], WorkerRegistry] = SqlAlchemyWorkerRegistry,
     ) -> None:
         self._database = database
         self._max_age_seconds = max_age_seconds
@@ -765,7 +724,4 @@ class RepositoryWorkerLivenessSource:
             return True
         if worker.trust_state != "trusted":
             return True
-        return (
-            worker.quarantined_at is not None
-            or worker.drain_requested_at is not None
-        )
+        return worker.quarantined_at is not None or worker.drain_requested_at is not None

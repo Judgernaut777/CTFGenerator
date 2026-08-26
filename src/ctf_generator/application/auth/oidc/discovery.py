@@ -33,9 +33,7 @@ class DiscoveryDocument:
     jwks_uri: str
 
 
-def fetch_discovery(
-    config: OidcProviderConfig, http_client: httpx.Client
-) -> DiscoveryDocument:
+def fetch_discovery(config: OidcProviderConfig, http_client: httpx.Client) -> DiscoveryDocument:
     """Fetch + validate the provider metadata. Any transport/parse error or an
     issuer mismatch raises :class:`OidcAuthError` (generic; never leaks the IdP
     internals)."""
@@ -51,9 +49,10 @@ def fetch_discovery(
 
     discovered_issuer = data.get("issuer")
     # Issuer mix-up defense: the document's issuer MUST match the configured one.
-    if not isinstance(discovered_issuer, str) or _normalize_issuer(
-        discovered_issuer
-    ) != config.issuer:
+    if (
+        not isinstance(discovered_issuer, str)
+        or _normalize_issuer(discovered_issuer) != config.issuer
+    ):
         raise OidcAuthError("oidc discovery issuer mismatch")
 
     try:

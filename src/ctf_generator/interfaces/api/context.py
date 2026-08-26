@@ -11,9 +11,7 @@ from __future__ import annotations
 
 import contextvars
 
-_REQUEST_ID: contextvars.ContextVar[str] = contextvars.ContextVar(
-    "ctfgen_request_id", default="-"
-)
+_REQUEST_ID: contextvars.ContextVar[str] = contextvars.ContextVar("ctfgen_request_id", default="-")
 
 
 def set_request_id(request_id: str) -> contextvars.Token:

@@ -170,9 +170,7 @@ def _check_migration_head(database) -> CheckResult:
 
 
 def _read_ledger_seqs(session) -> list[int]:
-    rows = session.execute(
-        sa.text("SELECT seq FROM score_events ORDER BY seq")
-    ).all()
+    rows = session.execute(sa.text("SELECT seq FROM score_events ORDER BY seq")).all()
     return [int(seq) for (seq,) in rows]
 
 
@@ -189,9 +187,7 @@ def _check_ledger_seq(database) -> CheckResult:
     previous = 0
     for seq in seqs:
         if seq < 1:
-            return CheckResult(
-                "ledger_seq_monotonic", False, f"non-positive seq {seq}"
-            )
+            return CheckResult("ledger_seq_monotonic", False, f"non-positive seq {seq}")
         if seq <= previous:
             return CheckResult(
                 "ledger_seq_monotonic",
@@ -215,9 +211,7 @@ def _check_ledger_rowcount(database, manifest: Mapping[str, object]) -> CheckRes
         return None
     try:
         with database.session_scope() as session:
-            count = session.execute(
-                sa.text("SELECT count(*) FROM score_events")
-            ).scalar_one()
+            count = session.execute(sa.text("SELECT count(*) FROM score_events")).scalar_one()
             max_seq = session.execute(
                 sa.text("SELECT coalesce(max(seq), 0) FROM score_events")
             ).scalar_one()
@@ -253,9 +247,7 @@ def _check_audit_rowcount(database, manifest: Mapping[str, object]) -> CheckResu
         return None
     try:
         with database.session_scope() as session:
-            count = session.execute(
-                sa.text("SELECT count(*) FROM audit_events")
-            ).scalar_one()
+            count = session.execute(sa.text("SELECT count(*) FROM audit_events")).scalar_one()
     except Exception as exc:  # noqa: BLE001
         return CheckResult(
             "audit_rowcount", False, f"could not read audit_events: {type(exc).__name__}"
@@ -279,7 +271,9 @@ def _check_scoreboard_parity(database, engine_name: str) -> CheckResult:
     projector = ScoreProjector(database, engine_name=engine_name)
     try:
         with database.session_scope() as session:
-            competitions = [c.competition_id for c in SqlAlchemyCompetitionRepository(session).list()]
+            competitions = [
+                c.competition_id for c in SqlAlchemyCompetitionRepository(session).list()
+            ]
             ledger = SqlAlchemyScoreLedger(session)
             projections = SqlAlchemyScoreboardProjectionRepository(session)
             checked = 0

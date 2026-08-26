@@ -112,12 +112,8 @@ class OidcProviderConfig:
             raise OidcConfigurationError("client_id is required")
         if not self.client_secret:
             raise OidcConfigurationError("client_secret is required")
-        if not self.redirect_uri or not self.redirect_uri.startswith(
-            ("https://", "http://")
-        ):
-            raise OidcConfigurationError(
-                "redirect_uri must be an absolute http(s) URL"
-            )
+        if not self.redirect_uri or not self.redirect_uri.startswith(("https://", "http://")):
+            raise OidcConfigurationError("redirect_uri must be an absolute http(s) URL")
         # Force-include the required scopes (dedup, preserve order).
         merged: list[str] = list(self.scopes)
         for required in _REQUIRED_SCOPES:
@@ -135,8 +131,9 @@ class OidcProviderConfig:
             raise OidcConfigurationError("leeway must not be negative")
         if not self.allowed_algorithms:
             raise OidcConfigurationError("allowed_algorithms must be non-empty")
-        if any(alg.upper().startswith("HS") or alg.lower() == "none"
-               for alg in self.allowed_algorithms):
+        if any(
+            alg.upper().startswith("HS") or alg.lower() == "none" for alg in self.allowed_algorithms
+        ):
             # Defense in depth: a symmetric / none alg in the allow-list would
             # reopen the key-confusion / unsigned-token attacks.
             raise OidcConfigurationError(
@@ -160,9 +157,7 @@ class OidcProviderConfig:
         return domain.lower() in self.allowed_domains
 
     @classmethod
-    def from_env(
-        cls, environ: Mapping[str, str] | None = None
-    ) -> OidcProviderConfig | None:
+    def from_env(cls, environ: Mapping[str, str] | None = None) -> OidcProviderConfig | None:
         """Build the config from the environment, or ``None`` when OIDC is not
         configured (any of the four required vars absent). Raises
         :class:`OidcConfigurationError` when the present values are invalid.
@@ -182,9 +177,7 @@ class OidcProviderConfig:
         scopes_raw = env.get("CTFGEN_OIDC_SCOPES", "openid email")
         scopes = tuple(s for s in scopes_raw.split() if s) or _REQUIRED_SCOPES
         domains_raw = env.get("CTFGEN_OIDC_ALLOWED_DOMAINS", "")
-        allowed_domains = tuple(
-            d.strip() for d in domains_raw.split(",") if d.strip()
-        )
+        allowed_domains = tuple(d.strip() for d in domains_raw.split(",") if d.strip())
         auto_provision = env.get("CTFGEN_OIDC_AUTO_PROVISION", "0").lower() in (
             "1",
             "true",
