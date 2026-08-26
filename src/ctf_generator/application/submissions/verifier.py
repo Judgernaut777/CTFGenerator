@@ -16,6 +16,8 @@ from ctf_generator.domain.ledger.processing import (
     FlagRejectedError,
     FlagUnavailableError,
 )
+from ctf_generator.families import derive_family_answer
+from ctf_generator.families import get as get_family
 
 MAX_CANDIDATE_LENGTH = 4096
 
@@ -54,6 +56,20 @@ class SpecFlagVerifier:
         typed verifier data is private authoring data and is deliberately never
         projected by contestant-facing schema mappers.
         """
+        derivation = version.spec.get("answer_derivation")
+        if derivation is not None:
+            if not isinstance(derivation, dict) or not isinstance(derivation.get("family"), str):
+                raise FlagUnavailableError("published answer derivation data is malformed")
+            if not instance_seed:
+                raise FlagUnavailableError("challenge requires a server-issued instance seed")
+            try:
+                expected = derive_family_answer(
+                    get_family(derivation["family"]), dict(version.spec), instance_seed
+                )
+            except (KeyError, LookupError, ValueError) as exc:
+                raise FlagUnavailableError("published answer derivation is unavailable") from exc
+            return hmac.compare_digest(expected.encode("utf-8"), candidate.encode("utf-8"))
+
         typed = version.spec.get("answer_verifier")
         if typed is not None:
             try:

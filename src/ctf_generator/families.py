@@ -146,6 +146,7 @@ class FamilyRenderer(Protocol):
 
 
 DefaultSpecBuilder = Callable[..., ChallengeSpec]
+AnswerDeriver = Callable[[dict[str, object], str], str]
 
 
 # --- Family record ---------------------------------------------------------------
@@ -163,6 +164,10 @@ class Family:
     cve_driven: bool = False
     llm_brief: str = "A security challenge."
     default_spec_builder: DefaultSpecBuilder | None = None
+    # Trusted installed-family hook for per-team deterministic answers. The
+    # submission service resolves the issued seed server-side; no contestant
+    # input can select it.
+    derive_answer: AnswerDeriver | None = None
     scoring_hints: ScoringHints = field(default_factory=ScoringHints)
     # Family-appropriate pedagogical defaults used by ``spec_generator.
     # default_spec`` so a generated challenge.yaml/checkpoints.yaml describes
@@ -243,6 +248,20 @@ def get(name: str) -> Family:
         return _REGISTRY[name]
     except KeyError:
         raise KeyError(f"unknown family: {name}") from None
+
+
+def derive_family_answer(family: Family, spec: dict[str, object], seed: str) -> str:
+    """Run an installed family's trusted deterministic answer hook.
+
+    The caller must supply a server-resolved issued seed; families never receive
+    raw contestant requests through this seam.
+    """
+    if family.derive_answer is None:
+        raise LookupError(f"family {family.name!r} does not derive per-team answers")
+    answer = family.derive_answer(spec, seed)
+    if not isinstance(answer, str) or not answer:
+        raise ValueError(f"family {family.name!r} returned an invalid derived answer")
+    return answer
 
 
 def is_registered(name: str) -> bool:

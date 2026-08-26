@@ -50,6 +50,7 @@ from sqlalchemy.exc import IntegrityError
 from ctf_generator.domain.ledger.models import LedgerSubmission, ScoreEvent, Solve
 from ctf_generator.domain.ledger.processing import (
     ChallengeNotAttachedError,
+    FlagRejectedError,
     IdempotencyConflictError,
     SubmissionOutcome,
     SubmissionProcessingError,
@@ -62,6 +63,7 @@ from ctf_generator.infrastructure.database.challenge_publication_repository impo
 from ctf_generator.infrastructure.database.challenge_version_repository import (
     SqlAlchemyChallengeVersionRepository,
 )
+from ctf_generator.infrastructure.database.instance_repository import SqlAlchemyInstanceRepository
 from ctf_generator.infrastructure.database.locks import acquire_submission_lock
 from ctf_generator.infrastructure.database.resolvers import resolve_submission_scope
 from ctf_generator.infrastructure.database.score_ledger_repository import (
@@ -142,6 +144,20 @@ class SubmissionProcessingService:
                     f"v{request.version_no} is a draft and not submittable"
                 )
 
+            # Contestants never select an instance seed. If present at this
+            # boundary it is a spoof attempt, even if it happens to equal the
+            # issued value. Resolve the team/version's seed from the server-side
+            # instance record only.
+            if request.instance_seed is not None:
+                raise FlagRejectedError("instance_seed is server-resolved and may not be submitted")
+            issued_instance = SqlAlchemyInstanceRepository(session).get_for_submission(
+                request.competition_id,
+                request.team_name,
+                request.definition_slug,
+                request.version_no,
+            )
+            resolved_seed = issued_instance.instance_seed if issued_instance is not None else None
+
             # Resolve the (competition, team, version) surrogate uuids ONCE (the
             # version/publication existence is already established above, so this
             # only adds the team resolve) and thread them into the append-only
@@ -157,7 +173,7 @@ class SubmissionProcessingService:
 
             # (4) Normalize + verify (constant time; candidate never persisted).
             candidate = normalize_candidate(request.candidate_flag)
-            correct = self._verifier.verify(version, request.instance_seed, candidate)
+            correct = self._verifier.verify(version, resolved_seed, candidate)
 
             # (5) Record the attempt (correct or not).
             submission = LedgerSubmission(
@@ -169,7 +185,7 @@ class SubmissionProcessingService:
                 submitted_at=request.submitted_at,
                 correct=correct,
                 submitter_email=request.submitter_email,
-                instance_seed=request.instance_seed,
+                instance_seed=resolved_seed,
             )
             # A SAVEPOINT around the insert: a concurrent reuse of this
             # submission_id in a DIFFERENT competition takes a different

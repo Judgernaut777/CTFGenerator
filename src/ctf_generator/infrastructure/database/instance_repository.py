@@ -150,6 +150,22 @@ class SqlAlchemyInstanceRepository:
         row = self._session.scalars(select(InstanceRow).where(InstanceRow.id == key)).one_or_none()
         return self._to_domain(row) if row is not None else None
 
+    def get_for_submission(
+        self, competition_id: str, team_name: str, definition_slug: str, version_no: int
+    ) -> Instance | None:
+        """Return the team's issued instance for one submitted version, if any."""
+        competition_uuid = _resolve.competition_uuid(self._session, competition_id)
+        team_uuid = _resolve.team_uuid(self._session, competition_uuid, team_name)
+        version_uuid = _resolve.version_uuid(self._session, definition_slug, version_no)
+        row = self._session.scalars(
+            select(InstanceRow).where(
+                InstanceRow.competition_id == competition_uuid,
+                InstanceRow.team_id == team_uuid,
+                InstanceRow.challenge_version_id == version_uuid,
+            )
+        ).first()
+        return self._to_domain(row) if row is not None else None
+
     def list_reconcilable(self, limit: int = 500) -> list[Instance]:
         rows = self._session.scalars(
             select(InstanceRow)

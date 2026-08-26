@@ -141,7 +141,7 @@ def version_to_list_item(version: ChallengeVersion) -> dict[str, Any]:
     return _version_base(version)
 
 
-_PRIVATE_ANSWER_SPEC_KEYS = frozenset({"flag", "answer_verifier"})
+_PRIVATE_ANSWER_SPEC_KEYS = frozenset({"flag", "answer_derivation", "answer_verifier"})
 
 
 def _public_spec(spec: dict[str, Any] | Any) -> dict[str, Any]:
