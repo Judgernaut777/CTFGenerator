@@ -9,6 +9,27 @@ Release CI enforces that every tagged version has an entry here (see
 
 ## [Unreleased]
 
+## [0.2.0] - 2026-08-27
+
+### Added
+
+- Binary-safe rendered challenge artifacts and plugin-family discovery for
+  reviewed artifact-only investigation families.
+- Private immutable typed answer verifiers for aliases, coordinates,
+  normalized identifiers, and multipart submissions.
+- Server-issued team-seed resolution and submission processing that keeps
+  candidate answers out of API responses, logs, score events, and persistence.
+- Production control-plane, worker, authentication, backup/restore, validation,
+  and release-qualification foundations accumulated since 0.1.0.
+
+### Security
+
+- Exact legacy flags continue to use constant-time `hmac.compare_digest`.
+- Contestant challenge-version projections redact flags, answer derivations,
+  and typed verifier configuration.
+- Malformed private verifier data fails closed rather than falling back to a
+  permissive comparison.
+
 ### Added — `build_challenge` pipeline tail (mirror, digest-pinning, compose)
 
 Closes the three documented tail deferrals of v1.0 blocker #4, each verified
