@@ -30,7 +30,7 @@ from ctf_generator.models import (
 # this test.
 _GOLDEN_DEFAULT_MAPPING = {
     "meta": {
-        "generator_version": "0.1.0",
+        "generator_version": "0.2.0",
         "spec_version": "1.0",
         "family": "web_business_logic_tenant_export",
         "seed": "abc123",
