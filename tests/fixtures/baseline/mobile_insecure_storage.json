@@ -5,13 +5,13 @@
       ".ctfgen-build": {
         "private": false,
         "public": false,
-        "sha256": "b946750e7101472869581c8ce3ff72b1e3c5a8f26a1adbe0961dbe5c7d2b21b3",
+        "sha256": "eb0e28ce1fb887ac7917f54d7505206e3d2f663ff9ca1df5c87a52f5d6b71055",
         "size": 165
       },
       "challenge.yaml": {
         "private": false,
         "public": false,
-        "sha256": "8d9d5dbd6ae009b7d1cd79663627b88c3d8c007f0f9a93a47a6b32c2d1bd750a",
+        "sha256": "0e499f81e369263ebcd9ad7d8da6a55ef28d471c353b9280c041f9d6afa35839",
         "size": 1279
       },
       "private/checkpoints.yaml": {
@@ -23,7 +23,7 @@
       "private/manifest.json": {
         "private": true,
         "public": false,
-        "sha256": "e041b95f8513e9361b7105b3beee706256bc92a285a25413881a52ef8d3d9a5c",
+        "sha256": "59e8df0cf7cc09c103161e35563e432bb955d578696e26fd453a704914206a63",
         "size": 2666
       },
       "private/solution.md": {
@@ -41,7 +41,7 @@
       "private/variant.json": {
         "private": true,
         "public": false,
-        "sha256": "1e4f34d1b4fc6f09253e30941c93588ea2df66788765ebce131e668190c73206",
+        "sha256": "efa838f242679c798fad321cb4bf1f478436c88b2f220620dfed416c6323c096",
         "size": 1550
       },
       "public/app/AndroidManifest.xml": {
@@ -101,7 +101,7 @@
       "public/manifest.json": {
         "private": false,
         "public": true,
-        "sha256": "6f5d9ce5157cceb3db247bc5eeb76cd56e1b0515e15e85e5506e3a20ff70952a",
+        "sha256": "26125da20b68449bc157325768f0ecffc94364e77684e03c37ac1482513f4870",
         "size": 1668
       },
       "tests/healthcheck.py": {
@@ -118,13 +118,13 @@
       ".ctfgen-build": {
         "private": false,
         "public": false,
-        "sha256": "d05c2aeec68050fbb75c2e469323f036ab44f5413712320ea8af016d0991811b",
+        "sha256": "22c6394d99d86c3184b03e0dd1c2e9120b2c4e456c81a2d4ec26567ab31d5c9a",
         "size": 165
       },
       "challenge.yaml": {
         "private": false,
         "public": false,
-        "sha256": "c8dff16eff9e09bc0efe913885868aa0883b4f9f426af5126a1dd38cb46ce6a1",
+        "sha256": "e95d593bf1d7a6bd57330c975784b56dde5acf9e3e7ca5385ca99fa4bfd82f88",
         "size": 1279
       },
       "private/checkpoints.yaml": {
@@ -136,7 +136,7 @@
       "private/manifest.json": {
         "private": true,
         "public": false,
-        "sha256": "07b57cc61a7e570f248420edda6e5e524b7643d8368981e1d196c318b73239f1",
+        "sha256": "64197bab07abc8cede1bee35620c70b9350685861bfb88460227dd7984976061",
         "size": 2666
       },
       "private/solution.md": {
@@ -154,7 +154,7 @@
       "private/variant.json": {
         "private": true,
         "public": false,
-        "sha256": "3e8c6ce7c7c5606abb8ebf3baf51f2d9dc3405714f4a9b67d2127cded9683941",
+        "sha256": "fb58e3372ed11ad87bbb2803f0eb691b7996f68f566673815fdb5a9d2ad0f43a",
         "size": 1544
       },
       "public/app/AndroidManifest.xml": {
@@ -214,7 +214,7 @@
       "public/manifest.json": {
         "private": false,
         "public": true,
-        "sha256": "a2c9898e89ee9d898be1482ccc4c88491c5be8a3988d9e95a19c89a11e022339",
+        "sha256": "504b29660139ad6895b62223a55e9a90b1767c4ed50385b233ded8bbadfe6b01",
         "size": 1668
       },
       "tests/healthcheck.py": {

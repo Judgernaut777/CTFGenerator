@@ -5,13 +5,13 @@
       ".ctfgen-build": {
         "private": false,
         "public": false,
-        "sha256": "fa8592f30c0406b8266dc1d0ee2d52730f503d676e73745f5c35911ea21b30d2",
+        "sha256": "1b6677483ba36b5f47fedb8a582f6f39097702bc8ba2614f466f0a7df3e48c75",
         "size": 167
       },
       "challenge.yaml": {
         "private": false,
         "public": false,
-        "sha256": "cde7efaa78bb853876fd4484ca1def5da786fffc473689991534ac538c1a26c4",
+        "sha256": "a0fc3cdd22b33e9328198d8129b7606ec8c1186962775f2c2e23cd4e616c4678",
         "size": 1329
       },
       "docker-compose.yml": {
@@ -29,7 +29,7 @@
       "private/manifest.json": {
         "private": true,
         "public": false,
-        "sha256": "914cf17835287cf64ebebaef595c0b54f90168b4d54407037ef5a8049f96a5dd",
+        "sha256": "92f7ffb076f3254a79b41fb086ae874dd905af4cd1d684348808bd1e1a5247bc",
         "size": 2805
       },
       "private/runtime.json": {
@@ -53,7 +53,7 @@
       "private/variant.json": {
         "private": true,
         "public": false,
-        "sha256": "6e36e9f51a6279845ef07c08bda54f112edee21e5407b2c27b05780d74eca59a",
+        "sha256": "172087a83a70d82e9d63473a77fda21a74937ae41861d066c1b9aa9fa2b1561a",
         "size": 920
       },
       "public/description.md": {
@@ -77,7 +77,7 @@
       "public/manifest.json": {
         "private": false,
         "public": true,
-        "sha256": "3765a0213acd1d523d0f27f50f008d3d9add59477ed5c51d8112bd5ec32d499b",
+        "sha256": "e3e4d03c35581eba3b34b6bfd715417dcca3d40ecca384dde4ba559d86b59f53",
         "size": 667
       },
       "services/hmi/Dockerfile": {
@@ -130,13 +130,13 @@
       ".ctfgen-build": {
         "private": false,
         "public": false,
-        "sha256": "4fcd3b922315a98ff122c64dc91b973700db29dbb075505eddf4f0e831a9638a",
+        "sha256": "0dea3cceb9d300e948598f8d430424e48d34fb681bb31a800dc1d57201e1fc60",
         "size": 167
       },
       "challenge.yaml": {
         "private": false,
         "public": false,
-        "sha256": "b84e9eb899c4402bb305765be2f836fd3437c1c4989a5d00c58cc557a982c8f3",
+        "sha256": "19ed48c0201411fa9430f109c73a4ccdac4b1144beaa5a63bc4d8a5fed6645a0",
         "size": 1329
       },
       "docker-compose.yml": {
@@ -154,7 +154,7 @@
       "private/manifest.json": {
         "private": true,
         "public": false,
-        "sha256": "c5d4b987a9090b4be828e7ff508c9319643e354aebdaf53d308ecda976ce93e0",
+        "sha256": "7d8ac782a0c8ef226f3f6c80367028f8aa6ed643a5a72e66b4bd80713e54345e",
         "size": 2805
       },
       "private/runtime.json": {
@@ -178,7 +178,7 @@
       "private/variant.json": {
         "private": true,
         "public": false,
-        "sha256": "af1138566670d96421cc4b331734790deca1e90d07716dcb59e74669c341d2e1",
+        "sha256": "65b8aa06791e54bf8c57412a907c0bc4527239b21b64b8feafd277183f63f051",
         "size": 923
       },
       "public/description.md": {
@@ -202,7 +202,7 @@
       "public/manifest.json": {
         "private": false,
         "public": true,
-        "sha256": "4b6dea7405a70a95cacc4d25477ec17fd3ce103f4fcf790bf6ac4d487279c2f2",
+        "sha256": "6c5b4f56808c0f590d872f265f4d41eba261ca3089f24085509a0f92ac26325e",
         "size": 667
       },
       "services/hmi/Dockerfile": {

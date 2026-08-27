@@ -5,13 +5,13 @@
       ".ctfgen-build": {
         "private": false,
         "public": false,
-        "sha256": "45f19442db7d04025dc6e1adc6e97df3ed79188e34714414ca9fd4888a8c28f8",
+        "sha256": "6261c780f4dffd389eb615132a3a72f8902b387bcb4b1597c7b897fd078c9a94",
         "size": 167
       },
       "challenge.yaml": {
         "private": false,
         "public": false,
-        "sha256": "6030b2c9ed032db3e23321576477008df38016e2e8e2708ce19890d1bb24154f",
+        "sha256": "844c21453e5df96247aad69b1ee002eb1d23c2f9a773d1a649b1edc502a47703",
         "size": 1304
       },
       "private/checkpoints.yaml": {
@@ -23,7 +23,7 @@
       "private/manifest.json": {
         "private": true,
         "public": false,
-        "sha256": "d23e64fb0e73b99987b0168ea197f95a502c08979929903bebaae5b6a219d46f",
+        "sha256": "b569d60778d013dbd0ce6e98ae9dfea8060777ed974369c99d31fbc257acd6d2",
         "size": 1950
       },
       "private/solution.md": {
@@ -41,7 +41,7 @@
       "private/variant.json": {
         "private": true,
         "public": false,
-        "sha256": "417aef0d63ad047ad7f35284ec6dad7f3611030196a9b2e3928526530d5eb4d3",
+        "sha256": "126129a2885d7b0a3021b47cd0fbff70a33f302c5899359a7e3592b796fe4218",
         "size": 1009
       },
       "public/artifacts/access.log": {
@@ -77,7 +77,7 @@
       "public/manifest.json": {
         "private": false,
         "public": true,
-        "sha256": "d99d400ff876538203e07931cb01c81ecaeee4d687f79843528bb63573d51190",
+        "sha256": "bc990e59ff590ef5cc1185a043178887506167d29766a70edda49302a25c18e0",
         "size": 953
       },
       "tests/healthcheck.py": {
@@ -94,13 +94,13 @@
       ".ctfgen-build": {
         "private": false,
         "public": false,
-        "sha256": "325055f3fb26c01ccbcd7c64064e2837e65a0fc9233430fe139399cc48f42d98",
+        "sha256": "b51351e377d0e54ea26815c7326a1119969cfb694fdc171a655b1ecf1deec275",
         "size": 167
       },
       "challenge.yaml": {
         "private": false,
         "public": false,
-        "sha256": "fd04a76534ad4a2e86c2d8d9c8224a5af220f57c5fbe04daac82935709bdfd3f",
+        "sha256": "f2dca1f687ecd5238c2cc0ce90c300a54c9fbcde4c3a63082201a116b3cf1ae4",
         "size": 1304
       },
       "private/checkpoints.yaml": {
@@ -112,7 +112,7 @@
       "private/manifest.json": {
         "private": true,
         "public": false,
-        "sha256": "505b2d7dca1b40b09c094f870dc4899fd59700cdb663776404e3858ca0938e10",
+        "sha256": "22232a3ab5e69829b76272f2c7f80cbb6e5ec7b9884a7be365ece619f48da8a1",
         "size": 1949
       },
       "private/solution.md": {
@@ -130,7 +130,7 @@
       "private/variant.json": {
         "private": true,
         "public": false,
-        "sha256": "38a97a78e96769beba6381261d964c93df2e7bd2281414786d48850e2b2be043",
+        "sha256": "323913873a44fac5f5758b0995b63f9534537b9d9923bf325951c4d93dc7dc39",
         "size": 999
       },
       "public/artifacts/access.log": {
@@ -166,7 +166,7 @@
       "public/manifest.json": {
         "private": false,
         "public": true,
-        "sha256": "7dab022389c8804fcdf6166cf5d1387c25d350bc5ef7ae67a89d468de2824bee",
+        "sha256": "2688ed6ca5002a43b92c042325c2347a8835bbbb16642b2a127548e5695f690c",
         "size": 953
       },
       "tests/healthcheck.py": {

@@ -5,13 +5,13 @@
       ".ctfgen-build": {
         "private": false,
         "public": false,
-        "sha256": "0990a97fde4e0fa1f0869d2df3785f72bcc869ad6c131d18b495c6fcd1ea783b",
+        "sha256": "e7e7a0bc3ecb02979efe321f4bc0d6e00e0a2b52e5f1687cbb36e3384901c477",
         "size": 161
       },
       "challenge.yaml": {
         "private": false,
         "public": false,
-        "sha256": "a875357de5ccaac5f82a1a971ab617d40c806c9cb2851cf641d61613408ec53d",
+        "sha256": "92d0842995d196db402b4cf9ae3007415aa5fd73608dddb485ae4d15310d10cc",
         "size": 2161
       },
       "detection/ssrf_egress_rule.yaml": {
@@ -35,7 +35,7 @@
       "private/manifest.json": {
         "private": true,
         "public": false,
-        "sha256": "68ba7fc3c0f79785fa0a3a89235aaa6f14a5bb53dc51240e7771303098401b22",
+        "sha256": "9621c4518a88f565c5d4b0af3bd9ff7f07573ca544b60c32a873b0fee85e8165",
         "size": 3531
       },
       "private/scenario_timeline.json": {
@@ -59,7 +59,7 @@
       "private/variant.json": {
         "private": true,
         "public": false,
-        "sha256": "5041ea47c4acc981557e8d9613b562ba553abbb7055a26972e108a774c69aeb3",
+        "sha256": "14351ffb05eae7d49c36d4059309cdf63c950a8269d502b862aa6d38a43ecc6c",
         "size": 938
       },
       "public/description.md": {
@@ -77,7 +77,7 @@
       "public/manifest.json": {
         "private": false,
         "public": true,
-        "sha256": "c07179cdb0f811cc506a8d189740be971e711ce45292e90912f1c25824c3d383",
+        "sha256": "a9845e249af067d774c8386bc7b4222fbd45923748c9aab0144ba6015be7e086",
         "size": 500
       },
       "services/api/Dockerfile": {
@@ -160,13 +160,13 @@
       ".ctfgen-build": {
         "private": false,
         "public": false,
-        "sha256": "1b90f5bf6131e652c2452f834ecd9fcdc65e638c283553d3ea5e646e1dc615dd",
+        "sha256": "195f1c635cde609a30bdc62341743cf977a306bfdec1e194b495a66c898f2234",
         "size": 161
       },
       "challenge.yaml": {
         "private": false,
         "public": false,
-        "sha256": "904431e8b92827faeb8f7857915a68bc593e6ef55cdc5a4f24472a43585676eb",
+        "sha256": "4c7cadb07e409287972c0324cd91b2092baecf90f68f7c27f28d232c4d5f15f4",
         "size": 2161
       },
       "detection/ssrf_egress_rule.yaml": {
@@ -190,7 +190,7 @@
       "private/manifest.json": {
         "private": true,
         "public": false,
-        "sha256": "ab20b9097e9bf76a6dc6945fce2aeaa5b7c04f71a83886051d4eeeda90928514",
+        "sha256": "df9ef28f7bf407e4d66f8d2e4a7cbe926f180c5a4e7a1a2b744f40d1e137908a",
         "size": 3531
       },
       "private/scenario_timeline.json": {
@@ -214,7 +214,7 @@
       "private/variant.json": {
         "private": true,
         "public": false,
-        "sha256": "41e5a205136146ea9cb9726ee6c7283022562de6adbf834c693df95b71e37e1e",
+        "sha256": "84de4405f28e30259458234192080663f836acb2a2b24cdb606b537908984aa3",
         "size": 958
       },
       "public/description.md": {
@@ -232,7 +232,7 @@
       "public/manifest.json": {
         "private": false,
         "public": true,
-        "sha256": "c15f0bddd7dca2f42a3b19ace233bf78207aa8f543b150b7135b032bd976d1d3",
+        "sha256": "68c32e00a9b841834805d9444dc1aa2c0b837f57c895d9e6f7ebefc26021b2e3",
         "size": 500
       },
       "services/api/Dockerfile": {

@@ -5,13 +5,13 @@
       ".ctfgen-build": {
         "private": false,
         "public": false,
-        "sha256": "12d48f17380bbd03a05686c40bdf7083c002e52863bb97490b6b4cc4fab69ee3",
+        "sha256": "53912c54a9215b5c79d7796229d9a262d34663190983c805a1b0da923371acf0",
         "size": 163
       },
       "challenge.yaml": {
         "private": false,
         "public": false,
-        "sha256": "83165bc9504f90417076a5cd4f024b6ab7ff1de5cf4c84c7cd8d4899269b1a2d",
+        "sha256": "ccc8b89030f681af6d432440d1889d17303a157509cf9b61e71edbca75718626",
         "size": 2093
       },
       "docker-compose.yml": {
@@ -35,7 +35,7 @@
       "private/manifest.json": {
         "private": true,
         "public": false,
-        "sha256": "bc92c3276e9a9dfe8620326b353532d6021ac613e191400ba685dbcda53a86ad",
+        "sha256": "0216ecfc0ed8cc8bfe2a70c81a21110692f7862e063f7ea7046f1c6eaa725c93",
         "size": 2947
       },
       "private/scenario_timeline.json": {
@@ -59,7 +59,7 @@
       "private/variant.json": {
         "private": true,
         "public": false,
-        "sha256": "82c461832b3c0d64ad93ea5259bb3a539814db1f81fcde28bdacab09811dcf4d",
+        "sha256": "3f9d5afbfd5bf4fc801cf63272ad32ae51f86b09694983a8681555cba754c85e",
         "size": 660
       },
       "public/description.md": {
@@ -77,7 +77,7 @@
       "public/manifest.json": {
         "private": false,
         "public": true,
-        "sha256": "673d8eca8ab80041a62d9caec106c5fa9bdbede7aad0bd6152049916fce30fec",
+        "sha256": "ad87f03cb22aa0004cb8af90f06b33ea36c09246e9b46cefaec05ce12c1d14f9",
         "size": 502
       },
       "services/edge/Dockerfile": {
@@ -136,13 +136,13 @@
       ".ctfgen-build": {
         "private": false,
         "public": false,
-        "sha256": "6ffe6655cf26395dbc3ae82c3b367bbd494489b58b1a7ffa3f05d30daf5440d0",
+        "sha256": "1334308d66bafd981c12b3254c95b75decb9d0672d4f40bb2db22652b1866a1b",
         "size": 163
       },
       "challenge.yaml": {
         "private": false,
         "public": false,
-        "sha256": "ca91860513e7a1174ba202f019c8821e8ff2a84444ad3f9ac450e8678a6ba8c2",
+        "sha256": "4874adfe8b4cae927cc0bf03bdd4f3017d1269e3ffabf05cee8a64ab9bd85962",
         "size": 2093
       },
       "docker-compose.yml": {
@@ -166,7 +166,7 @@
       "private/manifest.json": {
         "private": true,
         "public": false,
-        "sha256": "a9fc25707e718ca5f44a99ef032cc416d500c7ef79a974d3272fde8a5d645e8a",
+        "sha256": "4094705fc252c6947fc6d70f5adf64d7e1d6b7f64541a28d3e4271564ddacc80",
         "size": 2947
       },
       "private/scenario_timeline.json": {
@@ -190,7 +190,7 @@
       "private/variant.json": {
         "private": true,
         "public": false,
-        "sha256": "38d91ef77b865a05b990284f275ba9d5bca23c7053f0bc13b9570a7c825b8e48",
+        "sha256": "0944d52fcff49ce62108317402556bb3fe08ed59dd6a9d66aaa998bcbd18d02c",
         "size": 651
       },
       "public/description.md": {
@@ -208,7 +208,7 @@
       "public/manifest.json": {
         "private": false,
         "public": true,
-        "sha256": "433251ee184a173879bc740f02f2b9d0f9aba09caeca7d4cc401bd63bb0de2d8",
+        "sha256": "3c97ec01e40358d7044b16ae92b6a2263a670a938673fa619672bdd825efd09d",
         "size": 502
       },
       "services/edge/Dockerfile": {
